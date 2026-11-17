@@ -63,7 +63,7 @@ pub struct ScopeHeaderDescriptor : IValue {
 pub struct ScopeHeader : IValue {
     pub modifiers:   str;
     pub attributes:  str;
-    pub return_type: any;
+    pub return_type: str;
     pub target_kind: str;
     pub is_fn:       bool;
     pub is_block:    bool;

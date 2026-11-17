@@ -123,7 +123,7 @@ pub struct Program {
     pub lets: NodeLists;
     /// Type name -> index into `built` (selfhost/check/methods.pilot).
     pub built_index: Map<str, i64>;
-    pub built: List<any>;
+    pub built: List<BuiltType>;
     /// Receptor slot -> the name its table gives it (`prog_slot_name`).
     pub slot_names: Map<str, str>;
     /// Node lists computed once on demand (selfhost/check/generators.pilot).
@@ -155,10 +155,10 @@ fn attr_arg_key(ref s: Snap, a: i64) -> str {
 /// The argument keys of the attribute named `name` on node `n`, or none.
 pub fn prog_attr_args(ref p: Program, n: i64, name: str) -> List<str>? {
     for row_index in nl_get(p.attrs, key(n)) {
-        let row: List<any> = p.s.attrs[row_index];
-        if sym_text(p.s, row[1]) == name {
+        let row = p.s.attrs[row_index];
+        if sym_text(p.s, row.1) == name {
             var out: List<str> = [];
-            let args: List<i64> = row[2];
+            let args = row.2;
             for a in args { out.push(attr_arg_key(p.s, a)); }
             return out;
         }
@@ -218,8 +218,7 @@ pub fn prog_new(ref s: Snap) -> Program {
     };
     var r = 0;
     while r < s.attrs.len() {
-        let row: List<any> = s.attrs[r];
-        nl_add(p.attrs, key(row[0]), r);
+        nl_add(p.attrs, key(s.attrs[r].0), r);
         r = r + 1;
     }
     for tp in s.type_params {
@@ -407,9 +406,9 @@ fn find_slot_name(var ref p: Program, slot: str) -> str {
     let s = p.s;
     var r = 0;
     while r < s.attrs.len() {
-        let row: List<any> = s.attrs[r];
-        let args: List<i64> = row[2];
-        if sym_text(s, row[1]) == "Lang" && args.len() > 0 && kind(s, args[0]) == nk_member() {
+        let row = s.attrs[r];
+        let args = row.2;
+        if sym_text(s, row.1) == "Lang" && args.len() > 0 && kind(s, args[0]) == nk_member() {
             let table = const_node(p, lhs(s, args[0]), 0);
             if table >= 0 && kind(s, table) == nk_map() {
                 let v = map_entry(p, table, slot);
@@ -541,9 +540,9 @@ pub fn prog_member_type(var ref p: Program, ref m: Member) -> i64 {
 /// The argument nodes of the attribute named `name` on node `n`, or none.
 pub fn prog_attr_nodes(ref p: Program, n: i64, name: str) -> List<i64>? {
     for row_index in nl_get(p.attrs, key(n)) {
-        let row: List<any> = p.s.attrs[row_index];
-        if sym_text(p.s, row[1]) == name {
-            let args: List<i64> = row[2];
+        let row = p.s.attrs[row_index];
+        if sym_text(p.s, row.1) == name {
+            let args = row.2;
             return args;
         }
     }

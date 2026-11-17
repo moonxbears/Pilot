@@ -72,16 +72,25 @@ pub struct LayoutTarget : IValue {
 // strided lenses ({ ptr<T>, usize, isize } + 0b01),
 // owned buffers ({ ptr<T>, usize, usize } + 0b10),
 // and bounds pairs ({ T, T } + 0b00)
+/// The shape a type's fields give it (see the field patterns above).
+pub enum AnatomyKind : u8 {
+    Unknown,
+    ContiguousView,
+    StridedLens,
+    OwnedBuffer,
+    BoundsPair,
+}
+
 [Layout(c_abi)]
 pub struct AnatomyInfo : IValue {
-    pub kind:        u8;    // 0: Unknown, 1: ContiguousView, 2: StridedLens, 3: OwnedBuffer, 4: BoundsPair
+    pub kind:        AnatomyKind;
     pub ptr_offset:  usize;
     pub len_offset:  usize;
     pub cap_offset:  usize;
     pub stride_step: isize;
 
     pub static pure fn create(
-        kind:        u8,
+        kind:        AnatomyKind,
         ptr_offset:  usize,
         len_offset:  usize,
         cap_offset:  usize,
@@ -94,10 +103,10 @@ pub struct AnatomyInfo : IValue {
         stride_step: stride_step,
     };
 
-    pub pure fn is_contiguous() -> bool => .kind == 1;
-    pub pure fn is_strided() -> bool => .kind == 2;
-    pub pure fn is_owned_buffer() -> bool => .kind == 3;
-    pub pure fn is_bounds_pair() -> bool => .kind == 4;
+    pub pure fn is_contiguous() -> bool => .kind == AnatomyKind::ContiguousView;
+    pub pure fn is_strided() -> bool => .kind == AnatomyKind::StridedLens;
+    pub pure fn is_owned_buffer() -> bool => .kind == AnatomyKind::OwnedBuffer;
+    pub pure fn is_bounds_pair() -> bool => .kind == AnatomyKind::BoundsPair;
 }
 
 [Layout(c_abi)]
@@ -789,15 +798,15 @@ pub comptime fn reflect_hydrate_hardware_type() -> HardwareType {
                 registry[lid] = ReflectTypeInfo.create(lid, name, sz, 8, lat, 0);
                 lattice[lid] = lat;
 
-                var kind_code: u8 = 0;
+                var kind = AnatomyKind::Unknown;
                 if (lat & 0b11) == 0b01 {
-                    kind_code = 1;
+                    kind = ::ContiguousView;
                 } else if (lat & 0b11) == 0b10 {
-                    kind_code = 3;
+                    kind = ::OwnedBuffer;
                 } else if (lat & 0b11) == 0b00 {
-                    kind_code = 4;
+                    kind = ::BoundsPair;
                 }
-                anatomy[lid] = AnatomyInfo.create(kind_code, 0, 0, 0, 1);
+                anatomy[lid] = AnatomyInfo.create(kind, 0, 0, 0, 1);
             }
         }
         nid = nid + 1;

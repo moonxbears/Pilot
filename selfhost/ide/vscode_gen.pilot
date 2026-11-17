@@ -130,7 +130,7 @@ pub pure fn dumps_snippets(indent: i64) -> str {
     var s = "{\n";
     let b1 = "[\n" + p3 + "\"pub " + nameof(struct) + " {\",\n" + p3 + "\"\\t$0\",\n" + p3 + "\"}\"\n" + p2 + "]";
     let b2 = "[\n" + p3 + "\"pub syntax ${1:name}(${2:expr}) => " + nameof(quote) + " {\",\n" + p3 + "\"\\t$0\",\n" + p3 + "\"\\t};\"\n" + p2 + "]";
-    let b3 = "[\n" + p3 + "\"[var ${1:contents} = Patch(${2:orig_fn}, PatchPart.body(), ${3:0} ..${4:5})]\",\n" + p3 + "\"pub " + nameof(fn) + " ${5:new_fn}() {\",\n" + p3 + "\"\\t$0\",\n" + p3 + "\"\\t${1:contents}.patch().call();\",\n" + p3 + "\"}\"\n" + p2 + "]";
+    let b3 = "[\n" + p3 + "\"[var ${1:contents} = Patch(${2:orig_fn}, PatchPart::Body, ${3:0} ..${4:5})]\",\n" + p3 + "\"pub " + nameof(fn) + " ${5:new_fn}() {\",\n" + p3 + "\"\\t$0\",\n" + p3 + "\"\\t${1:contents}.patch().call();\",\n" + p3 + "\"}\"\n" + p2 + "]";
     let b4 = "[\n" + p3 + "\"pub blueprint ${1:Pipeline} {\",\n" + p3 + "\"\\trole ${2:Worker};\",\n" + p3 + "\"\\tcue ${3:on_event}(pkt:${4:iso<SliceBuffer<u8>>}) {\",\n" + p3 + "\"\\t\\troute pkt -> ${2:Worker}.${5:handle};\",\n" + p3 + "\"\\t}\",\n" + p3 + "\"}\"\n" + p2 + "]";
     s = s + serialize_snippet("Distributive Struct Block", "pstruct", b1, "Distributive Pilot struct block", indent) + ",\n";
     s = s + serialize_snippet("Syntax Macro Rule", "psyntax", b2, "Self-hosted Pilot syntax macro", indent) + ",\n";

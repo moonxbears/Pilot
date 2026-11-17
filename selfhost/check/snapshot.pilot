@@ -135,6 +135,22 @@ pub pure fn member_implied() -> i64 => 2;
 /// Integers per node row (crates/pilot-cli/src/check.rs `NODE_COLUMNS`).
 pub pure fn snap_columns() -> i64 => 9;
 
+/// An attribute the host serves: its target node, its name symbol and its
+/// argument nodes (snapshot part 5, `crates/pilot-cli/src/check.rs`).
+pub type AttrRow = (i64, i64, List<i64>);
+
+/// A file the host serves: its path, whether it is one of the user's files,
+/// its base offset, its source text, and whether the program links it
+/// (snapshot part 6).
+pub type FileRow = (str, bool, i64, str, bool);
+
+/// What one walk over the node rows finds (`scan_nodes`).
+struct NodeScan {
+    user_lo: i64;
+    user_hi: i64;
+    by_kind: List<List<i64>>;
+}
+
 /// The arena of the linked program.
 pub struct Snap {
     pub nodes: List<i64>;
@@ -142,8 +158,8 @@ pub struct Snap {
     pub syms: List<str>;
     pub type_params: List<List<i64>>;
     pub bases: List<List<i64>>;
-    pub attrs: List<any>;
-    pub files: List<any>;
+    pub attrs: List<AttrRow>;
+    pub files: List<FileRow>;
     pub for_clauses: List<List<i64>>;
     /// `[owner, parameter symbol, bound type node]` per generic bound.
     pub bounds: List<List<i64>>;
@@ -209,10 +225,10 @@ pub fn filled(n: i64, v: i64) -> List<i64> {
 }
 
 /// One walk over the node rows: the node range of the user's files and the
-/// nodes of each kind, as `[[lo, hi], by_kind]`.
-fn scan_nodes(ref nodes: List<i64>, ref files: List<List<any>>) -> List<any> {
+/// nodes of each kind.
+fn scan_nodes(ref nodes: List<i64>, ref files: List<FileRow>) -> NodeScan {
     var user: List<bool> = [];
-    for row in files { user.push(row[1]); }
+    for row in files { user.push(row.1); }
     let units = user.len();
     let count = nodes.len() / snap_columns();
     var by_kind: List<List<i64>> = [];
@@ -234,8 +250,8 @@ fn scan_nodes(ref nodes: List<i64>, ref files: List<List<any>>) -> List<any> {
         n = n + 1;
         at = at + 9;
     }
-    let range: List<i64> = if lo < 0 { [0, 0] } else { [lo, hi] };
-    return [range, by_kind];
+    if lo < 0 { return NodeScan { user_lo: 0, user_hi: 0, by_kind: by_kind }; }
+    return NodeScan { user_lo: lo, user_hi: hi, by_kind: by_kind };
 }
 
 /// Every node of kind `k`, in node order (`Snap.by_kind`).
@@ -261,8 +277,8 @@ pub fn arm_guard(ref s: Snap, arm: i64) -> i64 => s.arm_guards[arm];
 pub fn snap_load() -> Snap {
     let raw = __engine("chk_snapshot");
     let nodes: List<i64> = raw[0];
-    let scan = scan_nodes(nodes, raw[6]);
-    let range: List<i64> = scan[0];
+    let files: List<FileRow> = raw[6];
+    let scan = scan_nodes(nodes, files);
     var decl_nodes: List<i64> = [];
     let decl_rows: List<List<i64>> = raw[13];
     for row in decl_rows { decl_nodes.push(row[0]); }
@@ -273,7 +289,7 @@ pub fn snap_load() -> Snap {
         type_params: raw[3],
         bases: raw[4],
         attrs: raw[5],
-        files: raw[6],
+        files: files,
         for_clauses: raw[7],
         bounds: raw[8],
         splice_mods: raw[9],
@@ -289,9 +305,9 @@ pub fn snap_load() -> Snap {
         generator: raw[17],
         shapes: child_shapes(),
         count: nodes.len() / snap_columns(),
-        user_lo: range[0],
-        user_hi: range[1],
-        by_kind: scan[1],
+        user_lo: scan.user_lo,
+        user_hi: scan.user_hi,
+        by_kind: scan.by_kind,
         decl_nodes: decl_nodes,
     };
 }
@@ -382,8 +398,7 @@ pub fn node_name(ref s: Snap, n: i64) -> str => sym_text(s, lhs(s, n));
 pub fn in_user_file(ref s: Snap, n: i64) -> bool {
     let u = unit_of(s, n);
     if u < 0 || u >= s.files.len() { return false; }
-    let row: List<any> = s.files[u];
-    return row[1];
+    return s.files[u].1;
 }
 
 /// Whether node `n` is in a file the program links (not a declaration file
@@ -391,17 +406,16 @@ pub fn in_user_file(ref s: Snap, n: i64) -> bool {
 pub fn in_linked_file(ref s: Snap, n: i64) -> bool {
     let u = unit_of(s, n);
     if u < 0 || u >= s.files.len() { return false; }
-    let row: List<any> = s.files[u];
-    return row[4];
+    return s.files[u].4;
 }
 
 /// The source text node `n` spans.
 pub fn node_text(ref s: Snap, n: i64) -> str {
     let u = unit_of(s, n);
     if u < 0 || u >= s.files.len() { return ""; }
-    let row: List<any> = s.files[u];
-    let base: i64 = row[2];
-    let text: str = row[3];
+    let row = s.files[u];
+    let base = row.2;
+    let text = row.3;
     return text.slice(span_start(s, n) - base, span_end(s, n) - base);
 }
 

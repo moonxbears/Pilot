@@ -33,6 +33,6 @@ pub fn str_replace(src: str, target: str, replacement: str) -> str {
 
 /// Rewrites `src` into `style`, swapping every compact/readable pairing
 /// (`f!^(x)` <-> `sig f(x)`, `T?` <-> `opt<T>`, ..) while keeping trivia.
-pub fn format_str(src: str, style: u8) -> str {
+pub fn format_str(src: str, style: FmtStyle) -> str {
     return seam("pilot_fmt.format_str", "style rewriting needs the lossless CST and the M4 pairing table");
 }

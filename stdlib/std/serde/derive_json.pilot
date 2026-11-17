@@ -11,12 +11,19 @@ pub pkg std.serde.json;
 use core.derive.ITypeWeaverAttribute;
 use core.derive.IFieldWeaverAttribute;
 
+/// How a field name is written on the wire.
+pub enum CaseStyle : u8 {
+    Camel,  // camelCase
+    Snake,  // snake_case
+    Pascal, // PascalCase
+}
+
 // JSON Attributes
 [Layout(c_abi)]
 pub struct JsonAttr : ITypeWeaverAttribute, IValue {
-    pub naming: str;
+    pub naming: CaseStyle;
     pub weight: i32;
-    pub static pure fn create() -> JsonAttr => JsonAttr { naming: "camelCase", weight: 100 };
+    pub static pure fn create() -> JsonAttr => JsonAttr { naming: ::Camel, weight: 100 };
 }
 
 [Layout(c_abi)]
@@ -40,27 +47,27 @@ pub struct JsonFlattenAttr : IFieldWeaverAttribute, IValue {
 
 [Layout(c_abi)]
 pub struct JsonDeriveConfig : IValue {
-    pub case_style: u8; // 0 = camelCase, 1 = snake_case, 2 = PascalCase
+    pub case_style: CaseStyle;
     pub deny_unknown_fields: bool;
     pub omit_none_fields: bool;
     pub tag_field: str;
 
     pub static pure fn default_camel() -> JsonDeriveConfig => JsonDeriveConfig {
-        case_style: 0,
+        case_style: ::Camel,
         deny_unknown_fields: false,
         omit_none_fields: true,
         tag_field: "",
     };
 
     pub static pure fn default_snake() -> JsonDeriveConfig => JsonDeriveConfig {
-        case_style: 1,
+        case_style: ::Snake,
         deny_unknown_fields: false,
         omit_none_fields: true,
         tag_field: "",
     };
 
     pub static pure fn default_pascal() -> JsonDeriveConfig => JsonDeriveConfig {
-        case_style: 2,
+        case_style: ::Pascal,
         deny_unknown_fields: false,
         omit_none_fields: true,
         tag_field: "",
@@ -175,19 +182,16 @@ pub fn to_pascal_case(ident: str) -> str {
     return out;
 }
 
-pub fn apply_case_style(ident: str, style: u8) -> str {
-    if style == 0 {
-        return to_camel_case(ident);
-    } else if style == 1 {
-        return to_snake_case(ident);
-    } else if style == 2 {
-        return to_pascal_case(ident);
-    }
-    return ident;
+pub fn apply_case_style(ident: str, style: CaseStyle) -> str {
+    return switch style {
+        case Camel: to_camel_case(ident);
+        case Snake: to_snake_case(ident);
+        case Pascal: to_pascal_case(ident);
+    };
 }
 
 // WEAVE004: Duplicate JSON wire field name collision detector
-pub fn check_json_wire_collisions(field_names: List<str>, style: u8) -> str {
+pub fn check_json_wire_collisions(field_names: List<str>, style: CaseStyle) -> str {
     var seen: List<str> = [];
     let n = field_names.len();
     var i = 0;

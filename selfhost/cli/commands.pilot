@@ -165,7 +165,7 @@ pub fn cmd_check(ref p: ParsedArgs, ref reg: CommandRegistry) -> i64 {
         let compiled = host_check(f);
         var found = report_diagnostics(compiled);
         // The analyzer reads a program the seed accepted.
-        var steps: any = none;
+        var steps: List<HostStepRow>? = none;
         if compiled.len == 0 {
             let semantic = semantic_diags(f, false, live_phase_compile());
             found = found + report_diagnostics(semantic.diags);
@@ -409,6 +409,9 @@ pub fn cli_ir_files() -> List<str> {
         "selfhost/ir/pass_inline.pilot",
         "selfhost/ir/text.pilot",
         "selfhost/ir/fault.pilot",
+        "selfhost/ir/interp_value.pilot",
+        "selfhost/ir/interp_ops.pilot",
+        "selfhost/ir/interp_engine.pilot",
         "selfhost/ir/interp.pilot",
         "selfhost/ir/main.pilot",
     ] { out.push(f); }

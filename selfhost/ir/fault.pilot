@@ -6,10 +6,12 @@
 // run.rs): `<file>:<line>:<col>: runtime error: <message>` at the
 // instruction that failed, then `  called from <file>:<line>:<col>` for each
 // call it was inside, innermost first (consecutive calls from one place print
-// once with their count), and exit code 1. The message is the seed's own:
-// the interpreter runs each operator, branch condition and engine operation
-// through the engine operation `op_checked`, which gives the failure back as
-// a value instead of stopping (crates/pilot-vm checked.rs).
+// once with their count; past 32 calls, how many more there were), and exit
+// code 1. The message is the seed's own: the interpreter's operators and
+// engine operations (selfhost/ir/interp_ops.pilot, interp_engine.pilot)
+// fail with the seed's messages, and the host's operations on raw memory
+// run through the engine operation `op_checked`, which gives a failure back
+// as a value instead of stopping (crates/pilot-vm checked.rs).
 pub lvl(0) pkg selfhost.ir;
 
 
@@ -43,7 +45,8 @@ pub struct IrSourceMap : IObject {
 pub fn ir_source_map_empty() -> IrSourceMap => IrSourceMap { paths: [], bases: [], texts: [] };
 
 /// `<path>:<line>:<col>` of offset `at` (1-based, columns in bytes), as the
-/// seed's `LinkedSource::locate`; `<program>` when no file holds it.
+/// seed's `LinkedSource::locate`: `<program>` for no place, `<unknown>`
+/// when no file holds it.
 pub fn ir_locate(ref map: IrSourceMap, at: i64) -> str {
     // The file starting last at or before `at`.
     var f = -1;
@@ -52,7 +55,8 @@ pub fn ir_locate(ref map: IrSourceMap, at: i64) -> str {
         if map.bases[i] <= at && (f < 0 || map.bases[i] > map.bases[f]) { f = i; }
         i = i + 1;
     }
-    if at < 0 || f < 0 { return "<program>"; }
+    if at < 0 { return "<program>"; }
+    if f < 0 { return "<unknown>"; }
     let text = map.texts[f];
     var off = at - map.bases[f];
     if off > text.len() { off = text.len(); }
@@ -80,20 +84,62 @@ pub fn report_fault(ref fault: IrFault, ref map: IrSourceMap) {
         if fault.spans[i] != ir_no_span() { calls.push(fault.spans[i]); }
         i = i + 1;
     }
+    // The seed keeps the innermost `MAX_TRACE` calls and counts the rest.
+    let shown = if calls.len() > MAX_TRACE { MAX_TRACE } else { calls.len() };
     i = 0;
-    while i < calls.len() {
+    while i < shown {
         var run = 1;
-        while i + run < calls.len() && calls[i + run] == calls[i] { run = run + 1; }
+        while i + run < shown && calls[i + run] == calls[i] { run = run + 1; }
         let at = ir_locate(map, calls[i]);
         eprint(if run == 1 { f"  called from {at}" } else { f"  called from {at} ({run} times)" });
         i = i + run;
     }
+    if calls.len() > shown { eprint(f"  ... and {calls.len() - shown} more calls"); }
 }
 
-/// Runs operator, condition test or engine operation `name` on `args`:
-/// `[true, value]`, or `[false, message]` with the seed's failure message.
-pub fn op_checked(name: str, ref args: List<any>) -> List<any> => __engine("op_checked", name, args);
+/// The most calls a fault's report lists (the seed's `MAX_TRACE`).
+const MAX_TRACE: i64 = 32;
 
-/// A copy of list `v` (and of any list or record in it) that shares nothing
-/// with it.
-pub fn fresh_copy(ref v: List<any>) -> List<any> => __engine("value_clone", v);
+/// Host operation `name` (raw memory, the host's entry points) on `args`,
+/// run by the seed engine: its result, or none with the program's fault
+/// raised with the seed's message. This is where the interpreter's values
+/// cross to the seed's and back, so the engine operation is untyped: a
+/// host operation takes integers, floats and text and gives an integer, a
+/// float (`host_op` 9, a float load) or text (`str_from_ptr`).
+pub fn host_checked(name: str, ref args: List<IrVal>, var ref fault: IrFault) -> IrVal {
+    var raw: List<any> = [];
+    for v in args { raw.push(host_value(v)); }
+    let r = op_checked(name, raw);
+    if r[0] != true {
+        let message: str = r[1];
+        raise_fault(fault, message);
+        return IrVal.Nil;
+    }
+    if name == "str_from_ptr" {
+        let s: str = r[1];
+        return IrVal.Text(s);
+    }
+    if name == "host_op" && args.len() > 0 && ir_int(args[0]) == 9 {
+        let x: f64 = r[1];
+        return IrVal.Flt(x);
+    }
+    let n: i64 = r[1];
+    return IrVal.Int(n);
+}
+
+/// Scalar `v` as the seed's own value (a list or record has no seed value
+/// here; the host reads it as 0, as it reads any value that is not a
+/// number).
+fn host_value(v: IrVal) -> any => switch v {
+    case Bool(b): b;
+    case Int(n): n;
+    case UInt(n): n;
+    case Flt(x): x;
+    case Chr(code): code;
+    case Text(s): s;
+    default: 0;
+};
+
+/// Runs engine operation `name` on `args`: `[true, value]`, or `[false,
+/// message]` with the seed's failure message.
+fn op_checked(name: str, ref args: List<any>) -> List<any> => __engine("op_checked", name, args);

@@ -4,19 +4,22 @@
 // ==============================================================================
 pub pkg std.log;
 
-pub pure fn log_level_trace() -> u8 => 0;
-pub pure fn log_level_debug() -> u8 => 1;
-pub pure fn log_level_info()  -> u8 => 2;
-pub pure fn log_level_warn()  -> u8 => 3;
-pub pure fn log_level_error() -> u8 => 4;
+/// How severe a log record is, least to most.
+pub enum LogLevel : u8 {
+    Trace,
+    Debug,
+    Info,
+    Warn,
+    Error,
+}
 
 [Layout(c_abi)]
 pub struct LogRecord : IValue {
-    pub level:   u8;
+    pub level:   LogLevel;
     pub target:  str;
     pub message: str;
 }
 
-pub pure fn log_record_new(level: u8, target: str, msg: str) -> LogRecord {
+pub pure fn log_record_new(level: LogLevel, target: str, msg: str) -> LogRecord {
     return LogRecord { level: level, target: target, message: msg };
 }

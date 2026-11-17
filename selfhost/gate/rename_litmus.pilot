@@ -420,12 +420,12 @@ fn rl_rename_stderr(body: str, program_src: str, rmap: i64) -> str {
 /// renaming identifiers in `.pilot` files. Returns the number of files copied.
 fn rl_copy_renamed_tree(root: str, src_rel: str, sandbox_dir: str, dst_rel: str, rmap: i64, violations: i64) -> usize {
     let base = gm_join_path(root, src_rel);
-    let files = gm_split_lines(gate_fs_walk_files(base));
-    let n = glist_len(files);
+    let files = gate_fs_walk_files(base);
+    let n = files.len();
     var copied = 0;
     var i = 0;
     while i < n {
-        let path = glist_get(files, i);
+        let path = files[i];
         let rel = path.slice(base.len() + 1, path.len());
         let file_text = gate_fs_read_text(path);
         var out_text = file_text;

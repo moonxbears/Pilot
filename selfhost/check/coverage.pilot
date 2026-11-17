@@ -9,7 +9,7 @@
 // attribute may be written is checked with the other inherited attributes
 // (selfhost/check/attr_inherit.pilot).
 //
-// Planning (`coverage_plan`): probe rows `[node, capture, call, args, at]`
+// Planning (`coverage_plan`): probes (`PlannedProbe`)
 // (selfhost/check/probes.pilot), for every function the attribute applies
 // to, written on it or inherited:
 //   - before each of its statements: `coverage_line(unit, index)`;
@@ -58,12 +58,9 @@ pub struct CoverageSettings : IValue {
     pub outs: i64;
 }
 
-fn all_flags(ref known: List<List<any>>) -> i64 {
+fn all_flags(ref known: List<FlagRow>) -> i64 {
     var m = 0;
-    for f in known {
-        let v: i64 = f[1];
-        m = m | v;
-    }
+    for f in known { m = m | f.1; }
     return m;
 }
 
@@ -100,9 +97,9 @@ pub fn coverage_settings(ref p: Program, var ref sink: DiagSink, ref args: List<
 /// Reports every wrong `[Coverage]` argument in the user's files.
 pub fn check_coverage(ref p: Program, var ref sink: DiagSink) {
     for row in p.s.attrs {
-        let t: i64 = row[0];
-        if t >= 0 && in_user_file(p.s, t) && sym_text(p.s, row[1]) == coverage_attr() {
-            let args: List<i64> = row[2];
+        let t = row.0;
+        if t >= 0 && in_user_file(p.s, t) && sym_text(p.s, row.1) == coverage_attr() {
+            let args = row.2;
             let _ = coverage_settings(p, sink, args);
         }
     }
@@ -112,7 +109,8 @@ pub fn check_coverage(ref p: Program, var ref sink: DiagSink) {
 // The plan
 // ------------------------------------------------------------------------------
 
-fn text_row(n: i64, call: str, args: List<any>, at: ProbeAt) -> List<any> => [n, false, call, args, at as i64];
+fn text_row(n: i64, call: str, args: List<ProbeArg>, at: ProbeAt) -> PlannedProbe =>
+    PlannedProbe { node: n, capture: false, call: call, args: args, at: at };
 
 /// The statements of function `f` in source order: every node directly in a
 /// block whose nearest function is `f`.
@@ -147,8 +145,8 @@ fn fn_statements(ref p: Program, f: i64) -> List<i64> {
 
 fn line_of_node(ref s: Snap, n: i64) -> i64 {
     let f = file_of(s, n);
-    let base: i64 = f[0];
-    let text: str = f[1];
+    let base = f.0;
+    let text = f.1;
     return attr_line_at(text, span_start(s, n) - base);
 }
 
@@ -188,8 +186,8 @@ fn by_code(ref p: Program, f: i64) -> str {
 }
 
 /// The parameter whose size a call's input size is, and how to read it:
-/// `[param node, "i" | "s" | "l"]`, or none.
-fn size_param(var ref p: Program, f: i64) -> List<any>? {
+/// `(param node, "i" | "s" | "l")`, or none.
+fn size_param(var ref p: Program, f: i64) -> (i64, str)? {
     let s = p.s;
     let text = prog_slot_type(p, literal_slot(nk_str()));
     let list = prog_slot_type(p, list_slot());
@@ -197,9 +195,9 @@ fn size_param(var ref p: Program, f: i64) -> List<any>? {
         let tn = rhs(s, prm);
         if tn >= 0 {
             let t = prog_annot_type(p, tn);
-            if t == text { return [prm, "s"]; }
-            if is_integer_class(prog_value_class(p, t)) { return [prm, "i"]; }
-            if ty_is_named(p.tt, t) && ty_is_named(p.tt, list) && ty_decl(p.tt, t) == ty_decl(p.tt, list) { return [prm, "l"]; }
+            if t == text { return (prm, "s"); }
+            if is_integer_class(prog_value_class(p, t)) { return (prm, "i"); }
+            if ty_is_named(p.tt, t) && ty_is_named(p.tt, list) && ty_decl(p.tt, t) == ty_decl(p.tt, list) { return (prm, "l"); }
         }
     }
     return none;
@@ -219,9 +217,9 @@ fn fn_settings(ref p: Program, ref pkgs: Map<str, i64>, var ref quiet: DiagSink,
 fn own_settings(ref p: Program, var ref quiet: DiagSink, c: i64) -> CoverageSettings? {
     var found: CoverageSettings? = none;
     for row_index in nl_get(p.attrs, f"{c}") {
-        let row: List<any> = p.s.attrs[row_index];
-        if sym_text(p.s, row[1]) == coverage_attr() {
-            let args: List<i64> = row[2];
+        let row = p.s.attrs[row_index];
+        if sym_text(p.s, row.1) == coverage_attr() {
+            let args = row.2;
             found = coverage_settings(p, quiet, args);
         }
     }
@@ -237,23 +235,23 @@ fn group_label(ref s: Snap, c: i64) -> str {
 }
 
 /// Where the calls on entry to `f` go, and whether its way out is
-/// deferred: `[node, deferred]`; none for a function without a body.
-fn entry_of(ref s: Snap, f: i64) -> List<any>? {
+/// deferred: `(node, deferred)`; none for a function without a body.
+fn entry_of(ref s: Snap, f: i64) -> (i64, bool)? {
     let body = fn_body(s, f);
     if body < 0 { return none; }
     if kind(s, body) == nk_block() {
         let parts = children(s, body);
-        if parts.len() > 0 { return [parts[0], true]; }
+        if parts.len() > 0 { return (parts[0], true); }
     }
-    return [body, false];
+    return (body, false);
 }
 
-fn flag_text(v: i64) -> List<any> => text_arg(f"{v}");
+fn flag_text(v: i64) -> ProbeArg => text_arg(f"{v}");
 
-/// The probe rows that measure the covered functions of the program.
-pub fn coverage_plan(var ref p: Program) -> List<List<any>> {
+/// The probes that measure the covered functions of the program.
+pub fn coverage_plan(var ref p: Program) -> List<PlannedProbe> {
     let s = p.s;
-    var out: List<List<any>> = [];
+    var out: List<PlannedProbe> = [];
     let pkgs = package_decls(p);
     let quiet = sink_new(s);
     let speed = flag_value(enum_flags(p, coverage_mode_type()), "Speed");
@@ -285,16 +283,16 @@ pub fn coverage_plan(var ref p: Program) -> List<List<any>> {
     }
     if mains.len() != 1 { return out; }
     let main_fn = mains[0];
-    let main_entry: List<any> = entry_of(s, main_fn) ?? [];
-    let main_node: i64 = main_entry[0];
-    let main_deferred: bool = main_entry[1];
+    let main_entry = entry_of(s, main_fn) ?? (-1, false);
+    let main_node = main_entry.0;
+    let main_deferred = main_entry.1;
 
     // Groups: the containers that carry the attribute, the package last.
     var groups: List<i64> = [];
     var packages: List<i64> = [];
     for row in s.attrs {
-        let c: i64 = row[0];
-        if c >= 0 && in_user_file(s, c) && is_container(s, c) && sym_text(s, row[1]) == coverage_attr() {
+        let c = row.0;
+        if c >= 0 && in_user_file(s, c) && is_container(s, c) && sym_text(s, row.1) == coverage_attr() {
             var seen = false;
             for g in groups { if g == c { seen = true; } }
             for g in packages { if g == c { seen = true; } }
@@ -350,20 +348,19 @@ pub fn coverage_plan(var ref p: Program) -> List<List<any>> {
         let st: CoverageSettings = fn_settings(p, pkgs, quiet, u) ?? CoverageSettings { modes: 0, outs: 0 };
         let timed = (st.modes & speed) != 0;
         let key = f"u{u}";
-        let entry: List<any> = entry_of(s, u) ?? [];
-        let node: i64 = entry[0];
-        let deferred: bool = entry[1];
-        var enter_args: List<any> = [text_arg(key)];
+        let entry = entry_of(s, u) ?? (-1, false);
+        let node = entry.0;
+        let deferred = entry.1;
+        var enter_args: List<ProbeArg> = [text_arg(key)];
         if some sized = size_param(p, u) {
-            let prm: i64 = sized[0];
-            let how: str = sized[1];
-            enter_args.push([ProbeArgKind::BindingText as i64, node_name(s, prm), prm]);
-            enter_args.push(text_arg(how));
+            let prm = sized.0;
+            enter_args.push(binding_arg(node_name(s, prm), prm));
+            enter_args.push(text_arg(sized.1));
         } else {
             enter_args.push(text_arg(""));
             enter_args.push(text_arg(""));
         }
-        var exit_args: List<any> = [text_arg(key)];
+        var exit_args: List<ProbeArg> = [text_arg(key)];
         out.push(text_row(node, if timed { cov_hook_enter_timed() } else { cov_hook_enter() }, enter_args, ::Before));
         out.push(text_row(node, if timed { cov_hook_exit_timed() } else { cov_hook_exit() }, exit_args, if deferred { ProbeAt::Defer } else { ProbeAt::After }));
         var stmts = fn_statements(p, u);
@@ -379,7 +376,6 @@ pub fn coverage_plan(var ref p: Program) -> List<List<any>> {
 
 /// The path of the file node `n` is in.
 fn file_row_path(ref s: Snap, n: i64) -> str {
-    let row: List<any> = s.files[unit_of(s, n)];
-    let path: str = row[0];
+    let path = s.files[unit_of(s, n)].0;
     return path;
 }

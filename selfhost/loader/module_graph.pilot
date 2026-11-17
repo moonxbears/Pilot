@@ -305,21 +305,6 @@ pub pure fn mg_dir_of(path: str) -> str {
     return ".";
 }
 
-pub pure fn mg_lines(text: str) -> List<str> {
-    var out: List<str> = [];
-    var start = 0;
-    loop {
-        let nl = text.find("\n", start);
-        if nl < 0 {
-            if start < text.len() { out.push(text.slice(start, text.len())); }
-            break;
-        }
-        if nl > start { out.push(text.slice(start, nl)); }
-        start = nl + 1;
-    }
-    return out;
-}
-
 /// Where packages are looked for: the entry file's directory, then the
 /// standard library of the toolchain at `toolchain_root`, then its
 /// self-hosted compiler (`selfhost.*`, one package per directory).
@@ -367,7 +352,7 @@ pub fn mg_conventional_paths(root: str, pkg: str) -> List<str> {
 pub fn mg_root_pairs(ref g: ModuleGraph, root: str) -> List<str> {
     if !g.root_index.has(root) {
         var found: List<str> = [];
-        for file in mg_lines(File.walk_files(root)) {
+        for file in File.walk_files(root) {
             if !file.ends_with(".pilot") { continue; }
             let path = mg_normalize_path(file);
             guard some h = UnitHeader.read(path) else { continue; };
@@ -615,23 +600,28 @@ pub fn mg_build_graph_sharing(entry_file: str, toolchain_root: str, root_index: 
     return g;
 }
 
-/// What the host needs to link the program: `[paths, diagnostics]`, the
-/// unit files in link order (entry last) and each diagnostic as
-/// `[code, message, path, offset]`.
-pub fn mg_link_plan(entry_file: str, toolchain_root: str) -> List<any> => mg_link_plan_with(entry_file, toolchain_root, []);
+/// A loader diagnostic as the host reads it (crates/pilot-cli/src/run.rs
+/// `link_plan_with`): code, message, file path, byte offset.
+pub type LinkDiagRow = (str, str, str, u32);
+/// What the host needs to link the program: the unit files in link order
+/// (entry last), and the diagnostics.
+pub type LinkPlan = (List<str>, List<LinkDiagRow>);
+
+/// The program's `LinkPlan`.
+pub fn mg_link_plan(entry_file: str, toolchain_root: str) -> LinkPlan => mg_link_plan_with(entry_file, toolchain_root, []);
 
 /// `mg_link_plan`, with the files `extras` names (and what they import)
 /// linked after the prelude and before the program, in the same pass; a
 /// file the program links already is linked once.
-pub fn mg_link_plan_with(entry_file: str, toolchain_root: str, ref extras: List<str>) -> List<any> {
+pub fn mg_link_plan_with(entry_file: str, toolchain_root: str, ref extras: List<str>) -> LinkPlan {
     let g = mg_build_graph_sharing(entry_file, toolchain_root, [:], extras);
     var paths: List<str> = [];
     for id in g.topo_order {
         paths.push(g.units[id.raw].file_path);
     }
-    var diags: List<any> = [];
+    var diags: List<LinkDiagRow> = [];
     for d in g.diagnostics {
-        diags.push([d.code, d.message, d.file_path, d.offset]);
+        diags.push((d.code, d.message, d.file_path, d.offset));
     }
-    return [paths, diags];
+    return (paths, diags);
 }

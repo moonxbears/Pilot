@@ -15,8 +15,9 @@
 //     language is compiled, and run with its `.args` and `.stdin`. Its stdout
 //     and exit code must be the expected ones, and its stderr must hold each
 //     expected stderr line, a runtime error from `runtime error:` on. An
-//     emitted program carries no source positions, so the position lines of
-//     a runtime error's trace are not checked. A program the host compiler
+//     emitted program carries no source positions, so a runtime error's
+//     trace (its position lines and its count of further calls) is not
+//     checked. A program the host compiler
 //     rejects is a failure.
 // A tool the language needs that the host does not have stops the command.
 //
@@ -157,8 +158,9 @@ fn check_emitted(program: str, emitted: str, out: proc.ProcessOutput) -> List<st
         let at = want.find("runtime error: ", 0);
         if at >= 0 {
             want = want.slice(at, want.len());
-        } else if want.find(".pilot:", 0) >= 0 {
-            // A source position of a runtime error's trace.
+        } else if want.find(".pilot:", 0) >= 0 || (want.starts_with("... and ") && want.ends_with(" more calls")) {
+            // A source position of a runtime error's trace, or the count of
+            // the calls past the trace's end.
             continue;
         }
         if want.len() > 0 && stderr.find(want, 0) < 0 {

@@ -14,7 +14,7 @@ pub struct ListBuffer<T: IAnyValue> : IBuffer<T>, IEnumerable<T, ListEnumerator<
 
     pub pure fn len(ref self) -> usize => self.items.len();
 
-    pub pure fn contains(ref self, item: T) -> bool => self.items.contains(item);
+    pub pure fn contains(ref self, ref item: T) -> bool => self.items.contains(item);
 
     pub fn add(var ref self, item: T) {
         self.items.push(item);
@@ -73,7 +73,7 @@ pub struct RingBuffer<T: IAnyValue> : IQueue<T>, IObject {
         return if n == self.capacity { 0 } else { n };
     }
 
-    pub pure fn contains(ref self, item: T) -> bool {
+    pub pure fn contains(ref self, ref item: T) -> bool {
         var at = self.head;
         var i: usize = 0;
         while i < self.count {

@@ -702,24 +702,14 @@ pub partial struct {
     [KeywordDefAttr(29, "Zero-copy key-value strided column projection map.")]
     map {}
 
-    [KeywordDefAttr(35, "Positional sequence unpack operator (readable counterpart of *x).", "*")]
-    splat {}
-
-    [KeywordDefAttr(35, "Compile-time structural key-value unpack operator (readable counterpart of **x).", "**")]
-    pairs {}
-
-    [KeywordDefAttr(35, "Recursive deep-flatten unpack operator (readable counterpart of *..x).", "*..")]
-    flat {}
-
+    
     [KeywordDefAttr(29, "Recursive deep-flatten unpack operator carrier.")]
     expand {}
-
-    [KeywordDefAttr(37, "Zero-marshalling ABI call frame projection (readable counterpart of f!&(...)).", "!&")]
-    frame {}
-
+    
+    
     [KeywordDefAttr(29, "Homoiconic abstract syntax tree node representation.")]
     ast {}
-
+    
     // Category 30: Arithmetic Operators
     [KeywordDefAttr(30, "Addition operator (+).")]
     op_add {}
@@ -825,40 +815,52 @@ pub partial struct {
 
     [KeywordDefAttr(33, "Open slice bound operator (>..<).")]
     op_open_range {}
-
+    
     [KeywordDefAttr(33, "After-bound slice operator (>..).")]
     op_after_range {}
-
+    
     // Category 34: Null-Safety & Error Propagation Operators
     [KeywordDefAttr(34, "Universal try-unwrap and error propagation operator (?).")]
     op_try {}
-
+    
     [KeywordDefAttr(34, "Null-coalescing fallback operator (??).")]
     op_coalesce {}
-
+    
     // Category 35: Splat & Unpack Operators. Each symbol is the Pair of its
     // readable twin (`splat` `*`, `pairs` `**`, `flat` `*..`) and has no
     // entry of its own (decision D4, 2026-11-13).
+    [KeywordDefAttr(35, "Positional sequence unpack operator (readable counterpart of *x).", "*")]
+    splat {}
 
+    [KeywordDefAttr(35, "Compile-time structural key-value unpack operator (readable counterpart of **x).", "**")]
+    pairs {}
+
+    [KeywordDefAttr(35, "Recursive deep-flatten unpack operator (readable counterpart of *..x).", "*..")]
+    flat {}
+    
+    
     // Category 36: Syntax & Metaprogramming Constructs
     [KeywordDefAttr(36, "Type-position symbolic type rewrite rules.")]
     type_construct {}
-
+    
     [KeywordDefAttr(36, "AST unquote compile-time evaluation prefix: `~x` marks an argument of a deep splice (`f!!(~x)`, `splice f(~x)`) to be evaluated at compile time. Target, not built yet: deep splices stop at seam vm.call_quote (docs/keyword_roadmap.md K4). No readable spelling is bound: `unquote` is free as a name.", "~")]
     unquote {}
-
+    
     [KeywordDefAttr(36, "AST splice compile-time variable insertion prefix ($).")]
     splice {}
-
+    
     [KeywordDefAttr(36, "Compile-time syntax transformation macro. Target, not built yet: where a declaration or statement starts, every use stops at seam keyword.unbuilt; elsewhere it is an ordinary name (docs/keyword_roadmap.md K4).")]
     macro {}
-
+    
     // Category 37: Homoiconic Call-Quoting Modes. Each symbol is the Pair
     // of its readable twin (`call` `!`, `splice` `!!`, `frame` `!&`, `sig`
     // `!^`, `grad` `!@`, `plan` `!?`) and has no entry of its own (D4).
     [KeywordDefAttr(37, "Shallow AST quote call expression projection (readable counterpart of f!(...)).", "!")]
     call {}
-
+    
+    [KeywordDefAttr(37, "Zero-marshalling ABI call frame projection (readable counterpart of f!&(...)).", "!&")]
+    frame {}
+    
     [KeywordDefAttr(37, "Deep compile-time AST splice projection (readable counterpart of f!!(~...)).", "!!")]
     splice {}
 
@@ -975,29 +977,3 @@ pub fn reflect_category_keywords(target_cat_id: i64) -> str {
     }
     return result;
 }
-
-pub fn query_category_scope_pure(cat_id: i64) -> str {
-    return reflect_category_scope(cat_id);
-}
-
-pub fn query_category_badge_pure(cat_id: i64) -> str {
-    return reflect_category_badge(cat_id);
-}
-
-pub fn query_keyword_doc_pure(word: str) -> str {
-    return reflect_keyword_doc(-1, word);
-}
-
-pub fn query_registered_symbols_pure(cat_id: i64, mode: i64, target: str) -> str {
-    if mode == 1 {
-        return reflect_category_scope(cat_id);
-    }
-    if mode == 2 {
-        return reflect_category_badge(cat_id);
-    }
-    if mode == 3 {
-        return reflect_keyword_doc(cat_id, target);
-    }
-    return reflect_category_words(cat_id);
-}
-

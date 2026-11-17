@@ -169,7 +169,10 @@ pub struct Lowerer : IObject {
     pub drop_flags: Map<str, u32>;
     /// The calls planned around statements (selfhost/ir/lower_probe.pilot),
     /// by statement node.
-    pub probes: Map<str, List<any>>;
+    pub probes: Map<str, List<PlannedProbe>>;
+    /// The `ProbeAt::Defer` calls reached so far, each with its statement; a
+    /// scope holds `-(index + 1)` for one (selfhost/ir/lower_probe.pilot).
+    pub later_probes: List<DeferredProbe>;
     /// The program's enum declarations (`adt_nodes`), found once: a name
     /// that may be a variant is looked up among them, not among every node.
     pub adt_decls: List<i64>;
@@ -285,7 +288,7 @@ pub fn lower_program_rooted(var ref inf: Infer, every_function: bool) -> IrModul
         gen_frame: ir_no_value(), gen_sent: ir_no_value(), gen_resumes: [], gen_yielders: [], gen_dispatch: [],
         resume_of: Map<str, i64>(), frame_sizes: Map<str, i64>(), lowered: Map<str, bool>(), collect_lists: Map<str, u32>(), outs: [], out_phys: [],
         loop_enums: [], loop_enum_types: [], plan: plan_program(inf), releases: Map<str, AtRow>(), drop_flags: Map<str, u32>(),
-        probes: probe_rows(p), adt_decls: adt_nodes(p),
+        probes: probe_rows(p), later_probes: [], adt_decls: adt_nodes(p),
     };
     // Function 0 is `<start>` (selfhost/ir/lower_global.pilot).
     lw.queue.push(-1);

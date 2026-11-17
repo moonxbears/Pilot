@@ -33,7 +33,7 @@ pub pure fn eval_total_fuel() -> i64 => 1000000;
 struct ConstEval : IObject {
     ref m: IrModule;
     /// Global -> its value as computed, and whether it is known.
-    globals: List<any>;
+    globals: List<IrVal>;
     assigned: List<bool>;
     /// Function -> 0 not asked, 1 may run while compiling, 2 cannot (it
     /// calls through a function value or runs an engine operation with an
@@ -53,10 +53,10 @@ struct ConstEval : IObject {
 /// Computes what can be computed in `m`; true when it changed anything.
 pub fn const_eval_module(ref m: IrModule) -> bool {
     if m.functions.len == 0 { return false; }
-    var globals: List<any> = [];
+    var globals: List<IrVal> = [];
     var assigned: List<bool> = [];
     for g in m.globals {
-        globals.push(none);
+        globals.push(IrVal.Nil);
         assigned.push(g.ready);
     }
     var runnable: List<i64> = [];
@@ -249,10 +249,9 @@ fn try_function(var ref ce: ConstEval, fi: i64) -> bool {
     let f = m.functions[fi];
     let fuel = if ce.fuel < eval_fuel() { ce.fuel } else { eval_fuel() };
     let r = ir_eval(m, fi, ce.globals, ce.assigned, fuel);
-    let steps: i64 = r[2];
-    ce.fuel = ce.fuel - steps;
-    if r[0] != true { return false; }
-    let value = r[1];
+    ce.fuel = ce.fuel - r.steps;
+    if !r.ok { return false; }
+    let value = r.value;
     let g = ce.init_global[fi];
     if some k = constant_of(m, f, value) {
         ce.done[fi] = 1;
@@ -271,7 +270,7 @@ fn try_function(var ref ce: ConstEval, fi: i64) -> bool {
     if target < 0 {
         target = m.globals.len;
         m.globals.push(IrGlobal { name: f"once@{f.name}", physics: f.ret_physics, ready: true });
-        ce.globals.push(none);
+        ce.globals.push(IrVal.Nil);
         ce.assigned.push(false);
     }
     m.globals[target] = IrGlobal { name: m.globals[target].name, physics: m.globals[target].physics, ready: true };
@@ -294,29 +293,35 @@ fn is_scalar_physics(p: IrTypePhysics) -> bool =>
 
 /// A constant standing for `value` as the result of `f`: `[opcode, pool
 /// index]`, or none when the value has no constant of that physics.
-fn constant_of(var ref m: IrModule, ref f: IrFunction, value: any) -> List<i64>? {
+fn constant_of(var ref m: IrModule, ref f: IrFunction, value: IrVal) -> List<i64>? {
     let p = f.ret_physics;
-    if p.layout_id == 0 || value == none { return none; }
+    if p.layout_id == 0 { return none; }
     let rc = p.reg_class;
-    if (rc == reg_class_gpr_signed() || rc == reg_class_gpr_unsigned()) && p.bit_width == 1 {
-        return [op_const_bits() as i64, int_pool(m, if value == true { 1 } else { 0 })];
+    let is_int = rc == reg_class_gpr_signed() || rc == reg_class_gpr_unsigned();
+    switch value {
+        case Bool(b): {
+            if is_int && p.bit_width == 1 { return [op_const_bits() as i64, int_pool(m, if b { 1 } else { 0 })]; }
+            return none;
+        }
+        case Int(n): {
+            if is_int && p.bit_width > 1 && (p.bit_width <= 64 && rc == reg_class_gpr_signed() || p.bit_width < 64) { return [op_const_bits() as i64, int_pool(m, n)]; }
+            return none;
+        }
+        case Flt(x): {
+            if rc == reg_class_simd_float() && p.bit_width == 64 {
+                if some bits = f64_bits(x) { return [op_const_float() as i64, float_pool(m, bits)]; }
+            }
+            return none;
+        }
+        case Text(s): {
+            // Only where the function itself writes text of this physics,
+            // so the result is known to be text the emitters write as a
+            // constant.
+            if writes_text_of(f, p) { return [op_const_bytes() as i64, str_pool(m, s)]; }
+            return none;
+        }
+        default: return none;
     }
-    if rc == reg_class_gpr_signed() && p.bit_width > 1 && p.bit_width <= 64 {
-        let v: i64 = value;
-        return [op_const_bits() as i64, int_pool(m, v)];
-    }
-    if rc == reg_class_gpr_unsigned() && p.bit_width > 1 && p.bit_width < 64 {
-        let v: i64 = value as i64;
-        return [op_const_bits() as i64, int_pool(m, v)];
-    }
-    if rc == reg_class_simd_float() && p.bit_width == 64 {
-        if some bits = f64_bits(value) { return [op_const_float() as i64, float_pool(m, bits)]; }
-        return none;
-    }
-    // Text: only where the function itself writes text of this physics, so
-    // the result is known to be text the emitters write as a constant.
-    if writes_text_of(f, p) { return [op_const_bytes() as i64, str_pool(m, value)]; }
-    return none;
 }
 
 fn writes_text_of(ref f: IrFunction, p: IrTypePhysics) -> bool {

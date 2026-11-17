@@ -36,10 +36,9 @@ pub fn lowered_program(ref s: Snap, every_function: bool) -> IrModule {
 fn source_map(ref s: Snap) -> IrSourceMap {
     let map = ir_source_map_empty();
     for f in s.files {
-        let row: List<any> = f;
-        map.paths.push(row[0]);
-        map.bases.push(row[2]);
-        map.texts.push(row[3]);
+        map.paths.push(f.0);
+        map.bases.push(f.2);
+        map.texts.push(f.3);
     }
     return map;
 }

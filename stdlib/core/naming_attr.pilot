@@ -30,36 +30,24 @@ pub struct EnforceCoreNamingAttr : IAttribute, IValue {
     };
 }
 
-pub struct NamingRuleCode : IValue {
-    pub code: i64;
-
-    pub static pure:
-        fn interface_prefix() -> i64 => 1;
-        fn pascal_struct()    -> i64 => 2;
-        fn attribute_suffix() -> i64 => 3;
-        fn reference_suffix() -> i64 => 4;
-        fn guard_suffix()     -> i64 => 5;
-        fn struct_i_prefix()  -> i64 => 6;
+/// The naming rule a core declaration breaks.
+pub enum NamingRule : u8 {
+    InterfacePrefix,         // an interface is `I` + PascalCase
+    StructPascalCase,        // a struct is PascalCase
+    AttributeSuffix,         // an attribute struct ends in `Attr`
+    ReferenceViewSuffix,     // a 0b01 view ends in View, Lens, Cursor or Enumerator
+    ScopedGuardSuffix,       // a 0b11 guard ends in Guard, Scope or Lease
+    ReservedInterfacePrefix, // a struct does not start with `I` + capital
 }
 
-pub pure fn naming_rule_label(rule_code: i64) -> str {
-    if rule_code == 1 {
-        return "InterfacePrefix";
-    }
-    if rule_code == 2 {
-        return "StructPascalCase";
-    }
-    if rule_code == 3 {
-        return "AttributeSuffix";
-    }
-    if rule_code == 4 {
-        return "ReferenceViewSuffix";
-    }
-    if rule_code == 5 {
-        return "ScopedGuardSuffix";
-    }
-    if rule_code == 6 {
-        return "ReservedInterfacePrefix";
-    }
-    return "CoreNamingRule";
-}
+/// The label of each `NamingRule`, by variant value.
+const NAMING_RULE_LABELS: List<str> = [
+    "InterfacePrefix",
+    "StructPascalCase",
+    "AttributeSuffix",
+    "ReferenceViewSuffix",
+    "ScopedGuardSuffix",
+    "ReservedInterfacePrefix",
+];
+
+pub fn naming_rule_label(rule: NamingRule) -> str => NAMING_RULE_LABELS[rule as usize];

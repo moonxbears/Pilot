@@ -121,7 +121,13 @@ pub fn pg_encode_startup_hex(user: str, database: str) -> str {
         + "00";
 }
 
-pub fn pg_decode_startup_info(frame_hex: str) -> str {
+/// The `user` and `database` parameters of a StartupMessage.
+pub struct PgStartupInfo {
+    pub user: str;
+    pub database: str;
+}
+
+pub fn pg_decode_startup_info(frame_hex: str) -> PgStartupInfo {
     let total_len = pg_read_u32_be(frame_hex, 0);
     var pos = 8;
     var user_val = "";
@@ -149,7 +155,7 @@ pub fn pg_decode_startup_info(frame_hex: str) -> str {
         }
         pos = v_end + 1;
     }
-    return user_val + "|" + db_val;
+    return PgStartupInfo { user: user_val, database: db_val };
 }
 
 pub fn pg_encode_query_hex(sql: str) -> str {
@@ -159,10 +165,11 @@ pub fn pg_encode_query_hex(sql: str) -> str {
     return "51" + pg_hex_u32_be(total_len) + pg_str_to_hex(q_str) + "00";
 }
 
-pub fn pg_decode_query_sql(frame_hex: str) -> str {
+/// The SQL of a Simple Query (`'Q'`) frame; none for any other frame.
+pub fn pg_decode_query_sql(frame_hex: str) -> str? {
     let tag = pg_read_u8(frame_hex, 0);
     if tag != 81 {
-        return "";
+        return none;
     }
     let total_len = pg_read_u32_be(frame_hex, 1);
     let str_bytes = total_len - 5;
@@ -180,10 +187,11 @@ pub fn pg_encode_data_row_hex(col0: str, col1: str) -> str {
         + pg_hex_u32_be(n1) + pg_str_to_hex(col1);
 }
 
-pub fn pg_decode_data_row_pipe(frame_hex: str) -> str {
+/// The column values of a DataRow (`'D'`) frame; none for any other frame.
+pub fn pg_decode_data_row(frame_hex: str) -> List<str>? {
     let tag = pg_read_u8(frame_hex, 0);
     if tag != 68 {
-        return "";
+        return none;
     }
     let ncols = pg_read_u16_be(frame_hex, 5);
     var pos = 7;
@@ -194,11 +202,8 @@ pub fn pg_decode_data_row_pipe(frame_hex: str) -> str {
         pos = pos + 4;
         let cval = pg_decode_bytes_to_str(frame_hex, pos, clen);
         pos = pos + clen;
-        if c_idx > 0 {
-            out.push("|");
-        }
         out.push(cval);
         c_idx = c_idx + 1;
     }
-    return join_text(out, "");
+    return out;
 }

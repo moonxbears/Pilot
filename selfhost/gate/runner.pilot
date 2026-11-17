@@ -233,10 +233,10 @@ pub fn apply_ratchet_update(workspace_root: str) -> str {
         return "ERROR: unable to read selfhost/gate/manifest.pilot";
     }
     let crate_sums = __engine("map_new");
-    let rs_files = gm_split_lines(gate_fs_walk_files(gm_join_path(root, "crates")));
+    let rs_files = gate_fs_walk_files(gm_join_path(root, "crates"));
     var fi = 0;
-    while fi < glist_len(rs_files) {
-        let fp = glist_get(rs_files, fi);
+    while fi < rs_files.len() {
+        let fp = rs_files[fi];
         if gm_ends_with(fp, ".rs") && gm_contains(fp, "/src/") {
             let cidx = gm_find(fp, "crates/", 0);
             let sidx = gm_find(fp, "/src/", cidx);

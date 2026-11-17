@@ -242,12 +242,11 @@ pub fn harvest_core_vocabulary_and_audit(
 ) -> Map<str, bool> {
     let vocab = gset_new();
     let core_dir = gm_join_path(workspace_root, "stdlib/core");
-    let raw_files = gate_fs_walk_files(core_dir);
-    let files = gm_split_lines(raw_files);
-    let n_files = glist_len(files);
+    let files = gate_fs_walk_files(core_dir);
+    let n_files = files.len();
     var fi = 0;
     while fi < n_files {
-        let fpath = glist_get(files, fi);
+        let fpath = files[fi];
         if gm_ends_with(fpath, ".pilot") {
             let rel = sa_strip_rel_prefix(workspace_root, fpath);
             let src = gate_fs_read_text(fpath);
@@ -669,13 +668,12 @@ pub fn execute_adaptability_gate(workspace_root: str, ref _opts: GateRunOptions)
     }
 
     let vocab = harvest_core_vocabulary_and_audit(root, seed_reg, violations);
-    let raw_crates_files = gate_fs_walk_files(gm_join_path(root, "crates"));
-    let all_files = gm_split_lines(raw_crates_files);
-    let n_files = glist_len(all_files);
+    let all_files = gate_fs_walk_files(gm_join_path(root, "crates"));
+    let n_files = all_files.len();
     var scanned = gset_len(vocab);
     var i = 0;
     while i < n_files {
-        let fp = glist_get(all_files, i);
+        let fp = all_files[i];
         let rel = sa_strip_rel_prefix(root, fp);
         if gm_ends_with(rel, ".rs") && gm_contains(rel, "/src/") {
             let rs_src = gate_fs_read_text(fp);
@@ -717,8 +715,8 @@ pub fn execute_adaptability_gate(workspace_root: str, ref _opts: GateRunOptions)
 }
 
 fn sa_audit_pilot_tree(root: str, subdir: str, file_caps: i64, violations: i64) -> usize {
-    let walked = gm_split_lines(gate_fs_walk_files(gm_join_path(root, subdir)));
-    let n = glist_len(walked);
+    let walked = gate_fs_walk_files(gm_join_path(root, subdir));
+    let n = walked.len();
     let max_pilot = max_pilot_file_loc();
     let m_todo = "TO" + "DO";
     let m_fixme = "FIX" + "ME";
@@ -727,7 +725,7 @@ fn sa_audit_pilot_tree(root: str, subdir: str, file_caps: i64, violations: i64) 
     var checked = 0;
     var i = 0;
     while i < n {
-        let fp = glist_get(walked, i);
+        let fp = walked[i];
         if gm_ends_with(fp, ".pilot") {
             let rel = sa_strip_rel_prefix(root, fp);
             let src = gate_fs_read_text(fp);
@@ -797,10 +795,10 @@ pub fn execute_hygiene_and_ratchet_gate(workspace_root: str, ref _opts: GateRunO
     }
 
     // 2. Check `crates/` directory for any unregistered crate folder
-    let live_dirs = gm_split_lines(gate_fs_list_dirs(gm_join_path(root, "crates")));
+    let live_dirs = gate_fs_list_dirs(gm_join_path(root, "crates"));
     var di = 0;
-    while di < glist_len(live_dirs) {
-        let dname = glist_get(live_dirs, di);
+    while di < live_dirs.len() {
+        let dname = live_dirs[di];
         let crel = "crates/" + dname;
         let known = __engine("map_get", crate_reg, crel);
         if known.len() == 0 {
@@ -836,11 +834,11 @@ pub fn execute_hygiene_and_ratchet_gate(workspace_root: str, ref _opts: GateRunO
     let paused = seed_contraction_paused();
     let crate_loc_sums = __engine("map_new");
     let file_caps = build_file_ceiling_registry();
-    let rs_walk = gm_split_lines(gate_fs_walk_files(gm_join_path(root, "crates")));
+    let rs_walk = gate_fs_walk_files(gm_join_path(root, "crates"));
     var total_rs_loc = 0;
     var wi = 0;
-    while wi < glist_len(rs_walk) {
-        let fp = glist_get(rs_walk, wi);
+    while wi < rs_walk.len() {
+        let fp = rs_walk[wi];
         let rel = sa_strip_rel_prefix(root, fp);
         if gm_ends_with(rel, ".rs") && gm_contains(rel, "/src/") {
             let loc = gm_count_lines(gate_fs_read_text(fp));
@@ -1016,10 +1014,10 @@ fn sa_audit_airlock_boundary(root: str, violations: i64) -> i64 {
     var scanned = 0;
     let ratchet = legacy_engine_ratchet();
     for subdir in ["stdlib", "selfhost", "tools"] {
-        let walked = gm_split_lines(gate_fs_walk_files(gm_join_path(root, subdir)));
+        let walked = gate_fs_walk_files(gm_join_path(root, subdir));
         var wi = 0;
-        while wi < glist_len(walked) {
-            let full = glist_get(walked, wi);
+        while wi < walked.len() {
+            let full = walked[wi];
             if gm_ends_with(full, ".pilot") {
                 scanned = scanned + 1;
                 let rel = sa_strip_rel_prefix(root, full);
@@ -1046,10 +1044,10 @@ fn sa_audit_airlock_boundary(root: str, violations: i64) -> i64 {
 
     let vm_nats = stage_a_vm_natives();
     let host_nats = stage_a_host_natives();
-    let rs_walk = gm_split_lines(gate_fs_walk_files(gm_join_path(root, "crates")));
+    let rs_walk = gate_fs_walk_files(gm_join_path(root, "crates"));
     var ri = 0;
-    while ri < glist_len(rs_walk) {
-        let fp = glist_get(rs_walk, ri);
+    while ri < rs_walk.len() {
+        let fp = rs_walk[ri];
         if gm_ends_with(fp, ".rs") && gm_contains(fp, "/src/") {
             let rel = sa_strip_rel_prefix(root, fp);
             if !gm_ends_with(rel, "stage_a_natives.rs") && !gm_ends_with(rel, "infer.rs") {

@@ -176,27 +176,27 @@ fn hole_value_type(var ref inf: Infer, h: i64) -> i64 {
     return if b >= 0 { binding_type(inf, b) } else { ty_unknown() };
 }
 
-/// The function that fills hole `h`, and the one that makes its value a
-/// literal tree first (-1 when the value is a tree), or an empty list when
-/// it cannot be spliced.
-pub fn hole_fns(var ref inf: Infer, h: i64) -> List<i64> {
+/// How a hole is spliced: the function that fills it, and the one that
+/// makes its value a literal tree first (-1 when the value is a tree).
+pub type HoleFns = (i64, i64);
+/// `HoleFns` as the names the run plan carries ("" for no lift).
+pub type HoleCalls = (str, str);
+
+/// How hole `h` is spliced, or none when it cannot be.
+pub fn hole_fns(var ref inf: Infer, h: i64) -> HoleFns? {
     let p = inf.p;
-    var out: List<i64> = [];
     let fills = bound_fns(p, quote_hole_symbol());
-    if fills.len() == 0 { return out; }
+    if fills.len() == 0 { return none; }
     let t = hole_value_type(inf, h);
     let lift = if is_quote_type(p, t) { -1 } else { lift_fn(p, t) };
-    if lift < 0 && !is_quote_type(p, t) { return out; }
-    out.push(fills[0]);
-    out.push(lift);
-    return out;
+    if lift < 0 && !is_quote_type(p, t) { return none; }
+    return (fills[0], lift);
 }
 
-/// `hole_fns` as the names the run plan carries ("" for no lift).
-pub fn hole_calls(var ref inf: Infer, h: i64) -> List<str> {
-    var out: List<str> = [];
-    for f in hole_fns(inf, h) { out.push(if f < 0 { "" } else { node_name(inf.p.s, f) }); }
-    return out;
+/// `hole_fns` as the names the run plan carries, or none.
+pub fn hole_calls(var ref inf: Infer, h: i64) -> HoleCalls? {
+    guard some f = hole_fns(inf, h) else { return none; };
+    return (node_name(inf.p.s, f.0), if f.1 < 0 { "" } else { node_name(inf.p.s, f.1) });
 }
 
 /// Whether the program binds `name` to an engine function
@@ -248,7 +248,7 @@ pub fn check_quotes(var ref inf: Infer, var ref sink: DiagSink) {
             }
             for h in holes {
                 let t = hole_value_type(inf, h);
-                if !ty_is_unknown(p.tt, t) && hole_calls(inf, h).len() == 0 {
+                if !ty_is_unknown(p.tt, t) && hole_calls(inf, h) == none {
                     sink_error(sink, h, "QUOTE002", f"cannot splice `{ty_display(p.tt, t)}` into a quote: a hole takes an `ast`, an integer, a float, a bool or a string");
                 }
             }
@@ -283,18 +283,16 @@ pub fn plan_quotes(var ref inf: Infer, var ref rows: List<DropRow>) {
             var bad: List<i64> = [];
             let wire = quote_wire(s, q, holes, bad);
             var ok = bad.len() == 0;
-            var calls: List<List<str>> = [];
+            var calls: List<HoleCalls> = [];
             for h in holes {
-                let c = hole_calls(inf, h);
-                if c.len() == 0 { ok = false; }
-                calls.push(c);
+                if some c = hole_calls(inf, h) { calls.push(c); } else { ok = false; }
             }
             if ok {
                 rows.push((DropAction::QuoteBuild as i64, span_start(s, q), span_end(s, q), kind(s, q), node_name(s, decode), wire));
                 var i = 0;
                 while i < holes.len() {
                     let h = holes[i];
-                    rows.push((DropAction::QuoteHole as i64, span_start(s, h), span_end(s, h), kind(s, h), calls[i][0], calls[i][1]));
+                    rows.push((DropAction::QuoteHole as i64, span_start(s, h), span_end(s, h), kind(s, h), calls[i].0, calls[i].1));
                     i = i + 1;
                 }
             }

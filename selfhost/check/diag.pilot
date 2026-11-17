@@ -9,9 +9,12 @@
 pub lvl(0) pkg selfhost.check;
 
 
+/// One diagnostic: code, message, span start, span end, severity.
+pub type DiagRow = (str, str, i64, i64, i64);
+
 pub struct DiagSink {
     pub ref s: Snap;
-    pub rows: List<List<any>>;
+    pub rows: List<DiagRow>;
     /// `code@start` of every reported diagnostic, so a node is reported once.
     pub seen: Map<str, i64>;
 }
@@ -24,8 +27,7 @@ fn sink_add(var ref sink: DiagSink, n: i64, code: str, message: str, severity: i
     let key = code + "@" + f"{start}";
     if sink.seen.has(key) { return; }
     sink.seen.set(key, 1);
-    let row: List<any> = [code, message, start, span_end(sink.s, n), severity];
-    sink.rows.push(row);
+    sink.rows.push((code, message, start, span_end(sink.s, n), severity));
 }
 
 pub fn sink_error(var ref sink: DiagSink, n: i64, code: str, message: str) {

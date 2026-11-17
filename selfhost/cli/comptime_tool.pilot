@@ -8,26 +8,26 @@
 // per step of each function and method in the user's files (`[Live]`,
 // `[Generate]` and user step attributes, written on it or inherited:
 // selfhost/check/attr_chain.pilot), the functions in source order and each
-// one's steps in the order they run:
+// one's steps in the order they run. A row is a `StepRow`:
 //
-//   ["live",     file, line, group, call]     `add(3, 4)`: the function's name
+//   (::Live,     file, line, group, call, "")  `add(3, 4)`: the function's name
 //                                              and the attribute's arguments
 //                                              as written
-//   ["generate", file, line, group, function, name]
+//   (::Generate, file, line, group, function, name)
 //                                              the file the attribute names
 //                                              (`ext: "e"` names `<function>.e`)
-//   ["step",     file, line, group, value, function]
+//   (::Step,     file, line, group, value, function)
 //                                              `NameAttr { a: 1 }`: the
 //                                              attribute's value
-//   ["runtime",  file, line, group, function] a step that decides on every
+//   (::Runtime,  file, line, group, function, "") a step that decides on every
 //                                              call (`IRuntimeStepAttribute`);
 //                                              stops at seam `attr.runtime_step`
-//   ["idle",     file, line, group]           a `[Live]` or `[Generate]` that
+//   (::Idle,     file, line, group, "", "")    a `[Live]` or `[Generate]` that
 //                                              does not run at this moment; it
 //                                              keeps its place in the chain
 //
-// `group` tells the functions apart. `line` is where the attribute's
-// arguments start (on the package or struct, for an inherited one), or the
+// `group` (the function's node) tells the functions apart. `line` is where
+// the attribute's arguments start (on the package or struct, for an inherited one), or the
 // line of what it is written on when it has none. A step is told a
 // method's name as `Type.method`. The type checker
 // has checked the attributes already: a misused one never reaches this tool.
@@ -35,27 +35,42 @@ pub lvl(0) pkg selfhost.cli;
 
 use selfhost.check.*;
 
-/// `[path, base offset, text]` of the file node `n` is in.
-fn file_row(ref s: Snap, n: i64) -> List<any> {
-    let row: List<any> = s.files[unit_of(s, n)];
-    return [row[0], row[2], row[3]];
+/// What a step does at the moment asked for (`StepRow`).
+pub enum StepAction : u8 {
+    /// A `[Live]` call that runs.
+    Live,
+    /// A `[Generate]` that writes its file.
+    Generate,
+    /// A user step attribute's `step`.
+    Step,
+    /// A step that decides on every call; stops at seam `attr.runtime_step`.
+    Runtime,
+    /// A `[Live]` or `[Generate]` that does not run at this moment.
+    Idle,
 }
 
-fn row_of(ref p: Program, var ref sink: DiagSink, ref pkgs: Map<str, i64>, f: i64, ref st: ChainStep, runs: bool) -> List<str>? {
+/// One step of a function's chain (`comptime_runs`): action, file, line,
+/// group (the function's node), then two texts the action gives meaning to
+/// (see the table above).
+pub type StepRow = (StepAction, str, i64, i64, str, str);
+
+/// The file node `n` is in.
+fn file_row(ref s: Snap, n: i64) -> FileRow => s.files[unit_of(s, n)];
+
+fn row_of(ref p: Program, var ref sink: DiagSink, ref pkgs: Map<str, i64>, f: i64, ref st: ChainStep, runs: bool) -> StepRow? {
     let s = p.s;
     let file = file_row(s, st.site);
-    let path: str = file[0];
-    let base: i64 = file[1];
-    let text: str = file[2];
-    let line = f"{attr_line_at(text, span_start(s, st.site) - base)}";
-    let group = f"{f}";
+    let path = file.0;
+    let base = file.2;
+    let text = file.3;
+    let line = attr_line_at(text, span_start(s, st.site) - base);
     let name = node_name(s, f);
-    if st.kind == StepKind::Runtime { return ["runtime", path, line, group, fn_shown_name(p, pkgs, f)]; }
+    if st.kind == StepKind::Runtime { return (StepAction::Runtime, path, line, f, fn_shown_name(p, pkgs, f), ""); }
     if st.kind == StepKind::User {
         guard some v = step_value(p, sink, st.name, st.layers, st.site) else { return none; };
-        return ["step", path, line, group, v, fn_shown_name(p, pkgs, f)];
+        return (StepAction::Step, path, line, f, v, fn_shown_name(p, pkgs, f));
     }
-    if !runs { return ["idle", path, line, group]; }
+    if !runs { return (StepAction::Idle, path, line, f, "", ""); }
     if st.kind == StepKind::Live {
         let given = live_call_args(s, st.args);
         var call = name + "(";
@@ -65,14 +80,19 @@ fn row_of(ref p: Program, var ref sink: DiagSink, ref pkgs: Map<str, i64>, f: i6
             call = call + attr_one_line(node_text(s, given[i]));
             i = i + 1;
         }
-        return ["live", path, line, group, call + ")"];
+        return (StepAction::Live, path, line, f, call + ")", "");
     }
-    let target = generate_target(s, st.args) ?? ["", ""];
-    let named = if target[0] != "" { target[0] } else { name + "." + target[1] };
+    var named = name + ".";
+    if some target = generate_target(s, st.args) {
+        switch target {
+            case Path(path): { named = path; }
+            case Ext(suffix): { named = name + "." + suffix; }
+        }
+    }
     // The file is beside the source that names it.
     let src = file_row(s, f);
-    let src_path: str = src[0];
-    return ["generate", src_path, line, group, name, named];
+    let src_path = src.0;
+    return (StepAction::Generate, src_path, line, f, name, named);
 }
 
 /// Whether `f` is a function or method of the user's files the chain runs
@@ -91,35 +111,34 @@ fn chain_fn(ref p: Program, f: i64) -> bool {
 /// The steps of the functions and methods in the user's files at moment
 /// `phase` (a `LiveWhen` flag name), as rows; a function none of whose
 /// steps runs then gives none.
-pub fn comptime_runs(phase: str) -> List<List<str>> => steps_of(prog_new(snap_load()), phase);
+pub fn comptime_runs(phase: str) -> List<StepRow> => steps_of(prog_new(snap_load()), phase);
 
 /// The checker's diagnostic rows, the run plan when `plan` is set, and the
 /// rows of `comptime_runs(phase)`, from one pass over the program:
-/// `[diagnostic rows, run plan or none, step rows or none]`, for
+/// `(diagnostic rows, run plan or none, step rows or none)`, for
 /// `host_typecheck`. The steps of a program with an error are not looked
 /// for (a misused attribute must not reach `steps_of`): `none`.
-pub fn check_with_steps(phase: str, plan: bool) -> List<any> {
+pub fn check_with_steps(phase: str, plan: bool) -> (List<DiagRow>, RunPlan?, List<StepRow>?) {
     let s = snap_load();
     let sink = sink_new(s);
     let p = prog_new(s);
     let inf = infer_new(p, resolve_program(p, sink));
     check_all(inf, sink);
-    var made: any = none;
+    var made: RunPlan? = none;
     if plan { made = plan_of(s, inf); }
     var failed = false;
     for row in sink.rows {
-        let severity: i64 = row[4];
-        if severity == 1 { failed = true; }
+        if row.4 == 1 { failed = true; }
     }
-    var steps: any = none;
+    var steps: List<StepRow>? = none;
     if !failed { steps = steps_of(p, phase); }
-    return [sink.rows, made, steps];
+    return (sink.rows, made, steps);
 }
 
 /// `comptime_runs` over the program `p`.
-fn steps_of(var ref p: Program, phase: str) -> List<List<str>> {
+fn steps_of(var ref p: Program, phase: str) -> List<StepRow> {
     let s = p.s;
-    var out: List<List<str>> = [];
+    var out: List<StepRow> = [];
     let now = live_flag(p, phase);
     if now < 0 { return out; }
     let quiet = sink_new(s);
@@ -130,7 +149,7 @@ fn steps_of(var ref p: Program, phase: str) -> List<List<str>> {
     var f = s.user_lo;
     while f < s.user_hi {
         if chain_fn(p, f) {
-            var rows: List<List<str>> = [];
+            var rows: List<StepRow> = [];
             var active = false;
             for st in chain_steps(p, quiet, pkgs, f) {
                 // An inherited `[Generate]` writes only for a function it can run.
@@ -142,7 +161,7 @@ fn steps_of(var ref p: Program, phase: str) -> List<List<str>> {
                     let runs = mask > 0 && (mask & now) != 0;
                     let row = row_of(p, quiet, pkgs, f, st, runs);
                     if some r = row {
-                        if r[0] != "idle" { active = true; }
+                        if r.0 != StepAction::Idle { active = true; }
                         rows.push(r);
                     }
                 }

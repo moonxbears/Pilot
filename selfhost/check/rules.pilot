@@ -972,7 +972,7 @@ fn check_dropped_result(var ref inf: Infer, var ref sink: DiagSink, n: i64) {
 /// What a condition `c` tests: the operand of `!c`, else `c`. A wrong
 /// type under `if !x` (what `assert(x)` expands to) is then reported once,
 /// as a condition.
-fn condition_operand(s: Snapshot, c: i64) -> i64 {
+fn condition_operand(ref s: Snap, c: i64) -> i64 {
     if c >= 0 && kind(s, c) == nk_unary() && flags(s, c) == unary_not() { return lhs(s, c); }
     return c;
 }

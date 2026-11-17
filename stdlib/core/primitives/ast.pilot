@@ -64,9 +64,11 @@ pub struct ast<TReturn: IAnyValue> : IObject {
     /// How many children the root node has.
     pub fn len() -> usize => .arity[0];
 
-    /// Child `i` of the root node, as a tree of its own.
-    pub self[i: usize] -> ast<any> {
-        get => ast_subtree<any>(self, ast_child(self, 0, i));
+    /// Child `i` of the root node, as a tree of its own. The child's value
+    /// type does not follow from `TReturn` (an operand of `a + b` may have
+    /// any type), so it is the root interface `IAnyValue`.
+    pub self[i: usize] -> ast<IAnyValue> {
+        get => ast_subtree<TReturn, IAnyValue>(self, ast_child(self, 0, i));
     }
 
     /// The tree written back as source.
@@ -74,7 +76,7 @@ pub struct ast<TReturn: IAnyValue> : IObject {
 }
 
 /// Node `at` of `t` and its subtree, as a tree of its own.
-fn ast_subtree<U: IAnyValue>(t: ast<any>, at: usize) -> ast<U> {
+fn ast_subtree<T: IAnyValue, U: IAnyValue>(t: ast<T>, at: usize) -> ast<U> {
     var out = ast<U> { kinds: [], texts: [], arity: [], sizes: [] };
     var i = at;
     while i < at + t.sizes[at] {
@@ -88,7 +90,7 @@ fn ast_subtree<U: IAnyValue>(t: ast<any>, at: usize) -> ast<U> {
 }
 
 /// The index of child `c` of node `i` of `t`.
-fn ast_child(t: ast<any>, i: usize, c: usize) -> usize {
+fn ast_child<T: IAnyValue>(t: ast<T>, i: usize, c: usize) -> usize {
     var at = i + 1;
     var j: usize = 0;
     while j < c {
@@ -101,14 +103,14 @@ fn ast_child(t: ast<any>, i: usize, c: usize) -> usize {
 /// Node `i` of `t` as an operand of an operator of kind `outer`: in
 /// parentheses when it is a binary expression, or under a unary operator
 /// any operator expression.
-fn ast_operand(t: ast<any>, i: usize, outer: str) -> str {
+fn ast_operand<T: IAnyValue>(t: ast<T>, i: usize, outer: str) -> str {
     let k = t.kinds[i];
     let wrap = k == "binary" || (outer == "unary" && k == "unary");
     return if wrap { "(" + ast_render(t, i) + ")" } else { ast_render(t, i) };
 }
 
 /// The children of node `i` of `t`, written back and joined by `sep`.
-fn ast_joined(t: ast<any>, i: usize, from: usize, sep: str) -> str {
+fn ast_joined<T: IAnyValue>(t: ast<T>, i: usize, from: usize, sep: str) -> str {
     var out = "";
     var c = from;
     while c < t.arity[i] {
@@ -120,7 +122,7 @@ fn ast_joined(t: ast<any>, i: usize, from: usize, sep: str) -> str {
 }
 
 /// Node `i` of `t` written back as source.
-fn ast_render(t: ast<any>, i: usize) -> str {
+fn ast_render<T: IAnyValue>(t: ast<T>, i: usize) -> str {
     let k = t.kinds[i];
     let x = t.texts[i];
     let n = t.arity[i];
@@ -184,7 +186,7 @@ pub fn ast_decode<T: IAnyValue>(wire: str) -> ast<T> {
 
 /// Sets the size of every node of `t` from the numbers of children, last
 /// node first.
-fn ast_size_all(t: ast<any>) {
+fn ast_size_all<T: IAnyValue>(t: ast<T>) {
     var i = t.kinds.len();
     while i > 0 {
         i = i - 1;

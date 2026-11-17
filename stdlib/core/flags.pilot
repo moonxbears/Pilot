@@ -31,8 +31,9 @@ pub struct FlagSet<E: IAnyValue> : IValue {
     /// Whether every bit of `flag` is in the set.
     pub fn has(flag: E) -> bool => (.bits & (flag as u64)) == (flag as u64);
 
-    /// Whether the set and `other` share a flag.
-    pub fn overlaps(other: FlagSet<E>) -> bool => (.bits & other.bits) != 0;
+    /// Whether the set and `other` share a flag. The methods below borrow
+    /// `other` (`ref`): a set passed by value is copied at every call.
+    pub fn overlaps(ref other: FlagSet<E>) -> bool => (.bits & other.bits) != 0;
 
     /// The set with `flag` added.
     pub fn with(flag: E) -> FlagSet<E> => FlagSet<E> { bits: .bits | (flag as u64) };
@@ -44,13 +45,13 @@ pub struct FlagSet<E: IAnyValue> : IValue {
     pub fn toggled(flag: E) -> FlagSet<E> => FlagSet<E> { bits: .bits ^ (flag as u64) };
 
     /// The flags in either set (`a | b`).
-    pub fn union(other: FlagSet<E>) -> FlagSet<E> => FlagSet<E> { bits: .bits | other.bits };
+    pub fn union(ref other: FlagSet<E>) -> FlagSet<E> => FlagSet<E> { bits: .bits | other.bits };
 
     /// The flags in both sets (`a & b`).
-    pub fn intersect(other: FlagSet<E>) -> FlagSet<E> => FlagSet<E> { bits: .bits & other.bits };
+    pub fn intersect(ref other: FlagSet<E>) -> FlagSet<E> => FlagSet<E> { bits: .bits & other.bits };
 
     /// The flags in exactly one of the sets (`a ^ b`).
-    pub fn difference(other: FlagSet<E>) -> FlagSet<E> => FlagSet<E> { bits: .bits ^ other.bits };
+    pub fn difference(ref other: FlagSet<E>) -> FlagSet<E> => FlagSet<E> { bits: .bits ^ other.bits };
 
     /// Whether no flag is in the set.
     pub fn is_empty() -> bool => .bits == 0;

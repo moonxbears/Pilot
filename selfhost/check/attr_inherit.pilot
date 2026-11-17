@@ -64,19 +64,19 @@ pub struct EffAttr {
 
 fn key_of(n: i64) -> str => f"{n}";
 
-/// `[base offset, text]` of the file node `n` is in.
-pub fn file_of(ref s: Snap, n: i64) -> List<any> {
+/// `(base offset, text)` of the file node `n` is in.
+pub fn file_of(ref s: Snap, n: i64) -> (i64, str) {
     let u = unit_of(s, n);
-    if u < 0 || u >= s.files.len() { return [0, ""]; }
-    let row: List<any> = s.files[u];
-    return [row[2], row[3]];
+    if u < 0 || u >= s.files.len() { return (0, ""); }
+    let row = s.files[u];
+    return (row.2, row.3);
 }
 
 /// The name written before attribute argument `a`, or "".
 pub fn attr_arg_label(ref s: Snap, a: i64) -> str {
     let f = file_of(s, a);
-    let base: i64 = f[0];
-    let text: str = f[1];
+    let base = f.0;
+    let text = f.1;
     return attr_label_before(text, span_start(s, a) - base);
 }
 
@@ -116,7 +116,7 @@ pub fn is_attr_fn(ref s: Snap, n: i64) -> bool => kind(s, n) == nk_fn() || kind(
 pub fn package_decls(ref p: Program) -> Map<str, i64> {
     let out = Map<str, i64>();
     for row in p.s.attrs {
-        let t: i64 = row[0];
+        let t = row.0;
         if t >= 0 && kind(p.s, t) == nk_import_decl() && is_package_decl(p.s, t) {
             out.set(key_of(unit_of(p.s, t)), t);
         }
@@ -148,13 +148,11 @@ pub fn containers_of(ref p: Program, ref pkgs: Map<str, i64>, n: i64) -> List<i6
 fn rows_on(ref p: Program, n: i64) -> List<i64> => nl_get(p.attrs, key_of(n));
 
 fn row_name(ref p: Program, r: i64) -> str {
-    let row: List<any> = p.s.attrs[r];
-    return sym_text(p.s, row[1]);
+    return sym_text(p.s, p.s.attrs[r].1);
 }
 
 fn row_args(ref p: Program, r: i64) -> List<i64> {
-    let row: List<any> = p.s.attrs[r];
-    let args: List<i64> = row[2];
+    let args = p.s.attrs[r].2;
     return args;
 }
 
@@ -364,9 +362,9 @@ pub fn check_attr_inherit(ref p: Program, var ref sink: DiagSink) {
     let s = p.s;
     let pkgs = package_decls(p);
     for row in s.attrs {
-        let t: i64 = row[0];
-        let name = sym_text(s, row[1]);
-        let args: List<i64> = row[2];
+        let t = row.0;
+        let name = sym_text(s, row.1);
+        let args = row.2;
         if t >= 0 && in_user_file(s, t) && known_fn_attr(p, name) {
             let site = attr_site(args, t);
             if name == no_inherit_attr() {

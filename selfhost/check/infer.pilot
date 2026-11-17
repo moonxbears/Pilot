@@ -464,8 +464,7 @@ pub fn module_fn(var ref inf: Infer, callee: i64) -> i64 {
     for f in nl_get(p.fns, sym_text(s, rhs(s, callee))) {
         let u = unit_of(s, f);
         if u < 0 || u >= s.files.len() || !in_linked_file(s, f) { continue; }
-        let row: List<any> = s.files[u];
-        let path: str = row[0];
+        let path = s.files[u].0;
         let matches_pkg = alias_mod.len() > 0 && unit_declares_pkg(p, u, alias_mod);
         if !matches_pkg && !path.replace("\\", "/").ends_with(tail) { continue; }
         if found >= 0 { return -1; }

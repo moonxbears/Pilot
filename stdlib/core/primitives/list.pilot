@@ -38,8 +38,9 @@ pub partial struct List<T: IAnyValue> : IBuffer<T>, IEnumerable<T, ListEnumerato
     /// The number of items.
     pub count: i64 { get => .len(); }
 
-    /// Whether some item equals `item`.
-    pub fn contains(item: T) -> bool {
+    /// Whether some item equals `item`. `item` is borrowed (`ref`): a value
+    /// type passed by value is copied at every call (selfhost/check/copies.pilot).
+    pub fn contains(ref item: T) -> bool {
         var i: i64 = 0;
         while i < .len() {
             if self[i] == item { return true; }

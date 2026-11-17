@@ -39,7 +39,7 @@ pub struct Bug {
 /// The conformance programs under `dir` (`<root>/tests/conformance`).
 pub fn read_programs(dir: str) -> List<Program> {
     var out: List<Program> = [];
-    for path in sorted_lines(File.walk_files(dir)) {
+    for path in File.walk_files(dir) {
         if !path.ends_with(".pilot") { continue; }
         let stem = path.slice(0, (path.len() - 6));
         let stderr = stem + ".stderr";

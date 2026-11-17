@@ -4,17 +4,13 @@
 // ==============================================================================
 pub pkg pilot.types;
 
+/// The 2-bit lattice class of a type; the value is its lattice bits.
 pub enum LatticeClass : u8 {
-    ::Value = 0,
-    ::Reference = 1,
-    ::Object = 2,
-    ::Guard = 3,
+    ::Value = 0,     // 0b00 : IValue
+    ::Reference = 1, // 0b01 : IReference
+    ::Object = 2,    // 0b10 : IObject
+    ::Guard = 3,     // 0b11 : IGuard
 }
-
-pub pure fn lattice_class_value()     -> u8 => 0; // 0b00 : IValue
-pub pure fn lattice_class_reference() -> u8 => 1; // 0b01 : IReference
-pub pure fn lattice_class_object()    -> u8 => 2; // 0b10 : IObject
-pub pure fn lattice_class_guard()     -> u8 => 3; // 0b11 : IGuard
 
 [Layout(c_abi)]
 pub struct FieldInfo : IValue {
@@ -38,11 +34,11 @@ pub struct TypeInfo : IValue {
     pub type_name:     str;
     pub byte_size:     usize;
     pub alignment:     usize;
-    pub lattice_class: u8;
+    pub lattice_class: LatticeClass;
     pub field_count:   usize;
 }
 
-pub pure fn type_info_new(name: str, size: usize, align: usize, lattice: u8, fields: usize) -> TypeInfo {
+pub pure fn type_info_new(name: str, size: usize, align: usize, lattice: LatticeClass, fields: usize) -> TypeInfo {
     return TypeInfo {
         type_name:     name,
         byte_size:     size,

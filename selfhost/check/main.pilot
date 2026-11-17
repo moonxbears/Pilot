@@ -8,7 +8,7 @@
 pub lvl(0) pkg selfhost.check;
 
 
-pub fn check_program() -> List<List<any>> {
+pub fn check_program() -> List<DiagRow> {
     let s = snap_load();
     let sink = sink_new(s);
     let p = prog_new(s);
@@ -18,15 +18,15 @@ pub fn check_program() -> List<List<any>> {
 }
 
 /// `check_program` and `run_plan` in one pass over the program, sharing its
-/// resolution and inference: `[diagnostic rows, run plan]`. `pilot run`
-/// checks a program and then runs it, so it needs both.
-pub fn check_and_plan() -> List<any> {
+/// resolution and inference. `pilot run` checks a program and then runs it,
+/// so it needs both.
+pub fn check_and_plan() -> (List<DiagRow>, RunPlan) {
     let s = snap_load();
     let sink = sink_new(s);
     let p = prog_new(s);
     let inf = infer_new(p, resolve_program(p, sink));
     check_all(inf, sink);
-    return [sink.rows, plan_of(s, inf)];
+    return (sink.rows, plan_of(s, inf));
 }
 
 /// The program of snapshot `s`, resolved, inferred and checked, for a tool
@@ -45,7 +45,7 @@ pub fn checked_program(ref s: Snap) -> Infer? {
 
 /// Hands the checker's diagnostic rows to the host (`chk_report` in
 /// crates/pilot-cli/src/check.rs); gives the number of errors it reported.
-fn report_to_host(ref rows: List<List<any>>) -> i64 => __engine("chk_report", rows);
+fn report_to_host(ref rows: List<DiagRow>) -> i64 => __engine("chk_report", rows);
 
 /// Applies every rule of the checker to the inferred program.
 pub fn check_all(var ref inf: Infer, var ref sink: DiagSink) {
@@ -78,18 +78,20 @@ pub fn check_all(var ref inf: Infer, var ref sink: DiagSink) {
 }
 
 /// Everything the seed carries out around the program's nodes, as rows for
-/// crates/pilot-cli/src/check.rs `run_plan`: the drop plan rows
-/// (selfhost/check/drops.pilot), then the probes of `[Debug]` functions and
-/// coverage (selfhost/check/probes.pilot), each `[span start, span end, node
-/// kind, capture, call, args, at]`, then the glue rows.
-pub fn run_plan() -> List<any> {
+/// crates/pilot-cli/src/check.rs `decode_plan`: the drop plan rows
+/// (selfhost/check/drops.pilot), the probes of `[Debug]` functions and
+/// coverage (selfhost/check/probes.pilot), and the glue rows.
+pub type RunPlan = (List<DropRow>, List<ProbeRow>, List<GlueRow>);
+
+/// The run plan of the program the host serves.
+pub fn run_plan() -> RunPlan {
     let s = snap_load();
     let p = prog_new(s);
     return plan_of(s, infer_new(p, resolve_program(p, sink_new(s))));
 }
 
 /// The run plan (`run_plan`) of the inferred program.
-pub fn plan_of(ref s: Snap, var ref inf: Infer) -> List<any> {
+pub fn plan_of(ref s: Snap, var ref inf: Infer) -> RunPlan {
     let p = inf.p;
     let pl = drop_planner(inf);
     plan_copies(pl);
@@ -98,14 +100,8 @@ pub fn plan_of(ref s: Snap, var ref inf: Infer) -> List<any> {
     plan_type_tests(inf, pl.rows);
     plan_view_casts(inf, pl.rows);
     plan_quotes(inf, pl.rows);
-    var probes: List<List<any>> = [];
-    for row in probe_plan(p) {
-        let n: i64 = row[0];
-        probes.push([span_start(s, n), span_end(s, n), kind(s, n), row[1], row[2], row[3], ProbeAt::After as i64]);
-    }
-    for row in coverage_plan(p) {
-        let n: i64 = row[0];
-        probes.push([span_start(s, n), span_end(s, n), kind(s, n), row[1], row[2], row[3], row[4]]);
-    }
-    return [pl.rows, probes, pl.glue];
+    var probes: List<ProbeRow> = [];
+    for pr in probe_plan(p) { probes.push(probe_row(s, pr)); }
+    for pr in coverage_plan(p) { probes.push(probe_row(s, pr)); }
+    return (pl.rows, probes, pl.glue);
 }

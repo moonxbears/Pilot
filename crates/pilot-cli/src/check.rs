@@ -457,7 +457,7 @@ fn planned_probe(linked: &LinkedSource, row: &HostValue) -> Option<PlannedProbe>
         let pair = a.as_list()?;
         let code = pair.first()?.as_int()?;
         let text = pair.get(1).and_then(HostValue::as_str).unwrap_or("");
-        let flag = matches!(pair.get(1), Some(HostValue::Bool(true)));
+        let flag = matches!(pair.get(2), Some(HostValue::Bool(true)));
         args.push(pilot_vm::lower_probe::ProbeArg::from_code(
             code, text, flag,
         )?);

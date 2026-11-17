@@ -72,19 +72,6 @@ struct SeamSite : IValue {
     col: i64;
 }
 
-fn sg_lines(text: str) -> List<str> {
-    var out: List<str> = [];
-    var start = 0;
-    var nl = text.find("\n", start);
-    while nl >= 0 {
-        if nl > start { out.push(text.slice(start, nl)); }
-        start = nl + 1;
-        nl = text.find("\n", start);
-    }
-    if start < text.len() { out.push(text.slice(start, text.len())); }
-    return out;
-}
-
 fn sg_is_ident_byte(b: i64) -> bool {
     return (b >= 48 && b <= 57) || (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 95 || b == 46;
 }
@@ -258,7 +245,7 @@ pub fn execute_seam_gate(workspace_root: str, ref _opts: GateRunOptions) -> Gate
     var sites: List<SeamSite> = [];
     for tree in sg_roots() {
         let base = gm_join_path(root, tree);
-        for full in sg_lines(gate_fs_walk_files(base)) {
+        for full in gate_fs_walk_files(base) {
             if !full.ends_with(".pilot") { continue; }
             let rel = tree + full.slice(base.len(), full.len());
             sg_scan_source(gate_fs_read_text(full), rel, sites);
@@ -267,7 +254,7 @@ pub fn execute_seam_gate(workspace_root: str, ref _opts: GateRunOptions) -> Gate
     }
 
     let seed_base = gm_join_path(root, sg_seed_root());
-    for full in sg_lines(gate_fs_walk_files(seed_base)) {
+    for full in gate_fs_walk_files(seed_base) {
         if !full.ends_with(".rs") || full.find("/src/", 0) < 0 { continue; }
         let rel = sg_seed_root() + full.slice(seed_base.len(), full.len());
         sg_scan_seed_source(gate_fs_read_text(full), rel, sites);
@@ -328,7 +315,7 @@ pub fn execute_seam_gate(workspace_root: str, ref _opts: GateRunOptions) -> Gate
         }
     }
     let bugs_base = gm_join_path(root, sg_known_bugs_dir());
-    for full in sg_lines(gate_fs_walk_files(bugs_base)) {
+    for full in gate_fs_walk_files(bugs_base) {
         if !full.ends_with(".pilot") { continue; }
         let rel = sg_known_bugs_dir() + full.slice(bugs_base.len(), full.len());
         // Like `pilot test`, only top-level files are programs; packages a

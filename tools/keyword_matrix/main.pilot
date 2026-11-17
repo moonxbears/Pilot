@@ -81,7 +81,7 @@ fn join(root: str, rel: str) -> str {
 fn files_under(dir: str, ext: str, within: str) -> List<str> {
     var out: List<str> = [];
     if !File.exists(dir) { return out; }
-    for p in sorted_lines(File.walk_files(dir)) {
+    for p in File.walk_files(dir) {
         if p.ends_with(ext) && p.contains(within) && !p.ends_with("stdlib/core/keywords.pilot") { out.push(p); }
     }
     return out;
