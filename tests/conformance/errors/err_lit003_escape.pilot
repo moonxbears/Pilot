@@ -1,0 +1,10 @@
+// LIT003: a string may hold only the escapes `ESCAPES` declares
+// (stdlib/core/lex/literal_value.pilot): \n, \t, \r, \\, \" and \'. Any
+// other is refused when the program is built (owner decision 2026-11-16);
+// the seed used to keep `\q` as the two bytes. The text of an f-string is
+// checked the same way. A raw string has no escapes, so `r"\q"` is fine.
+fn main() {
+    print("a\qb");
+    print(f"n = {1}\d");
+    print(r"\q");
+}

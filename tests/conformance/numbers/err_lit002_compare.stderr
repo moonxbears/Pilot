@@ -1,0 +1,6 @@
+error[LIT002]: compared with a `u8`: `300` does not fit `u8`, which holds 0 ..= 255 (8-bit unsigned)
+err_lit002_compare.pilot:10:13
+error[LIT002]: compared with a `u8`: `256` does not fit `u8`, which holds 0 ..= 255 (8-bit unsigned)
+err_lit002_compare.pilot:11:8
+error[LIT002]: compared with a `f32`: `1e39` does not fit `f32`, whose largest finite value is (2 - 2^-23) * 2^127 (32-bit float)
+err_lit002_compare.pilot:12:12

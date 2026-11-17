@@ -1,0 +1,167 @@
+// =========================================================================
+// FILE: stdlib/core/convert/decimal_round.pilot
+// DECIMAL TO BINARY FLOAT, CORRECTLY ROUNDED, IN PILOT
+// =========================================================================
+// `round_decimal` turns `digits * 10^exp10` (every digit kept, as a limb
+// magnitude) into the nearest value of an IEEE 754 format, ties to even,
+// with subnormals; none when the nearest is past the largest finite value.
+// Float literals (stdlib/core/lex/literal_value.pilot, LIT002) and
+// `str.to_f64()` / `to_f32()` outside their exact fast path (convert.pilot)
+// both read numbers through it, so no host `strtod` decides what a decimal
+// means (PROP-021 §2.9).
+//
+// Method: the value is the exact fraction num / den. Its binary order e
+// (2^e <= value < 2^(e+1)) fixes the quantum 2^qe of the result, qe =
+// max(e, emin) - (p - 1) for p significant bits; the quotient
+// q = floor(value / 2^qe) has at most p bits and is found bit by bit, and
+// the remainder decides the rounding. This is the plain big-integer
+// algorithm (as in Go's and glibc's fallbacks); it is exact for any input
+// and slower than Eisel-Lemire, which only matters at compile time.
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Convert.DecimalRound;
+
+use Pilot.Core.Convert.Limbs;
+use Pilot.Core.FloatBits;
+
+/// The decimal notation, shared by float literals (the number patterns of
+/// stdlib/core/lex/numbers.pilot) and text conversion: the point, the
+/// exponent marks and the exponent signs, minus first.
+pub const DECIMAL_POINT: str = ".";
+pub const EXPONENT_MARKS: str = "eE";
+pub const EXPONENT_SIGNS: str = "-+";
+
+/// A decimal number with every digit kept: `digits * 10^exp10`.
+pub struct DecimalDigits : IObject {
+    /// The digits read as one integer, a limb magnitude.
+    pub digits: List<i64>;
+    /// The power of ten it is scaled by.
+    pub exp10: i64;
+
+    /// The encoding of the nearest value of `fmt` (positive), ties to even;
+    /// none when that is past `fmt`'s largest finite value.
+    pub fn encoding(ref self, fmt: FloatFormat) -> u64? => round_decimal(self.digits, self.exp10, fmt);
+}
+
+/// The encoding (positive) of the value of `fmt` nearest to
+/// `digits * 10^exp10`, ties to even; none when it is past the largest
+/// finite value.
+pub fn round_decimal(digits: List<i64>, exp10: i64, fmt: FloatFormat) -> u64? {
+    let len = limbs_bit_length(digits);
+    if len == 0 { return 0 as u64; }
+    let p = fmt.fraction_bits as i64 + 1;
+    let emax = fmt.bias;
+    let emin = 1 - fmt.bias;
+    // 10^k >= 2^(3k): past these bounds the value is surely too large, or
+    // surely below half the least subnormal, 2^(emin - p).
+    if exp10 >= 0 && len - 1 + 3 * exp10 > emax { return none; }
+    if exp10 < 0 && len + 3 * exp10 < emin - p { return 0 as u64; }
+    var num = digits;
+    var den: List<i64> = [1];
+    if exp10 >= 0 { limbs_mul_pow10(num, exp10); } else { limbs_mul_pow10(den, -exp10); }
+    // The binary order: 2^e <= num / den < 2^(e + 1).
+    var e = limbs_bit_length(num) - limbs_bit_length(den);
+    if dr_below_power(num, den, e) { e = e - 1; }
+    let qe = (if e > emin { e } else { emin }) - (p - 1);
+    let n = if qe < 0 { limbs_shl(num, -qe) } else { num };
+    let d = if qe > 0 { limbs_shl(den, qe) } else { den };
+    // q = floor(n / d) < 2^p, bit by bit; `rest` ends as the remainder.
+    var rest = n;
+    var q = 0;
+    var bit = p;
+    while bit >= 0 {
+        let step = limbs_shl(d, bit);
+        if limbs_cmp(rest, step) >= 0 {
+            limbs_sub(rest, step);
+            q = q | (1 << bit);
+        }
+        bit = bit - 1;
+    }
+    let half = limbs_cmp(limbs_shl(rest, 1), d);
+    if half > 0 || (half == 0 && (q & 1) == 1) { q = q + 1; }
+    var exponent = qe;
+    if q == 1 << p {
+        q = 1 << (p - 1);
+        exponent = exponent + 1;
+    }
+    let field = if q < (1 << (p - 1)) { 0 } else { exponent + (p - 1) + emax };
+    if field >= fmt.max_field as i64 { return none; }
+    let fraction = q & ((1 << (p - 1)) - 1);
+    return ((field << (p - 1)) | fraction) as u64;
+}
+
+/// Whether num / den < 2^e.
+fn dr_below_power(ref num: List<i64>, ref den: List<i64>, e: i64) -> bool {
+    if e >= 0 { return limbs_cmp(num, limbs_shl(den, e)) < 0; }
+    return limbs_cmp(limbs_shl(num, -e), den) < 0;
+}
+
+/// The digits of decimal text `text[from ..]`: digits, optionally a point
+/// and more digits, optionally an exponent mark, a sign and digits; the
+/// byte `separator` (-1: none) is skipped between digits. `point_first`
+/// lets the point stand with no digit before or after it (`.5`, `5.`), as
+/// text conversion does; a literal needs digits on both sides. None when the
+/// text is anything else. An exponent past 10^9 is kept at 10^9: the value
+/// is out of every format's range either way.
+pub fn read_decimal_digits(text: str, from: i64, separator: i64, point_first: bool) -> DecimalDigits? {
+    let n = text.len() as i64;
+    var digits: List<i64> = [];
+    var exp10 = 0;
+    var whole = 0;
+    var fraction = 0;
+    var i = from;
+    var after_point = false;
+    while i < n {
+        let b = text.byte_at(i) as i64;
+        if b >= 48 && b <= 57 {
+            limbs_mul_add(digits, 10, b - 48);
+            if after_point {
+                exp10 = exp10 - 1;
+                fraction = fraction + 1;
+            } else {
+                whole = whole + 1;
+            }
+        } else if b == DECIMAL_POINT.byte_at(0) as i64 && !after_point {
+            after_point = true;
+        } else if b != separator {
+            break;
+        }
+        i = i + 1;
+    }
+    if whole + fraction == 0 { return none; }
+    if after_point && !point_first && (whole == 0 || fraction == 0) { return none; }
+    if i < n && dr_one_of(text.byte_at(i) as i64, EXPONENT_MARKS) {
+        i = i + 1;
+        var negative = false;
+        if i < n && dr_one_of(text.byte_at(i) as i64, EXPONENT_SIGNS) {
+            negative = text.byte_at(i) == EXPONENT_SIGNS.byte_at(0);
+            i = i + 1;
+        }
+        var e = 0;
+        var seen = 0;
+        while i < n {
+            let b = text.byte_at(i) as i64;
+            if b >= 48 && b <= 57 {
+                if e < 1000000000 { e = e * 10 + (b - 48); }
+                seen = seen + 1;
+            } else if b != separator {
+                break;
+            }
+            i = i + 1;
+        }
+        if seen == 0 { return none; }
+        exp10 = if negative { exp10 - e } else { exp10 + e };
+    }
+    if i < n { return none; }
+    return DecimalDigits { digits: digits, exp10: exp10 };
+}
+
+/// Whether byte `b` is one of the bytes of `set`.
+fn dr_one_of(b: i64, set: str) -> bool {
+    var i = 0;
+    while i < set.len() as i64 {
+        if set.byte_at(i) as i64 == b { return true; }
+        i = i + 1;
+    }
+    return false;
+}

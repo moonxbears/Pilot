@@ -16,6 +16,7 @@
 pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Lex.Numbers;
 
 use Pilot.Core.Lex.Patterns;
+use Pilot.Core.Convert.DecimalRound;
 
 /// The bases a number may be written in.
 pub enum Radix : u8 {
@@ -102,8 +103,9 @@ pub fn digit(radix: Radix) -> Pattern {
 /// stand between two digits.
 pub fn digits(radix: Radix) -> Pattern => digit(radix) + (lit(DIGIT_SEPARATOR).opt() + digit(radix)).many();
 
-/// `e10`, `E-3`, `e+1_0`.
-pub fn exponent() -> Pattern => class("eE") + class("+-").opt() + digits(Radix::Dec);
+/// `e10`, `E-3`, `e+1_0`. The marks, signs and point are the decimal
+/// notation text conversion reads too (stdlib/core/convert/decimal_round.pilot).
+pub fn exponent() -> Pattern => class(EXPONENT_MARKS) + class(EXPONENT_SIGNS).opt() + digits(Radix::Dec);
 
 /// `1_000`, `0xFF_FF`, `0b1010`, `0o17`: each radix of `RADIXES`, after its
 /// prefix.
@@ -123,7 +125,7 @@ fn in_radix(r: RadixInfo) -> Pattern => if r.prefix == "" { digits(r.radix) } el
 /// `2.5`, `2.5e10`, `1e9`. A float has digits on both sides of its `.`, so
 /// `1..5` is `1`, `..`, `5`.
 pub fn float() -> Pattern =>
-    digits(Radix::Dec) + lit(".") + digits(Radix::Dec) + exponent().opt()
+    digits(Radix::Dec) + lit(DECIMAL_POINT) + digits(Radix::Dec) + exponent().opt()
     | digits(Radix::Dec) + exponent();
 
 /// The number tokens, in declaration order.

@@ -1,0 +1,40 @@
+// Float text outside the exact fast path (more than 19 significant digits,
+// or a mantissa and a power of ten that are not both exact) is rounded
+// correctly by the same Pilot routine as float literals
+// (stdlib/core/convert/decimal_round.pilot); it used to stop at the seam
+// `convert.float_parse_slow_path`. Printed as the encoding's bits
+// (`as_u64`, `as_u32`). Expected, worked by hand and checked against
+// Python's correctly rounded `float()` with `struct`:
+//   "9007199254740992"  2^53, in the fast path: 4845873199050653696
+//                       (0x4340000000000000)
+//   "9007199254740993"  2^53 + 1 is halfway between 2^53 and 2^53 + 2;
+//                       ties to even: 2^53 again, 4845873199050653696
+//   "0.1000000000000000055511151231257827"  36 digits, nearest double to
+//                       0.1: 0x3FB999999999999A = 4591870180066957722
+//   "123456789012345678901234567890e-10"  1.2345678901234567e19:
+//                       4892433759222981601
+//   "1.7976931348623159e308"  past halfway to 2^1024: Overflow
+//   f32 "16777217.0000000001"  just above halfway between 2^24 and
+//                       2^24 + 2: up to 2^24 + 2, 0x4B800001 = 1266679809
+//                       (rounded once, straight to binary32)
+use Pilot.Core.Convert;
+
+fn bits(text: str) {
+    let v = text.to_f64() catch e => {
+        let what = if e.kind == ConvertErrorKind::Overflow { "Overflow" } else { "another error" };
+        print(f"{text}: {what}");
+        return;
+    };
+    print(f"{text}: {v.as_u64()}");
+}
+
+fn main() {
+    bits("9007199254740992");
+    bits("9007199254740993");
+    bits("0.1000000000000000055511151231257827");
+    bits("123456789012345678901234567890e-10");
+    bits("1.7976931348623159e308");
+    let s: str = "16777217.0000000001";
+    let f = s.to_f32() catch e => 0.0;
+    print(f"{s} as f32: {f.as_u32()}");
+}

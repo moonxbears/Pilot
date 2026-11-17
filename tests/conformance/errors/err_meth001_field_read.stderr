@@ -1,0 +1,4 @@
+error[METH001]: `S` has no member `b`
+err_meth001_field_read.pilot:15:13
+error[METH001]: `S` has no member `b`
+err_meth001_field_read.pilot:16:17

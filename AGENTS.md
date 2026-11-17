@@ -158,7 +158,7 @@ Every type originates from `IAnyValue` (`0` runtime header bytes) and is classif
 
 ### 5.1 Two-Way Dot (`PrefixDot` vs. `InfixDot`), Floats, Enums & Cascades
 - **`InfixDot` (`.`):** Preceded immediately (no whitespace) by an identifier, literal, `)`, `]`, or `}` (`obj.field`, `tuple.0`).
-- **`PrefixDot` (`.`):** Preceded by whitespace or `;`, `(`, `[`, `{`, `,`, `:` (`.reset()`, `0 .. .count`). Desugars to `self.<ident>`. Never place dots adjacent without whitespace (`0.. .count`, not `0...count`).
+- **`PrefixDot` (`.`):** Preceded by whitespace, `;`, `(`, `[`, `{`, `,`, `:`, or a prefix operator (`.reset()`, `0 .. .count`, `-.level`, `!.on` is `!self.on`). Only an operand's end (a name, a literal, `)`, `]`, `}`, a declared postfix operator such as `?`) makes the next dot infix. Desugars to `self.<ident>`. Never place dots adjacent without whitespace (`0.. .count`, not `0...count`).
 - **Leading-Zero Floats & `::Variant` Enums:** Floats must start with a digit (`0.5`, never `.5`). Target-typed enum variants use `::Active` (bare `.Active` means `self.Active`).
 - **Fluid Cascades (`..` / `?..`):** Bound at `Precedence::Cascade = 1` (`node..set_title("Master")..set_status("OK");`), mutating/calling on the root receiver and returning it.
 

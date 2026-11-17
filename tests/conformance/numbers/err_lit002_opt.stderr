@@ -1,0 +1,4 @@
+error[LIT002]: `300` does not fit `u8`, which holds 0 ..= 255 (8-bit unsigned)
+err_lit002_opt.pilot:6:18
+error[LIT002]: `1e39` does not fit `f32`, whose largest finite value is (2 - 2^-23) * 2^127 (32-bit float)
+err_lit002_opt.pilot:7:19

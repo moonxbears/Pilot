@@ -169,6 +169,40 @@ fn is_none_literal(ref s: Snap, e: i64) -> bool => e >= 0 && kind(s, e) == nk_no
 fn mismatch(ref inf: Infer, src: i64, dst: i64) -> str =>
     f"expected `{ty_display(inf.p.tt, dst)}`, found `{ty_display(inf.p.tt, src)}`";
 
+/// Each field value of struct literal `n` (`P { a: 1 }`: a call on a type's
+/// name with one key/value map) must fit the field's declared type over the
+/// literal's generic arguments: TYPE001, or LIT002 for a number literal
+/// outside the field's range.
+fn check_struct_literal_fields(var ref inf: Infer, var ref sink: DiagSink, n: i64) {
+    let p = inf.p;
+    let s = p.s;
+    let ch = children(s, n);
+    if ch.len() != 2 || kind(s, ch[0]) != nk_ident() || kind(s, ch[1]) != nk_map() { return; }
+    if inf.r.ref_of[ch[0]] >= 0 || prog_type_decl(p, node_name(s, ch[0])) < 0 { return; }
+    let built = type_of(inf, n);
+    if !ty_is_named(p.tt, built) { return; }
+    let label = ty_display(p.tt, built);
+    let kv = children(s, ch[1]);
+    var i = 0;
+    while i + 1 < kv.len() {
+        let key = kv[i];
+        let v = kv[i + 1];
+        i = i + 2;
+        if kind(s, key) != nk_ident() || is_none_literal(s, v) { continue; }
+        let name = node_name(s, key);
+        guard some m = prog_member(p, built, name) else { continue; };
+        if !is_field(s, m.decl) { continue; }
+        let want = prog_member_type(p, m);
+        if ty_is_open(p.tt, want) || ty_is_unknown(p.tt, want) { continue; }
+        if check_target_call(inf, sink, v, want) { continue; }
+        let src = type_of(inf, v);
+        if !assignable(inf, src, want, v) {
+            let context = f"field `{name}` of `{label}`: ";
+            report_unfit(inf, sink, v, want, context, context + mismatch(inf, src, want));
+        }
+    }
+}
+
 /// Reports that `v` does not fit `dst`: LIT002 (after `context`) when `v`
 /// is an integer literal outside `dst`'s range, else TYPE001 `message`.
 fn report_unfit(var ref inf: Infer, var ref sink: DiagSink, v: i64, dst: i64, context: str, message: str) {
@@ -236,9 +270,8 @@ fn check_binding_value(var ref inf: Infer, var ref sink: DiagSink, n: i64) {
     let a = annot(s, n);
     let v = rhs(s, n);
     if a < 0 && v >= 0 {
-        // No type around it: the literal lands in the integer literal
-        // slot's type.
-        let problem = literal_range_problem(inf, v, prog_slot_type(inf.p, literal_slot(nk_int())));
+        // No type around it: the literal lands in its literal slot's type.
+        let problem = literal_range_problem(inf, v, default_literal_type(inf.p, v));
         if problem != "" { sink_error(sink, v, "LIT002", problem); }
         return;
     }
@@ -443,6 +476,35 @@ fn is_declared_ext_method(ref p: Program, name: str) -> bool {
         }
     }
     return false;
+}
+
+/// METH001 for member read `n` (`s.b`, not a call's callee) on a value
+/// whose type is a struct declared in Pilot that has no member of that
+/// name, from its fields, its spliced bundles and facets, its interfaces or
+/// an `ext` block. A `[Lang]` primitive's members partly come from the
+/// engine, so it is skipped, as is an open (generic) type.
+fn check_member_read(var ref inf: Infer, var ref sink: DiagSink, n: i64) {
+    let p = inf.p;
+    let s = p.s;
+    let up = p.parents[n];
+    if up >= 0 && kind(s, up) == nk_call() && children(s, up)[0] == n { return; }
+    let recv = lhs(s, n);
+    let field = rhs(s, n);
+    if recv < 0 || field < 0 { return; }
+    var rt = type_of(inf, recv);
+    let narrowed = narrowed_is_type(inf, n, recv);
+    if !ty_is_unknown(p.tt, narrowed) { rt = narrowed; }
+    if !ty_is_named(p.tt, rt) || ty_is_open(p.tt, rt) { return; }
+    let decl = ty_decl(p.tt, rt);
+    if decl < 0 || kind(s, decl) != nk_struct() || node_name(s, decl) == prog_slot_name(p, "any_t") { return; }
+    // A `[Lang]` primitive (`i64`, `str`) also has members the engine
+    // answers; any of its `partial` declarations may carry the mark.
+    for d in nl_get(p.type_decls, p.tt.name[rt]) {
+        if prog_attr_args(p, d, "Lang") != none { return; }
+    }
+    let name = sym_text(s, field);
+    if prog_member(p, rt, name) != none || is_declared_ext_method(p, name) { return; }
+    sink_error(sink, n, "METH001", f"`{ty_display(p.tt, rt)}` has no member `{name}`");
 }
 
 fn check_method_args(var ref inf: Infer, var ref sink: DiagSink, n: i64) {
@@ -833,12 +895,14 @@ fn check_assign(var ref inf: Infer, var ref sink: DiagSink, n: i64) {
     let p = inf.p;
     let s = p.s;
     let target = lhs(s, n);
-    if target < 0 || kind(s, target) != nk_ident() { return; }
+    if target < 0 { return; }
     let value = rhs(s, n);
+    // A literal assigned to a name or a field must fit its type (LIT002).
     if value >= 0 {
         let problem = literal_range_problem(inf, value, type_of(inf, target));
         if problem != "" { sink_error(sink, value, "LIT002", problem); }
     }
+    if kind(s, target) != nk_ident() { return; }
     let b = inf.r.ref_of[target];
     if b >= 0 && b < inf.r.site.len() && inf.r.bind_kind[b] == BindKind::Param {
         // A plain `ref` parameter is a read-only borrow; only `var ref`
@@ -989,18 +1053,25 @@ pub fn check_rules(var ref inf: Infer, var ref sink: DiagSink) {
     let p = inf.p;
     let s = p.s;
     check_type_names(inf, sink);
+    // The string tokens already checked for escapes, by where they start
+    // (an f-string's pieces share its token).
+    var escapes_seen: List<i64> = [];
     var i = 0;
     i = s.user_lo;
     while i < s.user_hi {
         if in_user_file(s, i) {
             let k = kind(s, i);
             if k == nk_int() || k == nk_float() { check_number_text(inf, sink, i); }
+            if k == nk_binary() { check_compared_literal(inf, sink, i); }
+            if k == nk_member() { check_member_read(inf, sink, i); }
+            if k == nk_str() { check_string_escapes(inf, sink, i, escapes_seen); }
             if k == nk_let() || k == nk_var() || k == nk_const() { check_binding_value(inf, sink, i); }
             else if k == nk_return() { check_return(inf, sink, i); }
             else if k == nk_yield() { check_yield(inf, sink, i); }
             else if k == nk_assign() { check_assign(inf, sink, i); }
             else if k == nk_expr_stmt() { check_dropped_result(inf, sink, i); check_type_body_item(inf, sink, i); }
             else if k == nk_call() {
+                check_struct_literal_fields(inf, sink, i);
                 check_call_args(inf, sink, i);
                 check_method_args(inf, sink, i);
                 check_closure_call(inf, sink, i);

@@ -1,0 +1,98 @@
+// The value of a float literal, computed in Pilot from its text (PROP-021
+// slice 21F): `float_from_text` reads the digits, the point and the
+// exponent the number patterns declare, keeping every digit, and
+// `encoding(fmt)` rounds that exact value to the nearest value of an IEEE
+// 754 format, ties to even; none when it is past the largest finite value
+// (rounding is never an error, overflow is: PROP-021 §2.9).
+//
+// Expected encodings, worked by hand and checked against Python's
+// correctly rounded `float()` and `struct` (binary64), and an exact
+// rational rounding for binary32:
+//   1.0      2^0: biased exponent 1023 = 0x3FF, fraction 0
+//   0.1      1.6 * 2^-4: biased 1019 = 0x3FB; 0.6 * 2^52 = ...297.6 rounds
+//            up to 2702159776422298 = 0x999999999999A
+//   1e23     0x1.52d02c7e14af6p+76 (the published nearest double)
+//   2^53 + 1 = 9007199254740993 is halfway between 2^53 and 2^53 + 2; ties
+//            go to the even fraction, 2^53: 0x4340000000000000. One more
+//            nonzero digit far after the point makes it just above halfway:
+//            up, 0x4340000000000001. 2^53 + 3 is halfway between 2^53 + 2
+//            (odd fraction 1) and 2^53 + 4 (fraction 2): 0x4340000000000002
+//   the largest double (2 - 2^-52) * 2^1023 = 1.7976931348623157e308:
+//            0x7FEFFFFFFFFFFFFF; halfway to 2^1024 is 1.79769313486231580793e308,
+//            so ...158e308 is below it (the largest double) and ...159e308
+//            above it: too large
+//   2^-1022 = 2.2250738585072014e-308, the least normal: 0x0010000000000000;
+//            the largest subnormal is 2.2250738585072009e-308 and the midpoint
+//            2.22507385850720113605e-308, so ...011e-308 is the largest
+//            subnormal, 0x000FFFFFFFFFFFFF
+//   2^-1074 = 4.94e-324, the least subnormal: 5e-324 is 1; half of it is
+//            2.47032822920623272088e-324, so ...328e-324 rounds up to 1 and
+//            ...327e-324 down to 0
+//   1e400 is too large; 1e-400 is 0
+//   1_000.5e1_0 is 1000.5 * 10^10 = 10005000000000, the same as
+//            10005000000000.0
+// binary32:
+//   0.1      biased 123 = 0x7B; 0.6 * 2^23 = 5033164.8 up to 0x4CCCCD:
+//            0x3DCCCCCD
+//   2^24 + 1 ties to even 2^24: biased 151 = 0x97, 0x4B800000
+//   the largest float (2 - 2^-23) * 2^127 = 3.40282346638528859812e38:
+//            0x7F7FFFFF; halfway to 2^128 is 3.40282356779733661638e38, so
+//            3.4028235e38 and 3.40282356e38 round to it, 3.40282357e38 and
+//            1e39 are too large
+//   2^-149 = 1.4e-45 is 1; half of it is 7.00649232162408535462e-46, so
+//            7e-46 is 0 and 7.1e-46 is 1
+// Not floats: `1.` and `e5` (a digit must stand on both sides of the point
+// and before the exponent), `1e` (no exponent digit), `1.5x`.
+use Pilot.Core.Lex.LiteralValue;
+use Pilot.Core.FloatBits;
+
+const HEX: List<str> = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B", "C", "D", "E", "F",];
+
+fn hex(v: u64, digits: i64) -> str {
+    let bits = v as i64;
+    var out = "";
+    var i = digits - 1;
+    while i >= 0 {
+        out = out + HEX[(bits >> (i * 4)) & 15];
+        i = i - 1;
+    }
+    return out;
+}
+
+fn show(text: str, fmt: FloatFormat, digits: i64) {
+    guard some v = float_from_text(text) else {
+        print(f"{text}: not a float");
+        return;
+    }
+    guard some e = v.encoding(fmt) else {
+        print(f"{text}: too large");
+        return;
+    }
+    print(f"{text}: {hex(e, digits)}");
+}
+
+fn same(a: str, b: str) {
+    guard some x = float_from_text(a) else { return; };
+    guard some y = float_from_text(b) else { return; };
+    let same = (x.encoding(binary64()) ?? 0) == (y.encoding(binary64()) ?? 1);
+    print(f"{a} == {b}: {same}");
+}
+
+fn main() {
+    let d = binary64();
+    for t in ["1.0", "0.1", "1e23", "9007199254740993.0", "9007199254740993.000000000000000000001",
+              "9007199254740995.0", "1.7976931348623157e308", "1.7976931348623158e308",
+              "1.7976931348623159e308", "2.2250738585072014e-308", "2.2250738585072011e-308",
+              "5e-324", "2.4703282292062328e-324", "2.4703282292062327e-324", "1e400", "1e-400"] {
+        show(t, d, 16);
+    }
+    same("1_000.5e1_0", "10005000000000.0");
+    let f = binary32();
+    for t in ["0.1", "16777217.0", "3.4028235e38", "3.40282356e38", "3.40282357e38", "1e39",
+              "1.4e-45", "7e-46", "7.1e-46"] {
+        show(t, f, 8);
+    }
+    for t in ["1.", "e5", "1e", "1.5x"] {
+        show(t, d, 16);
+    }
+}

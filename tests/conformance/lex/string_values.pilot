@@ -1,0 +1,63 @@
+// The value of a string literal, computed in Pilot from its token text
+// (PROP-021, string unescape): the escapes are the seed's set, declared as
+// data (`ESCAPES`): \n 10, \t 9, \r 13, \\ 92, \" 34, \' 39. Any other
+// escape is an error (owner decision 2026-11-16: reject, as Rust, Go and C#
+// do; the seed kept the two bytes). A raw string (`r`) keeps every byte;
+// triple-quoted and byte strings take escapes too, as the seed's do.
+// Each value is printed as its bytes, worked by hand from ASCII:
+//   "plain"          p l a i n = 112 108 97 105 110
+//   "a\nb"           97 10 98
+//   "\t\r\\\"\'"     9 13 92 34 39
+//   r"a\nb"          97 92 110 98 (raw)
+//   '''x\ty'''       120 9 121
+//   b"\n"            10
+//   "a\qb"           unknown escape `\q`, 2 bytes in (after `"a`)
+//   "\0"             unknown escape `\0`, 1 byte in
+// Escapes outside the holes of an f-string:
+//   f"x{a}\q"        one, `\q` at 6 (f " x { a } are 0..5)
+//   f"{{\q"          one, `\q` at 4 (`{{` is text)
+//   f"{b}"           none: a hole is code, and a string in it is a token
+//                    of its own
+//   rf"\q"           none: raw
+use Pilot.Core.Lex.LiteralValue;
+
+fn bytes_of(s: str) -> str {
+    var out = "";
+    var i = 0;
+    while i < s.len() as i64 {
+        if i > 0 { out = out + " "; }
+        out = out + f"{s.byte_at(i)}";
+        i = i + 1;
+    }
+    return out;
+}
+
+fn show(text: str) {
+    let v = string_from_text(text) catch bad => {
+        print(f"{text}: unknown escape `{bad.text}` at {bad.at}");
+        return;
+    };
+    print(f"{text}: {bytes_of(v)}");
+}
+
+fn problems(text: str) {
+    let found = string_escape_problems(text);
+    var line = f"{text}: {found.len()}";
+    for bad in found { line = line + f", `{bad.text}` at {bad.at}"; }
+    print(line);
+}
+
+fn main() {
+    show('"plain"');
+    show('"a\\nb"');
+    show('"\\t\\r\\\\\\"\\\'"');
+    show('r"a\\nb"');
+    show("'''x\\ty'''");
+    show('b"\\n"');
+    show('"a\\qb"');
+    show('"\\0"');
+    problems('f"x{a}\\q"');
+    problems('f"{{\\q"');
+    problems('f"{b}"');
+    problems('rf"\\q"');
+}

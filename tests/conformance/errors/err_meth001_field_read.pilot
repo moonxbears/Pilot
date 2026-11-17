@@ -1,0 +1,18 @@
+// METH001: reading a field a struct does not declare is refused when the
+// program is built, as an unknown enum variant is (errors/
+// err_enum_unknown_variant). `S` declares only `a`, so `s.b` is an error,
+// in plain code and inside an f-string hole alike, and nothing prints; the
+// run exits 1 like every check failure. It used to pass the check, and the
+// seed read `s.b` as none, printing "vnull" (known bug
+// check.field_read_unknown, fixed 2026-11-16): the rename litmus met it when
+// `f"v{inst.result}"` kept a field name the renamer had changed elsewhere.
+struct S : IValue {
+    pub a: i64;
+}
+
+fn main() {
+    let s = S { a: 1 };
+    let n = s.b;
+    println(f"v{s.b}");
+    println(n);
+}

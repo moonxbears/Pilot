@@ -1,0 +1,13 @@
+// LIT002 for a literal compared with a value of a narrower type: `x` is a
+// `u8` (0 ..= 255), so `x == 300` and `x < 256` compare with numbers no `u8`
+// holds; such a comparison is decided before it runs (always false, always
+// true), which is a mistake. The literal on either side counts. A float
+// compared with an `f32` must fit the `f32` (largest finite value
+// (2 - 2^-23) * 2^127, about 3.4e38; 1e39 is past it).
+fn main() {
+    let x: u8 = 5;
+    let y: f32 = 1.5;
+    if x == 300 { print("eq"); }
+    if 256 > x { print("gt"); }
+    if y < 1e39 { print("lt"); }
+}

@@ -17,14 +17,19 @@
 // Inside a hole the ordinary tokens apply, so the expression in it is real
 // tokens, not text read again later. `{{` is text; a lone `}` is text too,
 // as in today's seed lexer.
-// What an escape means is the job of the string's value function, not of
-// this file.
+// What an escape means is the job of the string's value function
+// (`string_from_text` in literal_value.pilot, with its `ESCAPES` table),
+// not of this file.
 [EnforceCoreNaming]
 pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Lex.Strings;
 
 use Pilot.Core.Lex.Patterns;
 
-/// The two quote bytes (`"` and `'`) and the escape byte (`\`).
+/// The prefix letters of a raw, a byte and an f-string, in either case.
+/// The patterns below and the value code (literal_value.pilot) read them.
+pub const RAW_MARKS: str = "rR";
+pub const BYTE_MARKS: str = "bB";
+pub const FSTRING_MARKS: str = "fF";
 
 /// A string quoted by byte `q`.
 [Workaround("seed.unannotated_local_operator", "the locals holding a Pattern are annotated")]
@@ -63,7 +68,7 @@ pub const HOLE_OPEN: str = "hole_open";
 
 fn quotes(q: i64, triple: bool) -> Pattern => if triple { byte(q) * 3 } else { byte(q) };
 
-fn fprefix(raw: bool) -> Pattern => if raw { class("rR") + class("fF") | class("fF") + class("rR") } else { class("fF") };
+fn fprefix(raw: bool) -> Pattern => if raw { class(RAW_MARKS) + class(FSTRING_MARKS) | class(FSTRING_MARKS) + class(RAW_MARKS) } else { class(FSTRING_MARKS) };
 
 /// The quotings of an f-string: quote byte, triple, raw.
 fn each_fstring(var ref out: List<TokenDecl>, var ref modes: List<LexMode>) {
@@ -117,6 +122,6 @@ fn fstring_mode(q: i64, triple: bool, raw: bool) -> LexMode {
 [StandIn("lex.token_attribute", "each token is a declaration marked [Token(..)] that the builder collects", "the token declarations are returned by this function, listed by hand", "PROP-021")]
 pub fn string_tokens() -> List<TokenDecl> => [
     acting(TokenRole::Operand, token("string", string_body())),
-    acting(TokenRole::Operand, token("raw_string", class("rR") + string_body())),
-    acting(TokenRole::Operand, token("byte_string", class("bB") + string_body())),
+    acting(TokenRole::Operand, token("raw_string", class(RAW_MARKS) + string_body())),
+    acting(TokenRole::Operand, token("byte_string", class(BYTE_MARKS) + string_body())),
 ];

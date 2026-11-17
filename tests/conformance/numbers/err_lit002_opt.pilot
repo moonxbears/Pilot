@@ -1,0 +1,10 @@
+// LIT002 for a literal landing in an optional (`T?`): the payload type
+// decides the range. `u8` holds 0 ..= 255 and 300 > 255; `f32`'s largest
+// finite value is (2 - 2^-23) * 2^127, about 3.4e38, and 1e39 is past it.
+// These used to be TYPE001 ("found `i64`"), which named the wrong problem.
+fn main() {
+    let x: u8? = 300;
+    let y: f32? = 1e39;
+    print(x ?? 0);
+    print(y ?? 0.0);
+}

@@ -1,0 +1,12 @@
+"plain": 112 108 97 105 110
+"a\nb": 97 10 98
+"\t\r\\\"\'": 9 13 92 34 39
+r"a\nb": 97 92 110 98
+'''x\ty''': 120 9 121
+b"\n": 10
+"a\qb": unknown escape `\q` at 2
+"\0": unknown escape `\0` at 1
+f"x{a}\q": 1, `\q` at 6
+f"{{\q": 1, `\q` at 4
+f"{b}": 0
+rf"\q": 0

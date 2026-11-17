@@ -877,9 +877,16 @@ pub let ERRORS = [
     ErrorDef {
         code: "LIT002",
         title: "Literal Does Not Fit Its Type",
-        description: "An integer literal's value is outside the range of the type it lands in (its annotation, parameter, return type, assigned variable, else the integer literal type); the range comes from the type's [Bits] width and register class (`300` into `u8`, `-1` into an unsigned type, `128` into `i8`)",
+        description: "A number literal does not fit the type it lands in (its annotation, parameter, return type, assigned variable or field, struct literal field, the payload of an optional, the other side of a comparison, else its literal slot type): an integer outside the range the type's [Bits] width and register class give (`300` into `u8`, `-1` into an unsigned type, `128` into `i8`), or a float that rounds past the largest finite value of the type's IEEE format (`1e39` into `f32`)",
         category: "Lexer",
         reference: "proposals.md PROP-021 §2.9",
+    },
+    ErrorDef {
+        code: "LIT003",
+        title: "Unknown Escape In A String",
+        description: "A string (plain, byte, triple-quoted, or an f-string's text outside its holes) holds an escape that ESCAPES (stdlib/core/lex/literal_value.pilot) does not declare; the escapes are \\n, \\t, \\r, \\\\, \\\" and \\', and a raw string (`r\"..\"`) has none",
+        category: "Lexer",
+        reference: "proposals.md PROP-021 §12.2",
     },
     ErrorDef {
         code: "LEX001",

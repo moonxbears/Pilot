@@ -1,0 +1,22 @@
+// A `.` right after the prefix `!` is a prefix dot: `!.on` is `!self.on`,
+// as `-.level` is `-self.level` (AGENTS.md §5.1: a dot not glued to an
+// operand is prefix). `!` ends no operand: postfix `x!` is not Pilot
+// (NULL001). The seed lexer (crates/pilot-lexer/src/lexer.rs) marks `!`
+// as ending an operand, so the dot becomes infix, `!.on` reads as a member
+// of nothing, and the program stops at run time. The Pilot lexer already
+// gives `! prefix_dot name` (tests/conformance/lex/dots).
+//
+// Expected, worked by hand: a.on is true, so a.off() is !true = false;
+// a.level is 3, so a.neg() is -3                       -> "false -3"
+struct Lamp : IValue {
+    pub on: bool;
+    pub level: i64;
+
+    pub fn off(ref self) -> bool => !.on;
+    pub fn neg(ref self) -> i64 => -.level;
+}
+
+fn main() {
+    let a = Lamp { on: true, level: 3 };
+    print(f"{a.off()} {a.neg()}");
+}

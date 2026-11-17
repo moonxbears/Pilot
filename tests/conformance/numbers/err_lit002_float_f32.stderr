@@ -1,0 +1,2 @@
+error[LIT002]: `1e39` does not fit `f32`, whose largest finite value is (2 - 2^-23) * 2^127 (32-bit float)
+err_lit002_float_f32.pilot:8:18

@@ -1,0 +1,2 @@
+error[TYPE001]: field `a` of `P`: expected `u8`, found `str`
+err_struct_field_type.pilot:8:20

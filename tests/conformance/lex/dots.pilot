@@ -15,15 +15,17 @@
 //               infix_dot name
 //   x?.y        `?` is postfix, so it ends an operand: name ? infix_dot
 //               name
+//   !.on        `!` is a prefix operator here, not postfix, so it ends no
+//               operand: ! prefix_dot name (read as `!self.on`)
 use Pilot.Core.Lex.Lexicon;
 use Pilot.Core.Lex.Operators;
 use pilot.lex.build;
 use pilot.lex.cache;
 
 fn main() {
-    let built = build_table_cached(core_tokens_with(operator_tokens(["..", "?"], ["?"])), LEX_CACHE_DIR);
+    let built = build_table_cached(core_tokens_with(operator_tokens(["..", "?", "!"], ["?"])), LEX_CACHE_DIR);
     print(built.ok());
-    let src = "a.b .c x .. y (a).b a. b\n.b a/**/.b x?.y";
+    let src = "a.b .c x .. y (a).b a. b\n.b a/**/.b x?.y !.on";
     var out = "";
     for l in lex_all(built.table, src) {
         let family = if l.decl < 0 { "?" } else { built.table.names[l.decl] };

@@ -1,0 +1,12 @@
+// With no type around it a float literal lands in the float literal slot's
+// type, the 64-bit IEEE format (52 fraction bits, bias 1023), whose largest
+// finite value is (2 - 2^-52) * 2^1023 = 1.7976931348623157e308. Halfway to
+// 2^1024 is 1.79769313486231580793e308, so 1.7976931348623159e308 rounds to
+// infinity: LIT002 (PROP-021 §2.9, slice 21F). A minus in front does not
+// change that, and `-1.7976931348623158e308` (below halfway) is accepted.
+fn main() {
+    let ok = -1.7976931348623158e308;
+    let x = -1.7976931348623159e308;
+    print(ok);
+    print(x);
+}

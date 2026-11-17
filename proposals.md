@@ -38,6 +38,8 @@
 | **`PROP-025`** | The Parser in Pilot: One Grammar-Table-Driven Pilot Parser Builds the AST the Checker and PilIR Read; the Rust Parser Is Deleted | Pilot work first (no Rust change); at the cutover deletes `crates/pilot-parser` (9,165 lines) and `crates/pilot-ast` (917) under `PROP-006` | `DRAFT 2026-11-16 — DESIGN; AWAITING OWNER APPROVAL` |
 | **`PROP-026`** | Seed: a Struct's Operator Applies to the Result of Another Operator or a Method Call (`a + b + c`), Closing Known Bug `seed.chained_struct_operator` | about `+20` in `crates/pilot-vm/src/lower_expr.rs`; deleted with the rest of the seed bytecode compiler by `PROP-005`; built `+28` | `APPROVED BY OWNER 2026-11-16 ("Approve PROP-026") AND BUILT` |
 | **`PROP-027`** | Operators a Type Gains Through `ext` Apply to Literals (`"0" ..= "9"` as a Byte-Range Pattern); a Struct's `op _[_]` Takes a Range Index (`hex[1 ..= 6]`) | small, in `crates/pilot-vm/src/lower_expr.rs`; plus Pilot lowering in `selfhost/ir/` | `APPROVED BY OWNER 2026-11-16 ("Approve PROP-027")` |
+| **`PROP-028`** | Fill the `bridge.proc_signal` Seam's `signal_handle` Sub-Op, So `pilot test --timeout` Can Stop a Hung Case | `+4` in `crates/pilot-vm/src/bridge.rs` | `APPROVED BY OWNER 2026-11-16 ("Approve PROP-028") AND BUILT` |
+| **`PROP-029`** | Seed Lexer: `!` Ends No Operand, So `!.on` Reads as `!self.on`, Closing Known Bug `seed.not_prefix_dot` | `0` (one argument in `crates/pilot-lexer/src/lexer.rs`) | `DRAFT 2026-11-16 — AWAITING OWNER APPROVAL` |
 | **`PROP-003`** | Wave 3, itemized 2026-11-15: slices 3A–3F (struct `invariant` rule, dead f-string desugarer, `op_checked` to Pilot, contract rules, f-string scanner dedupe, small trims) | about `-270` now (most of the planned `-2,850` waits for `PROP-005`/`006`) | `3A + 3B BUILT 2026-11-15 (−29 RUST); 3C DEFERRED TO PROP-005; 3D–3F DRAFT` |
 | **`PROP-004`** | Retire Legacy `crates/pilot-analysis` Crate (`1,591` formatted `src` LOC; `647` packed) & Migrate Milestone Harnesses to `.pilot` | `-1,591` LOC (formatted) | `PLANNED (WAVE 4)` |
 | **`PROP-005`** | Replace Rust `BytecodeCompiler` (`24` `lower_*.rs` + `vm_gen.rs` + `codes.rs`) with `selfhost/vm/ir_to_pilc.pilot` | about `-7,950` LOC packed, about `-8,770` formatted (PROP-016) | `ITEMIZED 2026-11-15: 5A APPROVED AND BUILT (PILOT ONLY); 5B ITEMIZED (SLICES 5B.1–5B.6); D1/D2/D3/D5 DECIDED 2026-11-15, D4 OPEN; 5B.1 AND 5B.2 APPROVED AND BUILT (PILOT ONLY); 5B.3 APPROVED, IN PROGRESS (`ref<T>`, CLI AND DROP PLAN ROWS DONE; RUST AMENDMENT 5B.3a APPROVED AND BUILT 2026-11-16); 5B.4–5B.6 NOT APPROVED; 5C–5F NOT APPROVED; BOOTSTRAP T1/T2 NEEDS AN OWNER DECISION BEFORE 5E` |
@@ -2185,7 +2187,7 @@ Whether `const` marks a value parameter is not recorded today either way (the pr
 
 ## `PROP-021` — The Lexer Declared in Pilot: Token Patterns Compiled by Pilot Into a State Table the Seed Only Runs
 
-**Status: DRAFT 2026-11-16, rewritten 2026-11-16 at the owner's direction ("yes, lets rewrite prop-021"); the Rust part (§3) awaits owner approval. Slice 21A (Pilot only, no Rust) BUILT 2026-11-16 at the owner's request ("can we start of the first proposal of the lex proposals?"), see §7. Slice 21B (Pilot only) BUILT 2026-11-16 (owner: "lets focus on prop-021+"), see §8. Slice 21C (Pilot only) BUILT 2026-11-16 (owner: "Start 21C"), see §9. Slice 21D (literal values, Pilot only) BUILT 2026-11-16 (owner: "lets continue with the next part"), see §10. Slice 21E (the token tape, Pilot only) BUILT 2026-11-16 in the compact 6-byte shape (owner: "Zig-style (6 bytes)", "Start 21E"), see §11.** Owner direction: "I would like pilot to have recognition over its own behavior" (about `1_000_000` meaning `1000000`), and "can you define what numbers are in pilot and then compile it to the lex file?". The first draft (per-literal tables the seed reads) is replaced. The lexer is no longer hand-written in either language. Pilot declares every token as a pattern, Pilot compiles the patterns into a state machine, and the seed only runs that machine.
+**Status: DRAFT 2026-11-16, rewritten 2026-11-16 at the owner's direction ("yes, lets rewrite prop-021"); the Rust part (§3) awaits owner approval. Slice 21A (Pilot only, no Rust) BUILT 2026-11-16 at the owner's request ("can we start of the first proposal of the lex proposals?"), see §7. Slice 21B (Pilot only) BUILT 2026-11-16 (owner: "lets focus on prop-021+"), see §8. Slice 21C (Pilot only) BUILT 2026-11-16 (owner: "Start 21C"), see §9. Slice 21D (literal values, Pilot only) BUILT 2026-11-16 (owner: "lets continue with the next part"), see §10. Slice 21E (the token tape, Pilot only) BUILT 2026-11-16 in the compact 6-byte shape (owner: "Zig-style (6 bytes)", "Start 21E"), see §11. Slice 21F (float values, correctly rounded, Pilot only) BUILT 2026-11-16 (owner: "do the next prop"), see §12.** Owner direction: "I would like pilot to have recognition over its own behavior" (about `1_000_000` meaning `1000000`), and "can you define what numbers are in pilot and then compile it to the lex file?". The first draft (per-literal tables the seed reads) is replaced. The lexer is no longer hand-written in either language. Pilot declares every token as a pattern, Pilot compiles the patterns into a state machine, and the seed only runs that machine.
 
 ### 1. What exists today (read 2026-11-16)
 
@@ -2464,7 +2466,7 @@ The gate rebuilds the table and compares it byte for byte (`PROP-023`). Until `P
   - **`::Variant` with two enums sharing a name** (`seed.variant_compare_untyped`): `asm.pilot`'s `::Operand` broke once the lexer's `TokenRole::Operand` was linked into the checker. The variants are qualified there, tagged `[Workaround]`.
 - **Not yet:**
   - **String unescape:** not built. Corrected 2026-11-16 during 21E: core does have a constructor from bytes to `str` (`from_utf8`, bound in `stdlib/core/builtins/native_calls.pilot`), so nothing blocks it. The seed silently keeps an unknown escape (`\q`), which is an open decision.
-  - **Float values:** slice 21F, correctly rounded.
+  - **Float values:** slice 21F, correctly rounded. Built, see §12.
   - **`LIT002` gaps:**
     - field assignment (`obj.f = 300`);
     - comparisons;
@@ -2600,6 +2602,85 @@ So the guide is followed where the Rust parser depends on it, and not copied whe
   - `--live-allocations` does not count `RawMem` blocks, so there is no leak test for `PackedBuffer`. The C runtime (`runtime/c/pilot_rt_bridge.h`) would need to count them;
   - `fmt_tokenize` and `repl_tokenize` still have their own tokenizers.
 - **Built lexers are cached (2026-11-16, owner: "Yes, A1 then A3").** `stdlib/pilot/lex/cache.pilot`: `build_modes_cached` / `build_table_cached` keep a built lexer in `target/cache/lex`, keyed by the declarations and the hash of the builder's sources, the whole key stored in the file. The slow lex cases and `pilot lex` use it. Test: `lex/lex_cache` on all three engines.
+
+### 12. Slice 21F, as built 2026-11-16 (Pilot only): float values, correctly rounded
+
+**Scope:** what a float literal is worth, LIT002 for floats (§2.9), and the same rounding for text conversion (owner: "do the next prop").
+
+- **One routine, two callers** (`stdlib/core/convert/decimal_round.pilot`, `Pilot.Core.Convert.DecimalRound`):
+  - `round_decimal(digits, exp10, fmt) -> u64?` gives the encoding of the nearest value of an IEEE format to `digits * 10^exp10`, ties to even, with subnormals.
+  - It returns none past the largest finite value.
+  - **Method:** the plain big-integer algorithm (Go's and glibc's fallback).
+    - The value is an exact fraction, and its binary order fixes the quantum.
+    - The quotient (at most p bits) is found bit by bit.
+    - The remainder decides the rounding.
+  - Bounds from `10^k >= 2^(3k)` stop absurd exponents before any big power is built.
+  - `read_decimal_digits` keeps every digit, and `DecimalDigits.encoding(fmt)` rounds it.
+  - Float literals use it through `float_from_text` (`stdlib/core/lex/literal_value.pilot`).
+  - `str.to_f64()` / `to_f32()` use it outside their exact fast path (`stdlib/core/convert/convert.pilot`). That **closes the seam `convert.float_parse_slow_path`**, and an f32 is now rounded once, straight to binary32.
+  - No host `strtod` or Rust `parse` is involved.
+- **Magnitudes** (`stdlib/core/convert/limbs.pilot`): the 16-bit limb arithmetic that 21D kept privately in `literal_value.pilot` moved there, with shift, compare, subtract and powers of ten added. `literal_value.pilot` now uses it, so there is one copy.
+- **Data, not repeated spellings:**
+  - The decimal notation (`DECIMAL_POINT`, `EXPONENT_MARKS`, `EXPONENT_SIGNS`) is declared once, as consts in `decimal_round.pilot`.
+  - The number patterns (`numbers.pilot` `float()`, `exponent()`) and the reader both use them.
+  - The formats are the existing `FloatFormat`s of `stdlib/core/float_bits.pilot`. `format_of_width(bits)` picks one by a type's `[Bits]` width, so the checker names no type.
+- **LIT002** (`selfhost/check/literals.pilot` `float_range_problem`):
+  - A float literal landing in a float type is refused only when it rounds past the largest finite value. The message gives that value exactly as `(2 - 2^-f) * 2^bias`.
+  - With no type around it, a literal lands in its own literal slot's type (`default_literal_type`): float slot for floats, integer slot for integers.
+  - The checker's tool link list (`selfhost/cli/host.pilot`) gained `float_bits.pilot`, `limbs.pilot` and `decimal_round.pilot`.
+- **Tests** (expected values worked by hand in each test's comments, and checked against Python's correctly rounded `float()` with `struct`, plus an exact rational rounding for binary32):
+  - `lex/float_values`: 0.1, 1e23, ties to even at 2^53 and 2^24, the largest double/float and the halfway points past them, the least normal, the largest subnormal (`2.2250738585072011e-308`), half the least subnormal on both sides, 1e±400, separators, and four texts that are not floats.
+  - `numbers/err_lit002_float_f32` and `numbers/err_lit002_float_f64` (under a minus, with no type).
+  - `numbers/convert_float_parse_slow`, which replaces `convert_float_parse_seam`: a tie, 36 digits, 30 digits with an exponent, Overflow, and an f32 rounded once.
+  - All pass on `pilot test`, `--ir` and `--emit c`.
+- **Found and fixed on the way:** §9's "rename litmus, f-string hole" problem is gone. Since 2026-11-16, `selfhost/gate/rename_litmus.pilot` renames inside f-string holes, which are code.
+- **Not yet:**
+  - The seed still reads float literals itself (`expr.rs`, `unwrap_or(0.0)`) until §3. A literal's value at run time is the seed's, which is correctly rounded but not computed by this routine.
+  - `f16`/`f128`: there is no `FloatFormat` for them, so `format_of_width` has none and their literals are not checked.
+  - The optional lint for digits beyond the type's precision.
+  - String unescape. Built, see §12.2.
+  - LIT002 gaps of §10: field assignment, comparisons, `opt` destinations. Closed, see §12.1.
+- **Modern alternative, recorded:**
+  - Eisel–Lemire (used by Rust's `dec2flt`, Go 1.16+ and fast_float) answers almost every input with one 128-bit multiply and a table of powers of five. It falls back to big integers only in rare ambiguous cases.
+  - It is many times faster, but needs 128-bit multiplication and a ~650-entry table.
+  - It costs only compile time here (ungated) and, for `to_f64()`, run time only outside the fast path. It is worth adding when `to_f64()` on long text shows up in a benchmark.
+
+#### 12.1 The LIT002 gaps of §10, closed 2026-11-16 (owner: "continue with the next item or prop")
+
+- **Field assignment** (`p.a = 300`): `check_assign` checked only plain names. It used to pass and store 300 mod 256 = 44.
+- **Struct literal fields** (`P { a: 300 }`): field values were not type-checked at all. `P { a: "x" }` passed too.
+  - Now `check_struct_literal_fields` (`selfhost/check/rules.pilot`) checks each value against the field's declared type, over the literal's generic arguments.
+  - A wrong type is TYPE001; a number outside the range is LIT002.
+- **Comparisons** (`x == 300`, `256 > x`, `y < 1e39`): `check_compared_literal` (`selfhost/check/literals.pilot`) requires the literal, on either side, to fit the other side's type. A comparison with a value no such type holds is decided before it runs.
+- **Optional and result destinations** (`u8? = 300`): the literal lands in the type that the destination's `op ?` gives. This was TYPE001 "found `i64`", which named the wrong problem.
+- **Unknown field reads** (the known bug `check.field_read_unknown`, found by the rename litmus): `s.b` on a struct without `b` is now METH001. The check is `check_member_read`.
+  - It used to pass, and the seed read the field as none.
+  - `[Lang]` primitives are skipped, because the engine answers some of their members. Open generic types are skipped too.
+  - The repro became `errors/err_meth001_field_read`.
+- **Tests:** `numbers/err_lit002_{field,struct_field,compare,opt}`, `errors/err_struct_field_type` and the passing edge program `numbers/literal_fit_places`. Expected values are worked by hand. All fail before the change and pass after, on `pilot test`, `--ir` and `--emit c`.
+
+#### 12.2 String values and LIT003, built 2026-11-16 (owner: "Reject it")
+
+- **Decision 2026-11-16:** an escape not in the set is an error, as in Rust, Go and C#. The seed used to keep `\q` as its two bytes.
+- **The escapes are data:** `ESCAPES` in `stdlib/core/lex/literal_value.pilot`.
+  - It holds exactly the seed's set (`crates/pilot-parser` `unescape_str`): `\n`, `\t`, `\r`, `\\`, `\"` and `\'`.
+  - Each entry is the byte after the backslash and the byte it stands for.
+  - The prefix letters (`RAW_MARKS`, `BYTE_MARKS`, `FSTRING_MARKS`) became consts in `stdlib/core/lex/strings.pilot`, which its patterns now use.
+  - A stray doc comment with no item under it there was deleted.
+- **Values:** `string_from_text(text) -> str ! BadEscape` gives a plain, byte or triple-quoted string's value, or its first unknown escape.
+  - A raw string keeps every byte.
+  - An f-string has no single value, so asking for one faults.
+  - Nothing here writes an escape in a string literal, so the lex files stay readable by today's seed lexer (§2, rule 1). Bytes come from `from_utf8`.
+- **LIT003** (`selfhost/check/literals.pilot` `check_string_escapes`): every string token in the program's own files is read from the source.
+  - That covers plain, byte and triple-quoted strings, and an f-string's text outside its holes.
+  - `string_escape_problems` lists each unknown escape, and the message lists the declared set.
+  - A hole is code, so a string inside one is checked as a token of its own.
+- **Tests** (expected bytes worked by hand from ASCII):
+  - `lex/string_values` (values, raw, triple, byte, unknown escapes, f-string text and holes) and `errors/err_lit003_escape` pass on `pilot test`, `--ir` and `--emit c`.
+  - The whole corpus still passes on the seed (642), so no test program relied on a kept unknown escape.
+- **Not yet:**
+  - The seed still builds string values itself (`unescape_str`) until §3. A program LIT003 does not stop gets the same value either way, because the escape sets are equal.
+  - `\"` inside f-string holes (`f"{m[\"a\"]}"`) is still the open question of §11.6.
 
 ### 6. Decided
 
@@ -2889,6 +2970,38 @@ Steps 1–3 are Pilot only and need no Rust change. Step 4's Rust deletions are 
 - `tests/conformance/runtime/proc_job_timeout.pilot` gains a job that spins (`while true {}` in `sh`) with a 2 s limit: it is timed out, and afterwards `kill -0 <pid>` reports it gone.
 - `runtime/test_timeout`'s sleeper spins, and the run still ends under 40 s.
 - `cargo test -p pilot-vm`, `cargo fmt --check`, and every conformance program on the three engines pass unchanged.
+
+## `PROP-029` — Seed Lexer: `!` Ends No Operand, So `!.on` Reads as `!self.on`
+
+**Status: DRAFT 2026-11-16 — AWAITING OWNER APPROVAL.** Owner decision 2026-11-16: "Read as !self.x".
+
+### 1. What happens today (run 2026-11-16)
+
+- AGENTS.md §5.1: a `.` glued to an operand is `InfixDot`; anywhere else it is `PrefixDot`, which reads as `self.<name>`. So `-.level` is `-self.level`, and the seed reads it that way (prints `-3`).
+- `!.on` is not read that way. The seed lexer emits `!` (`TokenKind::Exclamation`, `crates/pilot-lexer/src/lexer.rs`, the plain-`!` `emit` at the end of the `b0 == b'!'` branch) with `can_precede_infix_dot = true`, so the `.` after it is infix, and `!.on` becomes a member read with nothing on its left. `pilot check` passes; at run time the seed stops with `cannot apply ! to null`, and PilIR stops inside the checker snapshot (`list index -9`).
+- `!` never ends an operand in Pilot: postfix `x!` is not Pilot. The seed parser reads it only to report `NULL001`. No `.pilot` file in the tree writes `x!.y`.
+- The Pilot lexer already gets it right. `stdlib/core/lex/operators.pilot` lets only declared postfix operators (`_?`) end an operand, so `pilot lex` gives `! prefix_dot name`. Test: `tests/conformance/lex/dots` (passes).
+- Repro: `tests/conformance/known_bugs/not_prefix_dot.pilot` (true output `false -3`), registered as `seed.not_prefix_dot` in `bug_registry()`.
+
+### 2. Design
+
+- Emit plain `!` with `can_precede_infix_dot = false`, as every other prefix operator (`-`, `~`, `*`) already is. A `.` touching `!` is then prefix, and `!.on` reads `!self.on`.
+- `x!.y` (postfix `!`, then a member) would then read `x ! self.y`. That is a parse error, which is still loud, and `x!` is already NULL001.
+- The call-quote tokens (`!(`, `!!(`, `!&(`, …) and `!=` are unchanged.
+
+### 3. Rust (needs approval). Strictly this file:
+
+| File | Change |
+| :--- | :--- |
+| `crates/pilot-lexer/src/lexer.rs` | The plain-`!` `self.emit(TokenKind::Exclamation, …)`: last argument `true` becomes `false`. |
+
+**Estimate:** `0` lines net.
+
+### 4. Acceptance
+
+- `known_bugs/not_prefix_dot` prints `false -3` on the seed. It then moves to `tests/conformance/syntax/` (or an equivalent case folder), passes on `pilot test`, `--ir` and `--emit c`, and its `bug_registry()` entry is retired.
+- `lex/dots` still passes. `cargo test -p pilot-lexer`, `cargo test -p pilot-parser --test damaged_source -- --include-ignored` and `cargo fmt --check` pass.
+- Every conformance program passes unchanged on the three engines.
 
 ## `PROP-003` — Wave 3, Itemized: Parser Desugarings and VM Helpers That Can Leave Rust Now
 

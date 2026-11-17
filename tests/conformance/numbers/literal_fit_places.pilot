@@ -1,0 +1,29 @@
+// A literal at the very edge of its type is accepted in every place LIT002
+// looks (PROP-021 §10 gaps): a field assignment, a struct literal field, a
+// comparison on either side, and an optional destination. `u8` holds
+// 0 ..= 255; `i8` holds -128 ..= 127; the largest finite `f32` is
+// (2 - 2^-23) * 2^127 = 3.40282346638528859812e38, and 3.4028235e38 rounds
+// to it (it is below the halfway point to 2^128, 3.40282356779733661638e38).
+// Expected, worked by hand: p.a is 255, then 0; 255 == 255 is true and
+// -128 < n for n = -128 is false; the optionals hold 255 and -128; the f32
+// holds its largest finite value, which is above 3.0e38: true.
+struct P : IValue {
+    pub a: u8;
+}
+
+fn main() {
+    var p = P { a: 255 };
+    print(p.a);
+    p.a = 0;
+    print(p.a);
+    let x: u8 = 255;
+    let n: i8 = -128;
+    print(x == 255);
+    print(-128 < n);
+    let o: u8? = 255;
+    let m: i8? = -128;
+    print(o ?? 0);
+    print(m ?? 0);
+    let f: f32? = 3.4028235e38;
+    print((f ?? 0.0) > 3.0e38);
+}

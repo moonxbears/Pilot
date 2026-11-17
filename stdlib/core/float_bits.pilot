@@ -46,6 +46,15 @@ pub fn binary32() -> FloatFormat => FloatFormat {
     quiet_nan: 0x7FC00000,
 };
 
+/// The IEEE 754 binary format `bits` wide (sign, exponent and fraction
+/// fields together), or none when no format here is that wide.
+pub fn format_of_width(bits: i64) -> FloatFormat? {
+    for f in [binary32(), binary64()] {
+        if 1 + f.exponent_bits as i64 + f.fraction_bits as i64 == bits { return f; }
+    }
+    return none;
+}
+
 /// 2^k for 0 <= k <= 1023, exactly.
 fn two_to(k: i64) -> f64 {
     var p = 1.0;

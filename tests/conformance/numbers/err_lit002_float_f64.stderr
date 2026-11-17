@@ -1,0 +1,2 @@
+error[LIT002]: `-1.7976931348623159e308` does not fit `f64`, whose largest finite value is (2 - 2^-52) * 2^1023 (64-bit float)
+err_lit002_float_f64.pilot:9:13

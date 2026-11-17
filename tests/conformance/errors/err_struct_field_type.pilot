@@ -1,0 +1,10 @@
+// TYPE001 for a struct literal field given a value of another type: `a` is
+// a `u8` and "x" is a `str`. It used to pass the check.
+struct P : IValue {
+    pub a: u8;
+}
+
+fn main() {
+    let p = P { a: "x" };
+    print(p.a);
+}

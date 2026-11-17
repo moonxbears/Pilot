@@ -1,0 +1,12 @@
+// LIT002 where a literal is assigned to a field (PROP-021 §10 gap): the
+// field's type decides the range. `a` is a `u8`, 0 ..= 2^8 - 1 = 255, and
+// 300 > 255. It used to pass the check and store 300 mod 256 = 44.
+struct P : IValue {
+    pub a: u8;
+}
+
+fn main() {
+    var p = P { a: 1 };
+    p.a = 300;
+    print(p.a);
+}

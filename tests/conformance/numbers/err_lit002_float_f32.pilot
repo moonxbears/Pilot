@@ -1,0 +1,10 @@
+// A float literal past the largest finite value of the type it lands in is
+// LIT002, never a silent infinity (PROP-021 §2.9, slice 21F). Expected,
+// worked by hand: `f32` is the 32-bit IEEE format (23 fraction bits, bias
+// 127), whose largest finite value is (2 - 2^-23) * 2^127, about
+// 3.4028235e38; 1e39 is past it, and past the halfway point to 2^128
+// (about 3.4028236e38), so it would round to infinity.
+fn main() {
+    let x: f32 = 1e39;
+    print(x);
+}

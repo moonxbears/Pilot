@@ -1,0 +1,11 @@
+// LIT002 for a literal given to a field in a struct literal: `a` is a `u8`
+// (0 ..= 255) and 300 > 255. It used to pass the check and store
+// 300 mod 256 = 44.
+struct P : IValue {
+    pub a: u8;
+}
+
+fn main() {
+    let p = P { a: 300 };
+    print(p.a);
+}

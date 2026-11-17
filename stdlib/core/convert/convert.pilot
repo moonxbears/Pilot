@@ -34,12 +34,16 @@
 //                       `::Overflow` / `::Underflow` (Rust gives an infinity
 //                       instead), and a value too small to hold rounds to
 //                       zero. Text that needs more than the exact fast path
-//                       stops at the seam `convert.float_parse_slow_path`.
+//                       is read again, every digit, and rounded correctly
+//                       to the target format (decimal_round.pilot).
 //   str -> bool         exactly `true` or `false`.
 //   str -> char         exactly one Unicode scalar value.
 // =========================================================================
 [EnforceCoreNaming]
 pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Convert;
+
+use Pilot.Core.Convert.DecimalRound;
+use Pilot.Core.FloatBits;
 
 /// The error of a conversion that failed for reason `kind`.
 pub fn convert_error(kind: ConvertErrorKind) -> ConvertError => ConvertError { kind: kind };
@@ -393,10 +397,13 @@ fn fast_path(d: DecimalText, mant_limit: u64, exp_limit: i64) -> f64? {
     return none;
 }
 
-/// Converts read text to a float of the format given by its limits:
-/// `max_order` is the smallest `k` with `10^k` above the largest finite value,
-/// `zero_order` the largest `k` with `10^k` below half the smallest one.
-fn decimal_to_float(d: DecimalText, mant_limit: u64, exp_limit: i64, max_order: i64, zero_order: i64) -> f64 ! ConvertError {
+/// Converts read text `s` to a float of format `fmt`, whose limits are
+/// given too: `max_order` is the smallest `k` with `10^k` above the largest
+/// finite value, `zero_order` the largest `k` with `10^k` below half the
+/// smallest one. Outside the exact fast path every digit of `s` is read
+/// again and rounded straight to `fmt` (stdlib/core/convert/
+/// decimal_round.pilot), so an f32 is rounded once.
+fn decimal_to_float(s: str, d: DecimalText, fmt: FloatFormat, mant_limit: u64, exp_limit: i64, max_order: i64, zero_order: i64) -> f64 ! ConvertError {
     let inf = positive_infinity();
     if d.kind == FloatTextKind::NotANumber { return inf - inf; }
     if d.kind == FloatTextKind::Infinite { return if d.negative { -inf } else { inf }; }
@@ -411,19 +418,32 @@ fn decimal_to_float(d: DecimalText, mant_limit: u64, exp_limit: i64, max_order: 
     if some v = fast_path(d, mant_limit, exp_limit) {
         return if d.negative { -v } else { v };
     }
-    return seam("convert.float_parse_slow_path", "correctly rounded parsing of text outside the exact fast path (more than 19 significant digits, or a mantissa and power of ten that are not both exact): needs a big-integer or Eisel-Lemire algorithm");
+    let signed = s.byte_at(0) == 45 || s.byte_at(0) == 43;
+    guard some all = read_decimal_digits(s, if signed { 1 } else { 0 }, -1, true) else {
+        return invalid_decimal_float();
+    };
+    guard some bits = all.encoding(fmt) else {
+        let kind = if d.negative { ConvertErrorKind::Underflow } else { ConvertErrorKind::Overflow };
+        return res<f64, ConvertError>.err(convert_error(kind));
+    };
+    let v = float_from_bits(bits, fmt);
+    return if d.negative { -v } else { v };
 }
+
+/// Text `read_decimal` accepted that `read_decimal_digits` does not. Both
+/// read the same notation, so this is bad text either way.
+fn invalid_decimal_float() -> f64 ! ConvertError => res<f64, ConvertError>.err(convert_error(ConvertErrorKind::InvalidFormat));
 
 pub fn parse_f64(s: str) -> f64 ! ConvertError {
     let d = read_decimal(s)?;
     // 2^53; 10^22; 1.8e308 < 10^309; half of 4.9e-324 is above 10^-324.
-    return decimal_to_float(d, 9007199254740992, 22, 309, -324);
+    return decimal_to_float(s, d, binary64(), 9007199254740992, 22, 309, -324);
 }
 
 pub fn parse_f32(s: str) -> f32 ! ConvertError {
     let d = read_decimal(s)?;
     // 2^24; 10^10; 3.4e38 < 10^39; half of 1.4e-45 is above 10^-46.
-    let v = decimal_to_float(d, 16777216, 10, 39, -46)?;
+    let v = decimal_to_float(s, d, binary32(), 16777216, 10, 39, -46)?;
     return v as f32;
 }
 

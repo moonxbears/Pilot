@@ -1,0 +1,183 @@
+// =========================================================================
+// FILE: stdlib/core/convert/limbs.pilot
+// MAGNITUDES OF ANY SIZE, AS 16-BIT LIMBS
+// =========================================================================
+// A magnitude is a little-endian list of 16-bit limbs with no high zero
+// limb (0 is the empty list). Integer literals keep their value this way
+// (stdlib/core/lex/literal_value.pilot), and decimal text is rounded to a
+// float through it (decimal_round.pilot), exactly.
+//
+// A limb times a factor below 2^16 plus a carry stays below 2^33, so every
+// step fits an i64.
+// =========================================================================
+[EnforceCoreNaming]
+pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Convert.Limbs;
+
+/// The base of one limb (2^16).
+pub const LIMB: i64 = 65536;
+
+/// The bits in one limb.
+pub const LIMB_BITS: i64 = 16;
+
+/// The decimal digits, by value.
+const LIMB_DECIMAL_DIGITS: List<str> = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9",];
+
+/// Drops high zero limbs, in place.
+pub fn limbs_trim(var ref a: List<i64>) {
+    while a.len() > 0 && a[a.len() - 1] == 0 {
+        let _ = a.pop();
+    }
+}
+
+/// `a * by + add`, in place (`by` and `add` below 2^16).
+pub fn limbs_mul_add(var ref a: List<i64>, by: i64, add: i64) {
+    var carry = add;
+    var i = 0;
+    while i < a.len() {
+        let v = a[i] * by + carry;
+        a[i] = v % LIMB;
+        carry = v / LIMB;
+        i = i + 1;
+    }
+    while carry > 0 {
+        a.push(carry % LIMB);
+        carry = carry / LIMB;
+    }
+}
+
+/// `a * 10^n`, in place.
+pub fn limbs_mul_pow10(var ref a: List<i64>, n: i64) {
+    var left = n;
+    while left >= 4 {
+        limbs_mul_add(a, 10000, 0);
+        left = left - 4;
+    }
+    while left > 0 {
+        limbs_mul_add(a, 10, 0);
+        left = left - 1;
+    }
+}
+
+/// The bits needed to write `a` (0 for 0).
+pub fn limbs_bit_length(ref a: List<i64>) -> i64 {
+    let n = a.len() as i64;
+    if n == 0 { return 0; }
+    var top = a[n - 1];
+    var bits = 0;
+    while top > 0 {
+        bits = bits + 1;
+        top = top >> 1;
+    }
+    return (n - 1) * LIMB_BITS + bits;
+}
+
+/// `a * 2^k`, as a new magnitude.
+pub fn limbs_shl(ref a: List<i64>, k: i64) -> List<i64> {
+    var out: List<i64> = [];
+    if a.len() == 0 { return out; }
+    var i = 0;
+    while i < k / LIMB_BITS {
+        out.push(0);
+        i = i + 1;
+    }
+    let s = k % LIMB_BITS;
+    var carry = 0;
+    for limb in a {
+        let v = (limb << s) | carry;
+        out.push(v % LIMB);
+        carry = v / LIMB;
+    }
+    if carry > 0 { out.push(carry); }
+    return out;
+}
+
+/// -1, 0 or 1 as `a` is less than, equal to or greater than `b`.
+pub fn limbs_cmp(ref a: List<i64>, ref b: List<i64>) -> i64 {
+    if a.len() != b.len() { return if a.len() < b.len() { -1 } else { 1 }; }
+    var i = a.len() as i64 - 1;
+    while i >= 0 {
+        if a[i] != b[i] { return if a[i] < b[i] { -1 } else { 1 }; }
+        i = i - 1;
+    }
+    return 0;
+}
+
+/// `a - b`, in place (`a >= b`).
+pub fn limbs_sub(var ref a: List<i64>, ref b: List<i64>) {
+    var borrow = 0;
+    var i = 0;
+    while i < a.len() {
+        var v = a[i] - borrow;
+        if i < b.len() { v = v - b[i]; }
+        if v < 0 {
+            a[i] = v + LIMB;
+            borrow = 1;
+        } else {
+            a[i] = v;
+            borrow = 0;
+        }
+        i = i + 1;
+    }
+    limbs_trim(a);
+}
+
+/// 2^k as a magnitude.
+pub fn limbs_power_of_two(k: i64) -> List<i64> {
+    var out: List<i64> = [];
+    var i = 0;
+    while i < k / LIMB_BITS {
+        out.push(0);
+        i = i + 1;
+    }
+    out.push(1 << (k % LIMB_BITS));
+    return out;
+}
+
+/// `a - 1`, in place (`a` is not 0).
+pub fn limbs_sub_one(var ref a: List<i64>) {
+    var i = 0;
+    while a[i] == 0 {
+        a[i] = LIMB - 1;
+        i = i + 1;
+    }
+    a[i] = a[i] - 1;
+    limbs_trim(a);
+}
+
+/// The low 64 bits of `a`, as an i64 (two's complement: 2^64 - 1 is -1).
+pub fn limbs_low64(ref a: List<i64>) -> i64 {
+    let n = a.len() as i64;
+    var i = if n < 4 { n } else { 4 };
+    var v = 0;
+    while i > 0 {
+        i = i - 1;
+        v = (v << LIMB_BITS) | a[i];
+    }
+    return v;
+}
+
+/// `a` written in decimal.
+pub fn limbs_decimal(a: List<i64>) -> str {
+    var rest = a;
+    var digits: List<str> = [];
+    while rest.len() > 0 {
+        var rem = 0;
+        var i = rest.len() as i64 - 1;
+        while i >= 0 {
+            let cur = rem * LIMB + rest[i];
+            rest[i] = cur / 10;
+            rem = cur % 10;
+            i = i - 1;
+        }
+        limbs_trim(rest);
+        digits.push(LIMB_DECIMAL_DIGITS[rem]);
+    }
+    if digits.len() == 0 { return "0"; }
+    var out = "";
+    var j = digits.len() as i64 - 1;
+    while j >= 0 {
+        out = out + digits[j];
+        j = j - 1;
+    }
+    return out;
+}
