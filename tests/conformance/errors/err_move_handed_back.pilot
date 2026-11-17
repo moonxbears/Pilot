@@ -1,0 +1,30 @@
+// OWN001: a receiver that moved into a kept result (its method or operator
+// hands it back) cannot be used after: `g` is the same value as `h`.
+// Reading the result without keeping it (`a.back().n`) is not a move.
+struct H : IObject {
+    pub n: i64;
+
+    ~self() {
+        print(f"drop {.n}");
+    }
+
+    pub op + (k: i64) -> H {
+        var me = self;
+        me.n = me.n + k;
+        return me;
+    }
+
+    pub fn back(self) -> H {
+        return self;
+    }
+}
+
+fn main() {
+    let h = H { n: 1 };
+    let g = h + 5;
+    print(h.n);
+    let a = H { n: 2 };
+    print(a.back().n);
+    let c = a.back();
+    print(a.n + c.n + g.n);
+}

@@ -10,9 +10,10 @@
 // runs in (`pilot_parser::set_source_root`), and its own Pilot sources from
 // there too, so the renamed toolchain checks and runs the renamed programs
 // with no change to the seed. Every program whose result changes is a
-// `GATE008` violation; a program that fails in the workspace too, with no
-// renaming, is not (its failure is the corpus run's to report), so the gate
-// fails only on a dependence on a name.
+// `GATE008` violation; a program that passes when run again by itself in
+// the sandbox (it ran out of time under load), or that fails in the
+// workspace too, with no renaming (its failure is the corpus run's to
+// report), is not, so the gate fails only on a dependence on a name.
 // ==============================================================================
 pub lvl(0) pkg selfhost.gate;
 
@@ -477,26 +478,30 @@ fn rl_copy_renamed_file(root: str, rel: str, sandbox_dir: str, rmap: i64, violat
 }
 
 /// The name of the program a `pilot test` result line reports as failing
-/// (`FAIL <name>`, `FIXED <name>: ..`), or "" for any other line.
+/// (`FAIL <name>`, `FIXED <name>: ..`), or "" for any other line. Only a
+/// program of the corpus counts: a failing program's diff can quote the
+/// result lines of a `pilot test` it ran itself (`runtime/test_timeout`
+/// runs `tests/tool_fixtures/test_timeout`), and those are not the run's.
 fn rl_failed_program(line: str) -> str {
-    if gm_starts_with(line, "FAIL ") { return gm_trim(line.slice(5, line.len())); }
+    var name = "";
+    if gm_starts_with(line, "FAIL ") { name = gm_trim(line.slice(5, line.len())); }
     if gm_starts_with(line, "FIXED ") {
         let rest = line.slice(6, line.len());
         let colon = gm_find(rest, ":", 0);
-        return gm_trim(if colon < 0 { rest } else { rest.slice(0, colon) });
+        name = gm_trim(if colon < 0 { rest } else { rest.slice(0, colon) });
     }
-    return "";
+    if !gm_starts_with(name, rl_conformance_dir() + "/") { return ""; }
+    return name;
 }
 
-/// The programs among `programs` that fail in the workspace itself, with no
-/// renaming: their failure is not the litmus's to report (the corpus run
-/// reports it). None when the run gives no result, so every program counts.
-fn rl_failing_unrenamed(root: str, ref programs: List<str>) -> List<str> {
+/// The programs among `programs` that fail when `pilot test` runs them
+/// again, by themselves, in `dir`; none when that run gives no result.
+fn rl_failing_in(dir: str, ref programs: List<str>) -> List<str>? {
     var out: List<str> = [];
     if programs.len() == 0 { return out; }
     var args: List<str> = ["test",];
     for p in programs { args.push(p); }
-    let run = run_in(root, current_exe() ?? "pilot", args, "");
+    let run = run_in(dir, current_exe() ?? "pilot", args, "");
     let lines = gm_split_lines(run.stdout);
     var saw_result = false;
     var i = 0;
@@ -507,15 +512,17 @@ fn rl_failing_unrenamed(root: str, ref programs: List<str>) -> List<str> {
         if name.len() > 0 { out.push(name); }
         i = i + 1;
     }
-    if !saw_result { return []; }
+    if !saw_result { return none; }
     return out;
 }
 
-/// The GATE008 violations of one corpus run: every program `pilot test`
-/// reports as failing in the renamed sandbox that passes in the workspace
-/// itself (so only a change renaming caused is reported), or the run itself
-/// when it reports no result.
-fn rl_corpus_violations(root: str, run: LitmusRun, violations: i64) {
+/// The GATE008 violations of one corpus run in the sandbox `sandbox_dir`:
+/// every program `pilot test` reports as failing that fails again when run
+/// by itself in the sandbox (once the corpus is done, the sandbox's lexers
+/// built, so a program that only ran out of time under the corpus's load
+/// passes) and passes in the workspace itself (so only a change renaming
+/// caused is reported); or the run itself when it reports no result.
+fn rl_corpus_violations(root: str, sandbox_dir: str, run: LitmusRun, violations: i64) {
     let lines = gm_split_lines(run.stdout);
     var saw_result = false;
     var failed: List<str> = [];
@@ -537,10 +544,11 @@ fn rl_corpus_violations(root: str, run: LitmusRun, violations: i64) {
             "Run `pilot test` in the sandbox by hand to see where the toolchain stops"));
         return;
     }
-    let unrenamed = rl_failing_unrenamed(root, failed);
+    let again = rl_failing_in(sandbox_dir, failed) ?? failed;
+    let unrenamed = rl_failing_in(root, again) ?? [];
     var k = 0;
     while k < failed.len() as i64 {
-        if !unrenamed.contains(failed[k]) {
+        if again.contains(failed[k]) && !unrenamed.contains(failed[k]) {
             let _ = glist_push(violations, rl_violation(failed[k], details[k],
                 "Program result changed after renaming core types: the toolchain or the program depends on a core type name",
                 "Derive the behaviour from layouts, field anatomy, syntax rules or method tables, not names; write a name as `nameof(..)`, not a string; compare printed source with a renamed fixture file, not a `.stdout` line"));
@@ -603,7 +611,7 @@ fn rl_run_pass(root: str, rename_pairs: i64, violations: i64) -> usize {
     let files = rl_workspace_files(root);
     let sb = rl_build_sandbox(root, files, rename_pairs, violations);
     if glist_len(violations) == 0 {
-        rl_corpus_violations(root, rl_run_corpus(sb.dir), violations);
+        rl_corpus_violations(root, sb.dir, rl_run_corpus(sb.dir), violations);
     }
     rl_remove_sandbox(sb, violations);
     return sb.copied;
@@ -640,8 +648,12 @@ pub fn execute_dual_pass_rename_gate(workspace_root: str, ref opts: GateRunOptio
     if glist_len(violations0) == 0 && glist_len(violations1) == 0 {
         let run0 = rl_start_corpus(sb0.dir);
         let run1 = rl_start_corpus(sb1.dir);
-        rl_corpus_violations(root, rl_finish_corpus(run0), violations0);
-        rl_corpus_violations(root, rl_finish_corpus(run1), violations1);
+        // Both runs finish before either's failures are run again, so the
+        // reruns do not compete with a corpus run.
+        let done0 = rl_finish_corpus(run0);
+        let done1 = rl_finish_corpus(run1);
+        rl_corpus_violations(root, sb0.dir, done0, violations0);
+        rl_corpus_violations(root, sb1.dir, done1, violations1);
     }
     rl_remove_sandbox(sb0, violations0);
     rl_remove_sandbox(sb1, violations1);

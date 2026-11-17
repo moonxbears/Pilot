@@ -243,14 +243,14 @@ pub fn fmt_needs_space(prev2: str, prev: str, cur: str) -> bool {
 
 /// Tokens `[from, to)` on one line.
 fn render_flat(ref toks: List<FmtTok>, from: i64, to: i64) -> str {
-    var out = string_builder_new();
+    var out = StrBuilder();
     var prev2 = "";
     var prev = "";
     var i = from;
     while i < to {
         let t = toks[i].text;
-        if fmt_needs_space(prev2, prev, t) { out.append(" "); }
-        out.append(t);
+        if fmt_needs_space(prev2, prev, t) { out += " "; }
+        out += t;
         prev2 = prev;
         prev = t;
         i = i + 1;
@@ -314,8 +314,8 @@ fn tail_width(ref toks: List<FmtTok>, close: i64) -> i64 {
 /// `depth`, its `)` back at `depth`.
 fn render_broken(ref toks: List<FmtTok>, open: i64, close: i64, depth: i64) -> str {
     let inner = indent(depth + 1);
-    var out = string_builder_new();
-    out.append(toks[open].text + "\n");
+    var out = StrBuilder();
+    out += toks[open].text + "\n";
     var item = open + 1;
     var nest = 0;
     var i = open + 1;
@@ -334,13 +334,13 @@ fn render_broken(ref toks: List<FmtTok>, open: i64, close: i64, depth: i64) -> s
         if split {
             let text = render_flat(toks, item, i);
             if text.len() > 0 {
-                out.append(inner + text + (if i < close { ",\n" } else { "\n" }));
+                out += inner + text + (if i < close { ",\n" } else { "\n" });
             }
             item = i + 1;
         }
         i = i + 1;
     }
-    out.append(indent(depth) + ")");
+    out += indent(depth) + ")";
     return out.to_string();
 }
 
@@ -463,13 +463,14 @@ pub fn fmt_restyle(ref toks: List<FmtTok>, style: FmtStyle) -> List<FmtTok> {
 
 /// The lines being laid out: the finished text and the line in progress.
 struct Layout : IObject {
-    done: StringBuilder;
+    done: StrBuilder;
     line: str;
     depth: i64;
     prev2: str;
     prev: str;
 
     /// Ends the line in progress (if any) with `tail` and a newline.
+    [Workaround("seed.field_compound_operator", "appends to the `done` field with `append`, not `+=`")]
     fn flush(var ref self, tail: str) {
         if self.line.len() > 0 {
             self.done.append(self.line + tail + "\n");
@@ -493,10 +494,11 @@ struct Layout : IObject {
 }
 
 /// `toks` laid out in lines `max_width` columns wide, blocks indented.
+[Workaround("seed.field_compound_operator", "appends to the `done` field with `append`, not `+=`")]
 pub fn fmt_layout(ref toks: List<FmtTok>, max_width: i64) -> str {
     let width = if max_width < FMT_MIN_WIDTH { FMT_MIN_WIDTH } else { max_width };
     let total = toks.len() as i64;
-    var l = Layout { done: string_builder_new(), line: "", depth: 0, prev2: "", prev: "" };
+    var l = Layout { done: StrBuilder(), line: "", depth: 0, prev2: "", prev: "" };
     var parens = 0;
     var i = 0;
     while i < total {

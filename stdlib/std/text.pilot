@@ -4,32 +4,53 @@
 // ==============================================================================
 pub pkg std.text;
 
-/// Text built a piece at a time. The pieces are kept and joined once, when
-/// the text is read (`join_text`), so building n bytes copies each about
-/// log2(pieces) times instead of once per later piece.
-pub struct StringBuilder : IObject {
-    pub pieces: List<str>;
-    pub size: usize;
+use Pilot.Core.HostRaw;
 
-    pub pure fn len(ref self) -> usize => self.size;
+/// Text built a piece at a time: `var b = StrBuilder(); b += piece;`
+/// (`b.append(piece)` is the readable pair; another value appends as
+/// `b += f"{x}"`). Appending keeps the piece and adds up the size, copying
+/// nothing; reading copies each piece once into a buffer of exactly that
+/// size and makes the text from it. `s = s + piece` instead copies
+/// everything built so far on every append on the seed VM.
+pub struct StrBuilder : IObject {
+    pieces: List<str> = [];
+    size: usize = 0;
+
+    pub pure fn len(ref self) -> usize => .size;
 
     pub fn append(var ref self, piece: str) {
-        self.pieces.push(piece);
-        self.size = self.size + piece.len();
+        if piece == "" { return; }
+        .pieces.push(piece);
+        .size = .size + piece.len();
     }
 
-    /// The text so far; the pieces become one, so reading again is cheap.
+    /// `b + piece`: the builder with `piece` appended, so `b += piece` and
+    /// `b = b + x + y` append in order.
+    pub op + (piece: str) -> StrBuilder {
+        var me = self;
+        me.append(piece);
+        return me;
+    }
+
+    /// The text so far. It is kept as the one piece, so reading again is
+    /// cheap.
     pub fn to_string(var ref self) -> str {
-        if self.pieces.len() == 0 { return ""; }
-        if self.pieces.len() > 1 { self.pieces = [join_text(self.pieces, "")]; }
-        return self.pieces[0];
+        if .pieces.len() == 0 { return ""; }
+        if .pieces.len() == 1 { return .pieces[0]; }
+        let buf = RawMem.alloc(.size, 1);
+        var at = 0;
+        for p in .pieces {
+            let _ = str_copy_to_ptr(p, buf + at, p.len());
+            at = at + p.len();
+        }
+        // Typed: `str_from_ptr` is an untyped native (see std.proc).
+        let whole: str = str_from_ptr(buf, .size);
+        let _ = RawMem.free(buf, .size, 1);
+        .pieces = [whole];
+        return whole;
     }
 
     ~self() {}
-}
-
-pub fn string_builder_new() -> StringBuilder {
-    return StringBuilder { pieces: [], size: 0 };
 }
 
 /// `parts` in order, with `sep` between each two, as one string. The parts

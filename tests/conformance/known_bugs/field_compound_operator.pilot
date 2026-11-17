@@ -1,0 +1,33 @@
+// KNOWN BUG seed.field_compound_operator: `x.f += v`, where the field `f`
+// holds a struct that declares `op +`, runs the machine `+` instead of the
+// struct's operator on the seed: with an integer operand it stops with
+// "cannot apply `+` to record and integer"; with a `str` operand the field
+// silently becomes text and a later member call stops. A local (`var b = Acc(); b += 1;`) calls the operator; PilIR and
+// the emitted C call it for the field too. Found 2026-11-17 while moving
+// selfhost/fmt/fmt.pilot onto std.text.StrBuilder.
+//
+// Expected by hand: the local starts at 0 and gains 1 -> 1; the field
+// starts at 0, gains 2 through `h.acc += 2`, then 3 in a method through
+// `self.acc += 3` -> 5.
+pub struct Acc : IObject {
+    pub n: i64 = 0;
+    pub op + (k: i64) -> Acc => Acc { n: .n + k };
+    pub fn get(ref self) -> i64 => .n;
+}
+
+struct Holder : IObject {
+    acc: Acc;
+    fn bump(var ref self) {
+        self.acc += 3;
+    }
+}
+
+fn main() {
+    var b = Acc();
+    b += 1;
+    print(b.get());
+    var h = Holder { acc: Acc() };
+    h.acc += 2;
+    h.bump();
+    print(h.acc.get());
+}

@@ -1,0 +1,25 @@
+// KNOWN BUG seed.operator_overload_by_type: a type that declares one
+// operator twice, told apart by the operand's type, should call the `str`
+// one for `t + "ab"` and the `i64` one for `t + 42`. The seed calls the
+// `i64` one for both (`0 + "ab"` gives the text "0ab"); PilIR (and so the
+// emitted C) stops at the `ir.operator_overload` seam instead of calling
+// the first. Found 2026-11-17 while building std.text.StrBuilder.
+//
+// Expected output, worked by hand: "ab" adds its 2 bytes -> 2; 42 adds 42
+// -> 44; "xyz" adds 3 -> 47.
+struct Tally : IValue {
+    pub n: i64;
+
+    pub op + (s: str) -> Tally => Tally { n: .n + s.len() };
+    pub op + (k: i64) -> Tally => Tally { n: .n + k };
+}
+
+fn main() {
+    var t: Tally = Tally { n: 0 };
+    t = t + "ab";
+    print(t.n);
+    t = t + 42;
+    print(t.n);
+    t += "xyz";
+    print(t.n);
+}

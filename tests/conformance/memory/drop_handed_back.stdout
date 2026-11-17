@@ -1,0 +1,17 @@
+compound 13
+drop 13
+chain 23
+drop 23
+methods 30
+drop 30
+drop 40
+fresh 41
+drop 41
+discarded 50
+drop 50
+read 60
+still 60
+drop 60
+drop 71
+kept 71
+end

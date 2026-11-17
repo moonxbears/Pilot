@@ -768,31 +768,6 @@ pub fn drop_planner(var ref inf: Infer) -> DropPlanner {
     return pl;
 }
 
-/// Whether `n`, an identifier, names the receiver of the method it is in.
-fn names_receiver(ref s: Snap, n: i64) -> bool => s.receiver != "" && kind(s, n) == nk_ident() && node_name(s, n) == s.receiver;
-
-/// Whether some value `body` gives may be the receiver itself: an
-/// expression body that is it, or a `return` of it.
-fn may_give_receiver(ref s: Snap, body: i64) -> bool {
-    if body < 0 { return false; }
-    if names_receiver(s, body) { return true; }
-    if kind(s, body) == nk_block() {
-        var out = false;
-        for c in children(s, body) { if gives_receiver(s, c) { out = true; } }
-        return out;
-    }
-    return false;
-}
-
-fn gives_receiver(ref s: Snap, n: i64) -> bool {
-    if n < 0 { return false; }
-    let k = kind(s, n);
-    if k == nk_lambda() || k == nk_fn() { return false; }
-    if k == nk_return() && lhs(s, n) >= 0 && names_receiver(s, lhs(s, n)) { return true; }
-    for c in children(s, n) { if gives_receiver(s, c) { return true; } }
-    return false;
-}
-
 /// Whether call `c` makes a new value: a function's, a constructor's or a
 /// struct literal's result, or a method's that is not the receiver handed
 /// back. A method returning its receiver's own type with no body (an engine
