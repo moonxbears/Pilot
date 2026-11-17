@@ -1,0 +1,101 @@
+// A method or operator that hands back its receiver (`return self`, or a
+// local bound to it: `var me = self; ..; return me;`) gives the caller the
+// same value, not a new one. When the result is kept (bound, assigned,
+// passed by value), the receiver moves into it, so the value is dropped
+// once, by its new owner; `b += k` is `b = b + k`, so nothing is dropped
+// there. A result thrown away, or only read, leaves the receiver where it is.
+//
+// Expected output, worked by hand (each value is dropped after its last use):
+//   compound:   10 +1 -> 11, +2 -> 13, one value all along   -> compound 13, drop 13
+//   chain:      20 +1 +2 = 23, one value                     -> chain 23, drop 23
+//   methods:    back and via hand back 30                    -> methods 30, drop 30
+//   fresh:      `fresh` makes a new 41; 40 is only read and is
+//               dropped after that statement                 -> drop 40, fresh 41, drop 41
+//   discarded:  `a.back();` keeps nothing, so `a` stays       -> discarded 50, drop 50
+//   read:       `a.back().n` only reads                      -> read 60, still 60, drop 60
+//   passed:     71 moves into `keep`, which drops it before it
+//               returns                                       -> drop 71, kept 71
+struct H : IObject {
+    pub n: i64;
+
+    ~self() {
+        print(f"drop {.n}");
+    }
+
+    pub op + (k: i64) -> H {
+        var me = self;
+        me.n = me.n + k;
+        return me;
+    }
+
+    pub fn back(self) -> H {
+        return self;
+    }
+
+    pub fn via(self) -> H {
+        let me = self;
+        return me;
+    }
+
+    pub fn fresh(self, k: i64) -> H => H { n: .n + k };
+}
+
+fn mk(n: i64) -> H => H { n: n };
+
+fn keep(h: H) -> i64 {
+    return h.n;
+}
+
+fn compound() {
+    var b = mk(10);
+    b += 1;
+    b = b + 2;
+    print(f"compound {b.n}");
+}
+
+fn chain() {
+    let h = mk(20);
+    let g = h + 1 + 2;
+    print(f"chain {g.n}");
+}
+
+fn methods() {
+    let a = mk(30);
+    let b = a.back();
+    let c = b.via();
+    print(f"methods {c.n}");
+}
+
+fn fresh_value() {
+    let a = mk(40);
+    let b = a.fresh(1);
+    print(f"fresh {b.n}");
+}
+
+fn discarded() {
+    let a = mk(50);
+    a.back();
+    print(f"discarded {a.n}");
+}
+
+fn read_through() {
+    let a = mk(60);
+    print(f"read {a.back().n}");
+    print(f"still {a.n}");
+}
+
+fn passed() {
+    let a = mk(70);
+    print(f"kept {keep(a + 1)}");
+}
+
+fn main() {
+    compound();
+    chain();
+    methods();
+    fresh_value();
+    discarded();
+    read_through();
+    passed();
+    print("end");
+}

@@ -229,6 +229,74 @@ pub fn call_target(ref f: Flow, call: i64) -> i64 {
     return -1;
 }
 
+/// The operator declaration the binary expression `n` calls (one its left
+/// operand's type declares with a body), or -1.
+pub fn operator_target(ref f: Flow, n: i64) -> i64 {
+    let s = f.inf.p.s;
+    if kind(s, n) != nk_binary() { return -1; }
+    let op = flags(s, n);
+    let symbols = binary_op_symbols();
+    if op <= 0 || op >= symbols.len() { return -1; }
+    if some m = prog_member(f.inf.p, type_of(f.inf, lhs(s, n)), symbols[op]) {
+        let k = kind(s, m.decl);
+        if k == nk_fn() || k == nk_operator() { return m.decl; }
+    }
+    return -1;
+}
+
+/// Whether `n`, an identifier, names the receiver of the method it is in.
+pub fn names_receiver(ref s: Snap, n: i64) -> bool => s.receiver != "" && kind(s, n) == nk_ident() && node_name(s, n) == s.receiver;
+
+/// Whether some value the body `body` gives may be the receiver itself: an
+/// expression body that is it, or a `return` of it or of a local bound to it
+/// (`var me = self; ..; return me;`).
+pub fn may_give_receiver(ref s: Snap, body: i64) -> bool {
+    if body < 0 { return false; }
+    if names_receiver(s, body) { return true; }
+    if kind(s, body) != nk_block() { return false; }
+    var aliases: List<str> = [];
+    receiver_aliases(s, body, aliases);
+    return gives_receiver(s, body, aliases);
+}
+
+/// Collects into `aliases` the locals of `n` bound to the receiver or to
+/// another such local, in order.
+fn receiver_aliases(ref s: Snap, n: i64, var ref aliases: List<str>) {
+    if n < 0 { return; }
+    let k = kind(s, n);
+    if k == nk_lambda() || k == nk_fn() { return; }
+    if (k == nk_let() || k == nk_var()) && rhs(s, n) >= 0 && is_receiver_or(s, rhs(s, n), aliases) {
+        aliases.push(node_name(s, n));
+    }
+    for c in children(s, n) { receiver_aliases(s, c, aliases); }
+}
+
+fn is_receiver_or(ref s: Snap, n: i64, ref aliases: List<str>) -> bool {
+    if names_receiver(s, n) { return true; }
+    if kind(s, n) != nk_ident() { return false; }
+    let name = node_name(s, n);
+    for a in aliases { if a == name { return true; } }
+    return false;
+}
+
+fn gives_receiver(ref s: Snap, n: i64, ref aliases: List<str>) -> bool {
+    if n < 0 { return false; }
+    let k = kind(s, n);
+    if k == nk_lambda() || k == nk_fn() { return false; }
+    if k == nk_return() && lhs(s, n) >= 0 && is_receiver_or(s, lhs(s, n), aliases) { return true; }
+    for c in children(s, n) { if gives_receiver(s, c, aliases) { return true; } }
+    return false;
+}
+
+/// Whether the call or operator `c` hands back its receiver: its target has
+/// a body that may give the receiver itself.
+fn hands_back_receiver(ref f: Flow, c: i64) -> bool {
+    let s = f.inf.p.s;
+    let target = if kind(s, c) == nk_binary() { operator_target(f, c) } else { call_target(f, c) };
+    if target < 0 { return false; }
+    return may_give_receiver(s, fn_body(s, target));
+}
+
 /// Whether the identifier `n` is used by value where it stands.
 pub fn is_move_position(var ref f: Flow, n: i64) -> bool {
     let p = f.inf.p;
@@ -236,6 +304,20 @@ pub fn is_move_position(var ref f: Flow, n: i64) -> bool {
     let up = p.parents[n];
     if up < 0 { return false; }
     let k = kind(s, up);
+    // The receiver of a method or operator that hands it back moves into
+    // the result when the result is kept (`let g = h.back()`, `b = b + x`,
+    // `b += x`): the result is the same value, so `n` must not also be
+    // dropped. A result thrown away, or only read, leaves `n` where it is.
+    if k == nk_member() && lhs(s, up) == n {
+        let call = p.parents[up];
+        if call >= 0 && kind(s, call) == nk_call() && children(s, call)[0] == up {
+            return hands_back_receiver(f, call) && is_move_position(f, call);
+        }
+        return false;
+    }
+    if k == nk_binary() && lhs(s, up) == n && operator_target(f, up) >= 0 {
+        return hands_back_receiver(f, up) && is_move_position(f, up);
+    }
     if k == nk_assign() && rhs(s, up) == n {
         // Storing into a `ref` field borrows the value.
         let target = lhs(s, up);

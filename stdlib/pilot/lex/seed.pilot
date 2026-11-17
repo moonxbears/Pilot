@@ -64,9 +64,9 @@ pub fn seed_table_text(ref m: ModalLexer, full_key: str, var ref errors: List<Le
         fam = fam + 1;
     }
     if errors.len() > 0 { return ""; }
-    var b = text.string_builder_new();
-    b.append(lexer_text(m, seed_table_key(full_key)));
-    b.append(f"seed_special {SEED_EOF_KIND} {SEED_ERROR_KIND}\n");
-    b.append(ints_line("seed_kinds", kinds));
+    var b = StrBuilder();
+    b += lexer_text(m, seed_table_key(full_key));
+    b += f"seed_special {SEED_EOF_KIND} {SEED_ERROR_KIND}\n";
+    b += ints_line("seed_kinds", kinds);
     return b.to_string();
 }

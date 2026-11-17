@@ -1,0 +1,29 @@
+// KNOWN BUG check.temp_receiver_drop: a value made only to call a method on
+// it (`mk(1).read()`), where the method does not hand the receiver back, is
+// never dropped: the drop plan (selfhost/check/drops.pilot) drops bindings
+// and discarded statement results, not a temporary receiver. Every engine
+// carries out the same plan, so all three leak it. Found 2026-11-17 while
+// fixing double drops of handed-back receivers.
+//
+// Expected by hand: `mk(1)` lives only for the call, so it is dropped once
+// the statement `let g = ..` ends, before `g` is printed: "drop 1", "1",
+// "end".
+struct H : IObject {
+    pub n: i64;
+
+    ~self() {
+        print(f"drop {.n}");
+    }
+
+    pub fn read(self) -> i64 {
+        return .n;
+    }
+}
+
+fn mk(n: i64) -> H => H { n: n };
+
+fn main() {
+    let g = mk(1).read();
+    print(g);
+    print("end");
+}

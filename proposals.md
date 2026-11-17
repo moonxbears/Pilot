@@ -62,6 +62,8 @@ The path to `PROP-022`, in order. Each item is built and verified on its own (th
 | **`PROP-029`** | Seed Lexer: `!` Ends No Operand, So `!.on` Reads as `!self.on`, Closing Known Bug `seed.not_prefix_dot` | `0` (one argument in `crates/pilot-lexer/src/lexer.rs`) | `SUPERSEDED 2026-11-17 by PROP-021 21H` |
 | **`PROP-030`** | Seed: A `const` List or Map of Any Length Compiles (`materialize_cmap` Releases Each Element's Register), Closing Known Bug `seed.const_list_registers` | `+6` in `crates/pilot-vm/src/lib.rs` | `APPROVED BY OWNER 2026-11-16 ("Approve PROP-030") AND BUILT` |
 | **`PROP-032`** | Enums With Text Values (`enum CacheField { Key = "key", .. }`): `as str`, printing, `ENUM001`–`ENUM003` | about `+12` in `crates/pilot-vm/src/lib.rs` (`register_enum`) | `APPROVED BY OWNER 2026-11-16 ("Approve PROP-032")` |
+| **`PROP-033`** | The Analyzer Skips Units Whose Diagnostics Are Thrown Away (`ast_unit_is_user`) | about `+10` in `crates/pilot-cli/src/run.rs`, `crates/pilot-analysis/src/{pipeline,infer}.rs` | `PROPOSED 2026-11-17 — AWAITING OWNER APPROVAL` |
+| **`PROP-034`** | A String Built From Many Parts Is Allocated Once: f-Strings and `+` Chains Lower to One `str_build`, and a Unique String Appends in Place (Perceus) | about `+15` for the seed VM's n-part build (opcode or appended `HostOp`), itemized when sequenced; the rest is Pilot and C | `DRAFT 2026-11-17 — DESIGN; SEQUENCED AFTER PROP-025 STEPS 1–3` |
 | **`PROP-003`** | Wave 3, itemized 2026-11-15: slices 3A–3F (struct `invariant` rule, dead f-string desugarer, `op_checked` to Pilot, contract rules, f-string scanner dedupe, small trims) | about `-270` now (most of the planned `-2,850` waits for `PROP-005`/`006`) | `3A + 3B BUILT 2026-11-15 (−29 RUST); 3C DEFERRED TO PROP-005; 3D–3F DRAFT` |
 | **`PROP-004`** | Retire Legacy `crates/pilot-analysis` Crate (`1,591` formatted `src` LOC; `647` packed) & Migrate Milestone Harnesses to `.pilot` | `-1,591` LOC (formatted) | `PLANNED (WAVE 4)` |
 | **`PROP-005`** | Replace Rust `BytecodeCompiler` (`24` `lower_*.rs` + `vm_gen.rs` + `codes.rs`) with `selfhost/vm/ir_to_pilc.pilot` | about `-7,950` LOC packed, about `-8,770` formatted (PROP-016) | `ITEMIZED 2026-11-15: 5A APPROVED AND BUILT (PILOT ONLY); 5B ITEMIZED (SLICES 5B.1–5B.6); D1/D2/D3/D5 DECIDED 2026-11-15, D4 OPEN; 5B.1 AND 5B.2 APPROVED AND BUILT (PILOT ONLY); 5B.3 APPROVED, IN PROGRESS (`ref<T>`, CLI AND DROP PLAN ROWS DONE; RUST AMENDMENT 5B.3a APPROVED AND BUILT 2026-11-16); 5B.4–5B.6, 5C AND 5D APPROVED 2026-11-17 AND QUEUED (WORK QUEUE ITEMS 2–5; D4 AND EACH RUST LIST STILL NEEDED); 5E–5F NOT APPROVED; BOOTSTRAP T1/T2 NEEDS AN OWNER DECISION BEFORE 5E` |
@@ -3323,6 +3325,74 @@ The analyzer cannot tell a user unit from a stdlib unit today. The only unit que
 **Rust LOC:** about +10 lines, an addition to the seed. It is weighed against a per-case saving on every conformance case on all engines. Measure before/after with `pilot test tests/conformance` before landing.
 
 **Acceptance:** `pilot test`, `--ir` and `--emit c` keep their results. `cargo test -p pilot-analysis` and `-p pilot-cli` show no new failures. `cargo fmt --check` passes. `paused_max_total_rust_loc()` is updated only with the owner's approval.
+
+---
+
+## `PROP-034` — A String Built From Many Parts Is Allocated Once: f-Strings and `+` Chains Lower to One Join, and a Unique String Appends in Place
+
+**Status: DRAFT 2026-11-17, design only; not for building until `PROP-025` steps 1–3 land.** Owner direction 2026-11-17: "lets add this as a proposal after the building blocks of the pilot parser are built from that proposal". The question it came from: does `a + b + c` allocate once for the final string, or once per `+`?
+
+### 1. What happens today (read 2026-11-17)
+
+- **The parser keeps every `+`.** `crates/pilot-parser` builds `((a + b) + c) + d`. `f"x{a}y{b}"` is rewritten into the same left-nested chain (`crates/pilot-parser/src/fstring.rs` `lower_fstring`). `selfhost/ir/pass_fold.pilot` folds integers only, so even `"a" + "b"` reaches run time.
+- **Seed VM (`pilot run`, and `--ir`, which runs on the same VM):** each string `+` renders both operands into a Rust `String`, then copies it into a new VM string (`crates/pilot-vm/src/checked.rs` `binary_op`). It also calls `collect_if_due` (`vm.rs`). A chain of k parts makes k − 1 strings and copies the growing prefix each time, which is O(n²) bytes.
+- **C backend (`--emit c`):** `pilot_v_concat` (`runtime/c/pilot_rt.h`) is still one `+` at a time, but:
+  - strings of 15 bytes or less need no allocation;
+  - when the left string ends at its buffer's written end, the right one is appended in place;
+  - a growing buffer is reallocated at twice what it needs.
+  
+  Chains and `s = s + x` loops therefore copy O(n) bytes, amortized, without being sized once.
+- **`std.text.join_text` also builds pairwise:** it joins neighbours with `+` round after round, O(n log n). No engine op builds one string from a list of parts.
+
+### 2. What other languages do
+
+- **One many-part concatenation, sized once:**
+  - Go: `a + b + c` becomes one `concatstrings` call, on the stack when small and not escaping.
+  - C#: `String.Concat(a, b, c, d)`; interpolation goes through a pooled handler; constant pieces are folded at compile time.
+  - Java 9+: `invokedynamic` `StringConcatFactory` (JEP 280).
+  - Python: f-strings use the `BUILD_STRING n` opcode.
+  - Lua: `CONCAT` over consecutive registers.
+- **Loops of `s = s + x`:** a builder type, or an in-place append when the string has one owner (CPython refcount 1, Rust `String + &str`, Koka and Lean 4 under Perceus reuse).
+
+### 3. Design
+
+1. **One node in the Pilot parser.** When `PROP-025`'s parser lowers `f"..."`, it emits one `StrBuild` node holding the parts in order. It does not emit a `+` chain. Neighbouring literal parts are joined at parse time. A hole with a format pattern stays a call of the bound format function, as today.
+2. **`+` chains join the same node in a Pilot pass, conservatively.**
+   - The chain is flattened only from the first operand the checker knows is `str`, so `1 + 2 + "a"` stays `(1 + 2) + "a"`, which gives `"3a"`.
+   - Operands of unknown or generic type keep plain `+`.
+   - Chains of fewer than 3 parts keep plain `+`.
+   - Evaluation stays left to right, and each part is shown exactly as `+` shows it today.
+3. **PilIR:** one op, `str_build` (n operands). The verifier, printer, text parser, `pilot inspect` and const-eval learn it. Const-eval folds it when every part is constant.
+4. **Engines:**
+   - **C (`runtime/c/pilot_rt.h`, not Rust):**
+     - `pilot_v_build(n, parts)` adds up the lengths and allocates once.
+     - Results of 15 bytes or less stay inline.
+     - When the first part is uniquely held and has room, the call appends in place, as `pilot_v_concat` does today.
+   - **Seed VM (Rust, frozen airlock):**
+     - It needs one appended way to build a string from n registers: either an opcode or one appended `HostOp` with its `[EngineOp]` owner in Pilot.
+     - Which one, and the exact files, are itemized when this proposal is sequenced. The choice depends on what `PROP-005` leaves of the bytecode compiler.
+     - This is the only Rust in the proposal: about +15 lines. It replaces the per-`+` render-and-copy for the most common string pattern in the selfhost tree.
+   - **JS / Python / Lua transpilers:** emit the target's own join (`[...].join("")`, `"".join(...)`, `table.concat`).
+5. **In-place append for loops, decided by Perceus.** `selfhost/ir/pass_perceus.pilot` already proves when a value is unique. For `s = s + x` with `s` unique, it emits an append-in-place form (a `drop_reuse` of the string buffer). This makes the C runtime's run-time check a static decision on every engine, visible in `pilot inspect`. A `StringBuilder`-style type is not added.
+6. **`join_text` uses `str_build`** once it exists, so library joins also allocate once.
+
+### 4. Order
+
+1. `PROP-025` steps 1–3: the Pilot parser exists and the checker and PilIR read its AST.
+2. Steps 3.1–3.3 and the C and transpiler parts of 3.4 (Pilot and C only).
+3. The seed VM part of 3.4, itemized for approval. Until it lands, the seed VM lowers `str_build` to today's `+` chain, so behaviour is identical.
+4. Step 3.5 (Perceus in place) and step 3.6.
+
+### 5. Acceptance
+
+- **Output:** every program prints exactly what it prints today on `pilot test`, `--ir` and `--emit c`. New conformance cases, with expectations worked out by hand, cover:
+  - a numeric prefix (`1 + 2 + "a"` → `3a`);
+  - non-string parts (lists, records, `opt`);
+  - evaluation order with side-effecting parts;
+  - the empty f-string, an all-literal f-string, and format patterns.
+- **Allocation:** on the C backend, an f-string of k parts makes at most one allocation. This is checked by a leak and allocation count in `pilot bench`. A 10,000-step `s = s + x` loop copies O(n) bytes on every engine.
+- **Speed:** `pilot test tests/conformance` time, measured before and after on the seed and `--ir`.
+- **Litmus:** renaming `str` keeps all of this working; the pass finds strings by `TypeId`, never by name.
 
 ## `PROP-003` — Wave 3, Itemized: Parser Desugarings and VM Helpers That Can Leave Rust Now
 

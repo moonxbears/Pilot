@@ -834,6 +834,7 @@ pub fn lower_binary(var ref lw: Lowerer, n: i64) -> u32 {
     if !none_cmp && op > 0 && op < symbols.len() {
         let lt = value_type(lw, lhs(s, n));
         if runs_as_code(lw, lt, symbols[op]) {
+            if operator_overloaded(lw, lt, symbols[op]) { return seam("ir.operator_overload", f"`{node_text(s, n)}`: the type declares `op {symbols[op]}` more than once; choosing the declaration by the operand's type is not lowered to PilIR yet"); }
             let recv = lower_expr(lw, lhs(s, n));
             return member_call(lw, recv, lt, symbols[op], [rhs(s, n)], physics_of(lw, n), n);
         }
