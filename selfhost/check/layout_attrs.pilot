@@ -89,6 +89,18 @@ fn check_packed_lends(ref e: Effects, var ref sink: DiagSink) {
     let inf = e.inf;
     let p = inf.p;
     let s = p.s;
+    // No packed type: nothing to report. The walk's types and call targets
+    // are already memoized by check_rules, so skipping it changes no later
+    // answer.
+    var any_packed = false;
+    for row in s.attrs {
+        let t: i64 = row[0];
+        if t >= 0 && sym_text(s, row[1]) == layout_attr() && type_is_packed(p, node_name(s, t)) {
+            any_packed = true;
+            break;
+        }
+    }
+    if !any_packed { return; }
     var n = 0;
     n = s.user_lo;
     while n < s.user_hi {

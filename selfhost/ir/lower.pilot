@@ -360,16 +360,18 @@ pub fn function_index(var ref lw: Lowerer, decl: i64, self_t: i64) -> i64 => spe
 pub fn specialized_index(var ref lw: Lowerer, decl: i64, self_t: i64, arg_types: List<i64>) -> i64 {
     let s = lw.inf.p.s;
     var spec = "";
-    var shown = "";
-    for t in arg_types {
-        spec = spec + f",{t}";
-        if shown.len() > 0 { shown = shown + ","; }
-        shown = shown + if ty_is_unknown(lw.inf.p.tt, t) { "_" } else { ty_display(lw.inf.p.tt, t).replace(" ", "") };
-    }
+    for t in arg_types { spec = spec + f",{t}"; }
     let owner = owner_type_decl(lw, decl);
     let recv = if owner < 0 || is_static_decl(s, decl) { ty_unknown() } else if ty_is_named(lw.inf.p.tt, self_t) { self_t } else { owner_type(lw, owner) };
     let k = f"{decl}@{recv}{spec}";
     if lw.fn_index.has(k) { return lw.fn_index[k]; }
+    // The shown types name a new function only, so they are worked out
+    // after the cache misses (`ty_display` only reads the type table).
+    var shown = "";
+    for t in arg_types {
+        if shown.len() > 0 { shown = shown + ","; }
+        shown = shown + if ty_is_unknown(lw.inf.p.tt, t) { "_" } else { ty_display(lw.inf.p.tt, t).replace(" ", "") };
+    }
     let idx = lw.queue.len() as i64;
     lw.fn_index.set(k, idx);
     lw.queue.push(decl);

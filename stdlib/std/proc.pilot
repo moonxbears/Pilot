@@ -192,6 +192,9 @@ pub struct ProcessHandle : IObject {
     /// (`-1`: until something comes) for either stream to have something.
     /// A stream that has ended is closed. Returns whether either is open.
     pub fn drain(timeout_ms: i64) -> bool {
+        // Both streams closed: nothing to wait on (a pool asks every
+        // running child each millisecond).
+        if .stdout_fd < 0 && .stderr_fd < 0 { return false; }
         let fds = RawMem.alloc(32, 8);
         var n = 0;
         if .stdout_fd >= 0 { proc_pollfd_set(fds, n, .stdout_fd); n = n + 1; }

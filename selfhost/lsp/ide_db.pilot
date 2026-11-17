@@ -131,6 +131,8 @@ pub fn apply_doc_span_edit(doc: str, start_byte: i64, end_byte: i64, replacement
 }
 
 pub fn should_early_cutoff(old_source: str, new_source: str) -> i64 {
+    // The same text has the same signature.
+    if old_source == new_source { return 1; }
     let s1 = extract_item_tree_signature(old_source);
     let s2 = extract_item_tree_signature(new_source);
     if s1 == s2 {

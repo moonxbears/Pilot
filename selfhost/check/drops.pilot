@@ -490,11 +490,15 @@ fn place(var ref pl: DropPlanner, n: i64, b: i64, site: i64, key: str) {
 /// Places the drop of `b` among `stmts[from..]` of block `blk`. With
 /// `at_entry`, a block that never uses `b` drops it as it starts.
 fn place_seq(var ref pl: DropPlanner, blk: i64, ref stmts: List<i64>, from: i64, b: i64, site: i64, key: str, at_entry: bool) -> bool {
+    // The last statement that uses `b`: scanned from the end (`uses` is pure).
     var last = -1;
-    var i = from;
-    while i < stmts.len() {
-        if uses(pl, stmts[i], b) { last = i; }
-        i = i + 1;
+    var i = stmts.len() - 1;
+    while i >= from {
+        if uses(pl, stmts[i], b) {
+            last = i;
+            break;
+        }
+        i = i - 1;
     }
     if last < 0 {
         if at_entry { row(pl, ::Before, blk, pl.flow.inf.r.name[b], key); }

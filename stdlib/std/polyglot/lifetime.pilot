@@ -67,6 +67,10 @@ pub struct ThreadAffineDropQueue : IObject {
     /// Runs, on thread `tid`, every destructor queued for it, and removes
     /// them from the queue.
     pub var fn drain_thread(tid: u64) -> usize {
+        // Nothing queued for `tid` (or nothing at all): the queue stays as is.
+        var first: usize = 0;
+        while first < .queue.len() && .queue[first].target_tid != tid { first = first + 1; }
+        if first == .queue.len() { return 0; }
         var kept: List<QueuedDropItem> = [];
         var drained: usize = 0;
         var i: usize = 0;

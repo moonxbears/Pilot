@@ -99,7 +99,13 @@ pub fn eliminate_dead_code(var ref f: IrFunction) -> bool {
             var kept: List<IrInst> = [];
             for inst in b.insts {
                 let dead = inst.result != ir_no_value() && uses[inst.result] == 0 && inst.opcode < removable.len() && removable[inst.opcode] && cannot_fail(f, inst, producers);
-                if dead { again = true; } else { kept.push(inst); }
+                // Removing an instruction with no value operands lowers no
+                // use count, so it cannot make another one dead.
+                if dead {
+                    if !again && value_positions(f, inst).len() > 0 { again = true; }
+                } else {
+                    kept.push(inst);
+                }
             }
             if kept.len() != b.insts.len { b.insts = kept; changed = true; }
         }

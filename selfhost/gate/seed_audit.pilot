@@ -986,28 +986,35 @@ fn sa_count_host_op_sites(src: str) -> i64 {
 fn sa_strip_rs_comments(src: str) -> str {
     let cfg_pos = gm_find(src, "#" + "[cfg(test)]", 0);
     let lim = if cfg_pos >= 0 { cfg_pos } else { src.len() };
-    var out = "";
+    // The text between comments is copied a run at a time, not a byte at a
+    // time (which copies the output once per byte).
+    var parts: List<str> = [];
+    var run = 0;
     var i = 0;
     while i < lim {
         let b = src.byte_at(i);
         if b == 47 && i + 1 < lim {
             let b2 = src.byte_at(i + 1);
             if b2 == 47 {
+                parts.push(src.slice(run, i));
                 i = i + 2;
                 while i < lim && src.byte_at(i) != 10 { i = i + 1; }
+                run = i;
                 continue;
             }
             if b2 == 42 {
+                parts.push(src.slice(run, i));
                 i = i + 2;
                 while i + 1 < lim && !(src.byte_at(i) == 42 && src.byte_at(i + 1) == 47) { i = i + 1; }
                 i = if i + 1 < lim { i + 2 } else { lim };
+                run = i;
                 continue;
             }
         }
-        out = out + src.slice(i, i + 1);
         i = i + 1;
     }
-    return out;
+    parts.push(src.slice(run, lim));
+    return text.join_text(parts, "");
 }
 
 fn sa_audit_airlock_boundary(root: str, violations: i64) -> i64 {
@@ -1025,7 +1032,9 @@ fn sa_audit_airlock_boundary(root: str, violations: i64) -> i64 {
                     // Runtime `host_op` sites are checked by owner instead
                     // (verify_airlock_abi, Amendment A1), so they do not count here.
                     let src = gate_fs_read_text(full);
-                    let hits = sa_count_engine_calls(src) - sa_count_host_op_sites(src);
+                    // A file that never spells `__engine` has no calls and
+                    // no host_op sites; most files do not.
+                    let hits = if src.find("__engine", 0) < 0 { 0 } else { sa_count_engine_calls(src) - sa_count_host_op_sites(src) };
                     if hits > 0 {
                         let cap = if ratchet.has(rel) { ratchet.get(rel) } else { 0 };
                         if hits > cap {

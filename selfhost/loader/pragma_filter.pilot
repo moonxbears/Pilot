@@ -108,6 +108,8 @@ pub pure fn pf_find(haystack: str, needle: str, start: i64) -> i64 {
 
 pub fn pragma_solve_intervals(src: str) -> i64 {
     let list = glist_new();
+    // Every interval starts at a `#pragma` line: none, no scan.
+    if pf_find(src, "#pragma", 0) < 0 { return list; }
     let open_keys = glist_new();
     let open_starts = glist_new();
     let sl = src.len();

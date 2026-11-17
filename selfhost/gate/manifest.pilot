@@ -299,21 +299,14 @@ pub pure fn gm_ends_with(s: str, sfx: str) -> bool {
     return s.slice(l - sl, l) == sfx;
 }
 
+/// The first `needle` in `haystack` at or after byte `start`, or -1 (and
+/// -1 for an empty needle or a negative start). The search is the string's
+/// own `find`, one engine step, not a byte loop on the interpreter: the
+/// gate searches every file of the tree many times.
 pub pure fn gm_find(haystack: str, needle: str, start: i64) -> i64 {
     if needle.len() == 0 || start < 0 { return -1; }
-    let hl = haystack.len();
-    let nl = needle.len();
-    if nl > hl || start + nl > hl { return -1; }
-    var i = start;
-    while i + nl <= hl {
-        var j = 0;
-        while j < nl && haystack.byte_at(i + j) == needle.byte_at(j) {
-            j = j + 1;
-        }
-        if j == nl { return i; }
-        i = i + 1;
-    }
-    return -1;
+    if start + needle.len() > haystack.len() { return -1; }
+    return haystack.find(needle, start);
 }
 
 pub pure fn gm_contains(haystack: str, needle: str) -> bool {

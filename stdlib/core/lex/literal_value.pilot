@@ -63,8 +63,12 @@ pub struct IntLiteral : IObject {
 /// neither a digit of its radix nor the separator, or no digit at all.
 pub fn int_from_text(text: str) -> IntLiteral? {
     var info = RADIXES[0];
+    // No prefix starts another, so the first match is the only one.
     for r in RADIXES {
-        if r.prefix != "" && text.starts_with(r.prefix) { info = r; }
+        if r.prefix != "" && text.starts_with(r.prefix) {
+            info = r;
+            break;
+        }
     }
     let sep = DIGIT_SEPARATOR.byte_at(0) as i64;
     var limbs: List<i64> = [];
@@ -103,9 +107,16 @@ pub fn range_text(bits: i64, signed: bool) -> str {
 /// stdlib/core/convert/decimal_round.pilot). None when it is not one.
 pub fn float_from_text(text: str) -> DecimalDigits? {
     let point = text.find(DECIMAL_POINT, 0) >= 0;
+    // A point already makes it a float; the marks are looked for only
+    // without one, and only until one is found.
     var mark = false;
-    for i in 0 .. EXPONENT_MARKS.len() {
-        if text.find(EXPONENT_MARKS.slice(i, i + 1), 0) >= 0 { mark = true; }
+    if !point {
+        for i in 0 .. EXPONENT_MARKS.len() {
+            if text.find(EXPONENT_MARKS.slice(i, i + 1), 0) >= 0 {
+                mark = true;
+                break;
+            }
+        }
     }
     if !point && !mark { return none; }
     return read_decimal_digits(text, 0, DIGIT_SEPARATOR.byte_at(0) as i64, false);

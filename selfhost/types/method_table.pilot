@@ -90,6 +90,8 @@ pub fn register_method(
     // collision reported among them for this name.
     if entry.tier == MemberTier::Tier1ExplicitStruct {
         mt.methods[m_name] = entry;
+        // Nothing reported yet: nothing to settle.
+        if mt.diagnostics.len() == 0 { return; }
         var kept: List<str> = [];
         let settled = "on '" + m_name + "'";
         for d in mt.diagnostics {

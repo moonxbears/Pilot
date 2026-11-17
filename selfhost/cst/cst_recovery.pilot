@@ -44,6 +44,8 @@ pub fn damerau_levenshtein_le1(a: str, b: str) -> i64 {
         while i < alen {
             if a.byte_at(i) != b.byte_at(i) {
                 mismatch_count = mismatch_count + 1;
+                // Past two mismatches the answer is 99 whatever follows.
+                if mismatch_count > 2 { return 99; }
                 if first_mismatch < 0 {
                     first_mismatch = i;
                 } else if second_mismatch < 0 {

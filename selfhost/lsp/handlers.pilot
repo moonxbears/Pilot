@@ -96,6 +96,7 @@ pub pure fn lsp_str_contains_word(text: str, word: str) -> bool {
     let tlen = text.len();
     let wlen = word.len();
     if wlen == 0 || tlen < wlen { return false; }
+    if text.find(word, 0) < 0 { return false; }
     var i = 0;
     while i + wlen <= tlen {
         if text.slice(i, i + wlen) == word {
@@ -358,6 +359,8 @@ pub fn find_best_node_for_ident(word: str, offset: i64, node_count: i64) -> i64 
         let k = __engine(Cfg.ast.ast_node_kind, i);
         let sym = __engine(Cfg.ast.ast_node_sym, i);
         let sname = __engine(Cfg.ast.sym_str, sym);
+        // Only a node named `word` can win; skip the source scans for others.
+        if sname != word { i = i + 1; continue; }
         var eff_s = s;
         var eff_e = e;
         if k == 17 {
@@ -376,7 +379,7 @@ pub fn find_best_node_for_ident(word: str, offset: i64, node_count: i64) -> i64 
                 eff_e = m_end;
             }
         }
-        if eff_s <= offset && offset <= eff_e && sname == word {
+        if eff_s <= offset && offset <= eff_e {
             let l = eff_e - eff_s;
             if l < best_len {
                 best_len = l;
@@ -627,15 +630,16 @@ pub fn handle_lsp_completion(offset: i64) {
 
         var s_id = -1;
         if recv_name == "self" {
-            var j = 0;
-            while j < node_count {
+            // The last enclosing struct or interface: search from the end.
+            var j = node_count - 1;
+            while j >= 0 {
                 let k = __engine(Cfg.ast.ast_node_kind, j);
                 if k == 1 || k == 2 {
                     let s = __engine(Cfg.ast.ast_span_start, j);
                     let e = __engine(Cfg.ast.ast_span_end, j);
-                    if s <= offset && offset <= e { s_id = j; }
+                    if s <= offset && offset <= e { s_id = j; break; }
                 }
-                j = j + 1;
+                j = j - 1;
             }
         } else {
             var j = 0;
@@ -650,11 +654,12 @@ pub fn handle_lsp_completion(offset: i64) {
                     if s_id == -1 {
                         let var_lid = __engine(Cfg.ast.ast_get_bound_layout, j);
                         if var_lid != 4294967295 {
-                            var sj = 0;
-                            while sj < node_count {
+                            // The last match wins: search from the end.
+                            var sj = node_count - 1;
+                            while sj >= 0 {
                                 let sk = __engine(Cfg.ast.ast_node_kind, sj);
-                                if (sk == 1 || sk == 2) && __engine(Cfg.ast.ast_get_bound_layout, sj) == var_lid { s_id = sj; }
-                                sj = sj + 1;
+                                if (sk == 1 || sk == 2) && __engine(Cfg.ast.ast_get_bound_layout, sj) == var_lid { s_id = sj; break; }
+                                sj = sj - 1;
                             }
                         }
                     }
@@ -663,11 +668,11 @@ pub fn handle_lsp_completion(offset: i64) {
                         if ty_sym != 0 {
                             let ty_name = __engine(Cfg.ast.sym_str, ty_sym);
                             if ty_name != "" {
-                                var sj = 0;
-                                while sj < node_count {
+                                var sj = node_count - 1;
+                                while sj >= 0 {
                                     let sk = __engine(Cfg.ast.ast_node_kind, sj);
-                                    if (sk == 1 || sk == 2) && __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, sj)) == ty_name { s_id = sj; }
-                                    sj = sj + 1;
+                                    if (sk == 1 || sk == 2) && __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, sj)) == ty_name { s_id = sj; break; }
+                                    sj = sj - 1;
                                 }
                             }
                         }
@@ -824,11 +829,11 @@ pub fn handle_lsp_definition(offset: i64) {
         let pat_len = 7 + word.len();
         var first_decl = pub_s;
         var first_ident = ident_s;
-        var scan_p = 0;
-        while scan_p + pat_len <= s {
-            if __engine(Cfg.ast.source_slice, scan_p, scan_p + pat_len) == pat {
-                first_decl = scan_p; first_ident = scan_p + 7; scan_p = s + 1;
-            } else { scan_p = scan_p + 1; }
+        // The first `pub fn <word>` that ends by `s`, found in one slice.
+        let before = __engine(Cfg.ast.source_slice, 0, s);
+        let at = before.find(pat, 0);
+        if at >= 0 && at + pat_len <= s {
+            first_decl = at; first_ident = at + 7;
         }
         __engine(Cfg.ast.lsp_set_result, "{\"start\":" + s + ",\"end\":" + e + ",\"pubStart\":" + pub_s + ",\"identStart\":" + ident_s + ",\"declOffset\":" + first_decl + ",\"identOffset\":" + first_ident + "}");
         return;
@@ -958,13 +963,8 @@ pub fn is_keyword_or_seed(w: str) -> bool {
 pub fn handle_lsp_prepare_rename(offset: i64) {
     let word = extract_ident_at_offset(offset);
     if word == "" || is_keyword_or_seed(word) { __engine(Cfg.ast.lsp_set_result, "null"); return; }
-    let best_nid = find_best_node_for_ident(word, offset, __engine(Cfg.ast.ast_node_count));
-    if best_nid != -1 {
-        let sname = __engine(Cfg.ast.sym_str, __engine(Cfg.ast.ast_node_sym, best_nid));
-        let sym_name = if sname != "" { sname } else { word };
-        __engine(Cfg.ast.lsp_set_result, if is_keyword_or_seed(sym_name) { "null" } else { sym_name });
-        return;
-    }
+    // Any node `find_best_node_for_ident` picks is named `word`, which is
+    // not a keyword: the answer is `word` either way.
     __engine(Cfg.ast.lsp_set_result, word);
 }
 

@@ -55,13 +55,12 @@ pub fn fmt_style_named(name: str) -> FmtStyle? {
 }
 
 fn indent(depth: i64) -> str {
-    var out = "";
-    var i = 0;
-    while i < depth * FMT_INDENT {
-        out = out + " ";
-        i = i + 1;
-    }
-    return out;
+    let n = depth * FMT_INDENT;
+    if n <= 0 { return ""; }
+    // Double the run of spaces, then take what is still missing.
+    var out = " ";
+    while out.len() as i64 * 2 <= n { out = out + out; }
+    return out + out.slice(0, n - out.len() as i64);
 }
 
 /// `s` without the spaces, tabs and carriage returns that end it.
@@ -384,8 +383,8 @@ pub fn fmt_restyle(ref toks: List<FmtTok>, style: FmtStyle) -> List<FmtTok> {
         let t = toks[i].text;
         if style == FmtStyle::Readable {
             // f!^(x) -> sig f(x), ..
-            let kw = paired(CALL_QUOTES, text_at(toks, i + 1), 0);
-            if word_at(toks, i) && kw != "" {
+            let kw = if word_at(toks, i) { paired(CALL_QUOTES, text_at(toks, i + 1), 0) } else { "" };
+            if kw != "" {
                 out.push(word(kw));
                 out.push(toks[i]);
                 out.push(punct("("));

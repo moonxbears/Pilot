@@ -224,6 +224,14 @@ fn rc_liveness(var ref rc: RcFunction) {
     for _b in f.blocks { rc.live_in.push([]); }
     for _i in rc.counted { rc.mark.push(false); }
     if rc.counted.len() == 0 { return; }
+    // Block -> instruction -> its counted uses: neither `f` nor the kinds
+    // change below, so they are worked out once, not every round.
+    var uses: List<List<List<u32>>> = [];
+    for blk in f.blocks {
+        var per: List<List<u32>> = [];
+        for inst in blk.insts { per.push(rc_uses(rc, inst)); }
+        uses.push(per);
+    }
     var changed = true;
     while changed {
         changed = false;
@@ -235,7 +243,7 @@ fn rc_liveness(var ref rc: RcFunction) {
             while k >= 0 {
                 let inst = insts[k];
                 if inst.result != ir_no_value() && inst.result < rc.index.len() && rc.index[inst.result] >= 0 { rc.mark[rc.index[inst.result]] = false; }
-                for v in rc_uses(rc, inst) { rc_mark(rc, touched, rc.index[v]); }
+                for v in uses[b][k] { rc_mark(rc, touched, rc.index[v]); }
                 k = k - 1;
             }
             for p in f.blocks[b].params {

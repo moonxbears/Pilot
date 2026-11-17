@@ -90,7 +90,8 @@ pub struct JsonValue : IObject {
     }
 
     pub fn remove(var ref self, key: str) -> bool {
-        if self.kind != JsonKind::Object {
+        // Absent key: nothing to rebuild.
+        if !self.has(key) {
             return false;
         }
         var new_list: List<JsonPair> = [];
@@ -125,11 +126,11 @@ pub struct JsonValue : IObject {
         if self.array_val.len() > idx {
             return self.array_val[idx];
         }
-        let k = "" + idx;
-        if self.has(k) {
-            return self.get(k);
+        // An object keyed by the index text; `get` gives null when absent.
+        if self.kind != JsonKind::Object {
+            return json_null();
         }
-        return json_null();
+        return self.get("" + idx);
     }
 
     pub fn set_at(var ref self, idx: usize, val: JsonValue) {

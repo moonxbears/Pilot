@@ -148,6 +148,7 @@ pub fn eval_engine_ops() -> Map<str, bool> {
     return ops;
 }
 
+<<<<<<< HEAD
 /// What evaluating a function while compiling gave: its value when `ok`,
 /// else why it stopped; and how many instructions it ran.
 pub struct IrEvalResult : IObject {
@@ -167,6 +168,30 @@ fn top_frame(ref m: IrModule, fi: i64, ref globals: List<IrVal>, ref assigned: L
 /// running out.
 pub fn ir_eval(ref m: IrModule, fi: i64, ref globals: List<IrVal>, ref assigned: List<bool>, fuel: i64) -> IrEvalResult {
     let top = top_frame(m, fi, globals, assigned, [], IrBudget { left: fuel, depth: 0, eval: true, allowed: eval_engine_ops() });
+=======
+/// The tables an evaluation while compiling reads and never changes, built
+/// once for every `ir_eval` of a module.
+pub struct IrEvalTables : IObject {
+    pub handlers: List<any>;
+    pub preparers: List<any>;
+    pub constants: List<any>;
+    pub engine_ops: Map<str, str>;
+    /// The engine operations it may run (`eval_engine_ops()`).
+    pub allowed: Map<str, bool>;
+}
+
+pub fn ir_eval_tables(allowed: Map<str, bool>) -> IrEvalTables =>
+    IrEvalTables { handlers: interp_handlers(), preparers: interp_preparers(), constants: interp_constants(), engine_ops: interp_engine_ops(), allowed: allowed };
+
+/// Runs function `fi` of `m` (which takes nothing) while compiling, with the
+/// globals `globals` (those `assigned` marks as set) and at most `fuel`
+/// instructions, reading the tables `t` (`ir_eval_tables`). Gives `[true,
+/// value, steps]`, or `[false, why, steps]` when it stopped: a runtime
+/// error, an effect, or the budget running out. `steps` is how many
+/// instructions it ran.
+pub fn ir_eval(ref m: IrModule, fi: i64, ref globals: List<any>, ref assigned: List<bool>, fuel: i64, ref t: IrEvalTables) -> List<any> {
+    let top = IrFrame { m: m, f: m.functions[fi], vals: [], cells: [], globals: globals, assigned: assigned, next: 0, next_args: [], ret: none, handlers: t.handlers, preparers: t.preparers, constants: t.constants, code: no_code(m), engine_ops: t.engine_ops, fault: ir_fault_new(), args: [], budget: IrBudget { left: fuel, depth: 0, eval: true, allowed: t.allowed } };
+>>>>>>> claude/cool-moser-2264b9
     let out = interp_call(top, fi, []);
     let steps = if top.budget.left < 0 { fuel } else { fuel - top.budget.left };
     if top.fault.active { return IrEvalResult { ok: false, value: IrVal.Nil, why: top.fault.message, steps: steps }; }
@@ -429,6 +454,35 @@ pub fn f64_from_bits(bits: i64) -> f64 {
     return if neg { -mant } else { mant };
 }
 
+<<<<<<< HEAD
+=======
+fn float_constant(ref m: IrModule, ref f: IrFunction, inst: IrInst) -> any => f64_from_bits(m.floats[ir_args(f, inst)[0]]);
+
+fn bytes_constant(ref m: IrModule, ref f: IrFunction, inst: IrInst) -> any => m.strings[ir_args(f, inst)[0]];
+
+fn undef_constant(ref m: IrModule, ref f: IrFunction, inst: IrInst) -> any => none;
+
+fn global_addr_constant(ref m: IrModule, ref f: IrFunction, inst: IrInst) -> any => -1 - inst.subop;
+
+/// Opcode -> the value its instruction gives, for the opcodes whose
+/// instruction gives the same value on every run.
+pub fn interp_constants() -> List<any> {
+    var cs: List<any> = [];
+    let opcodes = opcode_names().len();
+    var i = 0;
+    while i < opcodes {
+        cs.push(none);
+        i = i + 1;
+    }
+    cs[op_const_bits()] = bits_constant;
+    cs[op_const_float()] = float_constant;
+    cs[op_const_bytes()] = bytes_constant;
+    cs[op_undef()] = undef_constant;
+    cs[op_global_addr()] = global_addr_constant;
+    return cs;
+}
+
+>>>>>>> claude/cool-moser-2264b9
 /// A constant whose value is not placed (its result is defined more than
 /// once, or it has none): the step holds its value.
 fn prepare_constant(ref fr: IrFrame, var ref st: IrStep) { st.value = constant_value(fr.m, fr.f, st.inst); }
@@ -454,6 +508,7 @@ fn is_narrow_register(phy: IrTypePhysics) -> bool {
     return phy.reg_class == reg_class_simd_float() && phy.bit_width == 32;
 }
 
+<<<<<<< HEAD
 /// The operator of an arithmetic opcode.
 fn arith_op(opcode: u16) -> IrOp {
     if opcode == op_add() { return IrOp.Add; }
@@ -466,14 +521,35 @@ fn arith_op(opcode: u16) -> IrOp {
     if opcode == op_bit_xor() { return IrOp.Xor; }
     if opcode == op_shl() { return IrOp.Shl; }
     return IrOp.Shr;
+=======
+/// The operator of each arithmetic opcode: `prepare_arith` is registered
+/// for these ten only, so the last is `shr`. Asked once per prepared
+/// instruction, so no table is built for it.
+fn arith_symbol(op: u16) -> str {
+    if op == op_add() { return "+"; }
+    if op == op_sub() { return "-"; }
+    if op == op_mul() { return "*"; }
+    if op == op_div() { return "/"; }
+    if op == op_rem() { return "%"; }
+    if op == op_bit_and() { return "&"; }
+    if op == op_bit_or() { return "|"; }
+    if op == op_bit_xor() { return "^"; }
+    if op == op_shl() { return "<<"; }
+    return ">>";
+>>>>>>> claude/cool-moser-2264b9
 }
 
 /// An arithmetic operator. Integers are computed in 64 bits and floats as
 /// f64, so a result in a narrower register is wrapped or rounded to it
 /// (`run_narrow`).
 fn prepare_arith(ref fr: IrFrame, var ref st: IrStep) {
+<<<<<<< HEAD
     let op = arith_op(st.inst.opcode);
     st.oper = op;
+=======
+    let op = st.inst.opcode;
+    st.sym = arith_symbol(op);
+>>>>>>> claude/cool-moser-2264b9
     let phy = st.inst.physics;
     if !is_narrow_register(phy) {
         if both_signed_64(fr, st) {
@@ -504,12 +580,24 @@ fn run_narrow(var ref fr: IrFrame, ref st: IrStep) {
     vals[st.result] = ir_wrap(v, st.rc, st.width, fault);
 }
 
+<<<<<<< HEAD
 /// The operator of each comparison predicate (`CmpPred` 0..5).
 const CMP_OPS: List<IrOp> = [IrOp.Eq, IrOp.Ne, IrOp.Lt, IrOp.Le, IrOp.Gt, IrOp.Ge,];
 
 fn prepare_cmp(ref fr: IrFrame, var ref st: IrStep) {
     st.oper = CMP_OPS[st.inst.subop as i64];
     if both_signed_64(fr, st) { st.h = INT_CMP[st.inst.subop as i64]; }
+=======
+/// The operator of each comparison predicate (`CmpPred` 0..5), built once.
+const CMP_SYMBOLS: List<str> = ["==", "!=", "<", "<=", ">", ">=",];
+
+fn prepare_cmp(ref fr: IrFrame, var ref st: IrStep) {
+    let pred = st.inst.subop as i64;
+    st.sym = CMP_SYMBOLS[pred];
+    // Equality is defined between any two values; an ordering only between
+    // numbers.
+    if pred < 2 || both_plain_numbers(fr, st) { st.h = DIRECT_CMP[pred]; }
+>>>>>>> claude/cool-moser-2264b9
 }
 
 /// Whether both operands of the step are signed 64-bit integers by the
@@ -547,6 +635,7 @@ fn run_add_ii(var ref fr: IrFrame, ref st: IrStep) {
     v[st.result] = ir_binary(st.oper, x, y, fr.fault);
 }
 
+<<<<<<< HEAD
 fn run_sub_ii(var ref fr: IrFrame, ref st: IrStep) {
     let v = fr.vals;
     let x = v[st.a[0]];
@@ -617,6 +706,10 @@ const INT_CMP: List<IrStepFn> = [run_eq_ii, run_ne_ii, run_lt_ii, run_le_ii, run
 // ------------------------------------------------------------------------------
 // Memory and calls
 // ------------------------------------------------------------------------------
+=======
+/// The direct handler of each comparison predicate, in `CMP_SYMBOLS` order.
+const DIRECT_CMP: List<any> = [run_eq, run_ne, run_lt, run_le, run_gt, run_ge,];
+>>>>>>> claude/cool-moser-2264b9
 
 fn run_stack_slot(var ref fr: IrFrame, ref st: IrStep) {
     let cells = fr.cells;
@@ -949,6 +1042,7 @@ fn run_return(var ref fr: IrFrame, ref st: IrStep) {
     fr.next = -1;
 }
 
+<<<<<<< HEAD
 // ------------------------------------------------------------------------------
 // Tables
 // ------------------------------------------------------------------------------
@@ -959,6 +1053,15 @@ fn opcode_table(entry: IrStepFn) -> List<IrStepFn> {
     var i = 0;
     while i < opcode_names().len() {
         t.push(entry);
+=======
+/// A table with no entry for any opcode.
+fn opcode_table() -> List<any> {
+    var t: List<any> = [];
+    let opcodes = opcode_names().len();
+    var i = 0;
+    while i < opcodes {
+        t.push(none);
+>>>>>>> claude/cool-moser-2264b9
         i = i + 1;
     }
     return t;

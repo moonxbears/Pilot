@@ -235,6 +235,15 @@ pub fn is_quote_value(ref s: Snap, q: i64) -> bool => kind(s, q) == nk_quote() &
 pub fn check_quotes(var ref inf: Infer, var ref sink: DiagSink) {
     let p = inf.p;
     let s = p.s;
+    // DECL001 below needs a quote value around the name: none in the
+    // program, no ancestor walk.
+    var any_value = false;
+    for q in prog_nodes_of_kind(p, nk_quote()) {
+        if is_quote_value(s, q) {
+            any_value = true;
+            break;
+        }
+    }
     var n = s.user_lo;
     while n < s.user_hi {
         if in_user_file(s, n) && is_quote_value(s, n) {
@@ -256,11 +265,13 @@ pub fn check_quotes(var ref inf: Infer, var ref sink: DiagSink) {
         // The engines never compile a quote's code, so the names it uses
         // are checked here: a binding in scope, a function, a constant or
         // a type.
-        if in_user_file(s, n) && kind(s, n) == nk_ident() && flags(s, n) == 0 && inf.r.ref_of[n] < 0 && enclosing_quote(p, n) >= 0
-            && is_quote_value(s, enclosing_quote(p, n)) {
-            let name = node_name(s, n);
-            if nl_get(p.fns, name).len() == 0 && global_const(inf, n) < 0 && prog_type_decl(p, name) < 0 && !is_native_name(p, name) {
-                sink_error(sink, n, "DECL001", f"undefined name `{name}`");
+        if any_value && in_user_file(s, n) && kind(s, n) == nk_ident() && flags(s, n) == 0 && inf.r.ref_of[n] < 0 {
+            let q = enclosing_quote(p, n);
+            if q >= 0 && is_quote_value(s, q) {
+                let name = node_name(s, n);
+                if nl_get(p.fns, name).len() == 0 && global_const(inf, n) < 0 && prog_type_decl(p, name) < 0 && !is_native_name(p, name) {
+                    sink_error(sink, n, "DECL001", f"undefined name `{name}`");
+                }
             }
         }
         if in_user_file(s, n) && kind(s, n) == nk_ident() && flags(s, n) == 1 && in_program(p, n) && enclosing_quote(p, n) < 0 {

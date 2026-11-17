@@ -286,6 +286,22 @@ pub fn derive_all_structural(type_name: str, derives: List<str>, fields: List<De
     var full = "";
     let n = derives.len();
     var i = 0;
+    // A lattice that refuses Clone/Default: the first such derive's error is
+    // the answer, so no other source is built (they only build text).
+    if validate_lattice_for_clone(lattice_bits) != "" || validate_lattice_for_default(lattice_bits) != "" {
+        while i < n {
+            let d = derives.get(i);
+            if d == "Clone" {
+                let err = validate_lattice_for_clone(lattice_bits);
+                if err != "" { return err; }
+            } else if d == "Default" {
+                let err = validate_lattice_for_default(lattice_bits);
+                if err != "" { return err; }
+            }
+            i = i + 1;
+        }
+        i = 0;
+    }
     while i < n {
         let d = derives.get(i);
         if d == "Eq" {

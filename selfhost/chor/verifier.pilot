@@ -130,19 +130,20 @@ pub fn verify_blueprint_topology(ref bp: BlueprintDef) -> List<str> {
     var ri = 0;
     while ri < bp.routes.len() {
         let route = bp.routes[ri];
-        // Check if from_role is HardRealtime
-        var from_is_hrt = false;
-        var rj = 0;
-        while rj < bp.roles.len() {
-            if bp.roles[rj].name == route.from_role && bp.roles[rj].is_hard_realtime {
-                from_is_hrt = true;
-                break;
+        // Only a blocking route can be reported, so the role search is
+        // skipped for the others.
+        if route.transport.backpressure == BackpressurePolicy::Block {
+            // Check if from_role is HardRealtime
+            var from_is_hrt = false;
+            var rj = 0;
+            while rj < bp.roles.len() {
+                if bp.roles[rj].name == route.from_role && bp.roles[rj].is_hard_realtime {
+                    from_is_hrt = true;
+                    break;
+                }
+                rj = rj + 1;
             }
-            rj = rj + 1;
-        }
-
-        if from_is_hrt {
-            if route.transport.backpressure == BackpressurePolicy::Block {
+            if from_is_hrt {
                 diags.push(format_chor005(route.from_role, route.cue_name));
             }
         }
@@ -210,7 +211,8 @@ pub fn verify_blueprint_topology(ref bp: BlueprintDef) -> List<str> {
     // 6. CHOR007: Concurrent write races on unpartitioned storage
     var w1 = 0;
     while w1 < bp.roles.len() {
-        var w2 = w1 + 1;
+        // A role that writes no storage races with none.
+        var w2 = if bp.roles[w1].write_storages.len() == 0 { bp.roles.len() } else { w1 + 1 };
         while w2 < bp.roles.len() {
             let r_a = bp.roles[w1];
             let r_b = bp.roles[w2];

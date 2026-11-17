@@ -70,11 +70,12 @@ pub const MAIN_MODE: str = "main";
 /// closing `}`, and the escaped quote it rejects).
 [StandIn("lex.token_attribute", "each token is a declaration marked [Token(..)] that the builder collects", "the token declarations are returned by this function, listed by hand", "PROP-021")]
 pub fn core_modes(operators: List<TokenDecl>) -> List<LexMode> {
-    var modes: List<LexMode> = [lex_mode(MAIN_MODE, modal_tokens(operators, false))];
+    let groups = modal_groups(operators);
+    var modes: List<LexMode> = [lex_mode(MAIN_MODE, modal_tokens(groups, false))];
     for m in fstring_modes() {
         modes.push(m);
     }
-    modes.push(lex_mode(HOLE_MODE, modal_tokens(operators, true)));
+    modes.push(lex_mode(HOLE_MODE, modal_tokens(groups, true)));
     return modes;
 }
 
@@ -86,11 +87,16 @@ fn seed_forms_after(ref operators: List<TokenDecl>) -> List<TokenDecl> {
     return seed_form_tokens(names);
 }
 
-/// The tokens of the main mode, or of the hole mode when `in_hole`.
-fn modal_tokens(operators: List<TokenDecl>, in_hole: bool) -> List<TokenDecl> {
+/// The token groups the main and hole modes share, in declaration order
+/// (each mode adds its braces after them). Built once for both modes.
+fn modal_groups(operators: List<TokenDecl>) -> List<List<TokenDecl>> => [number_tokens(), suffixed_number_tokens(), misplaced_separator_tokens(), name_tokens(), trivia_tokens(), unclosed_string_tokens(), string_tokens(), fstring_openers(), operators, seed_forms_after(operators),];
+
+/// The tokens of the main mode, or of the hole mode when `in_hole`, from
+/// the shared `groups` (`modal_groups`).
+fn modal_tokens(ref groups: List<List<TokenDecl>>, in_hole: bool) -> List<TokenDecl> {
     let braces = if in_hole { delimiters_in(true, HOLE_MODE) } else { delimiters_in(false, "") };
     var out: List<TokenDecl> = [];
-    for group in [number_tokens(), suffixed_number_tokens(), misplaced_separator_tokens(), name_tokens(), trivia_tokens(), unclosed_string_tokens(), string_tokens(), fstring_openers(), operators, seed_forms_after(operators), braces] {
+    for group in [*groups, braces] {
         for d in group {
             if !in_hole || !is_line_start_trivia(d.name) {
                 out.push(d);

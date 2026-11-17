@@ -138,12 +138,19 @@ pub fn check_with_steps(phase: str, plan: bool) -> (List<DiagRow>, RunPlan?, Lis
 /// `comptime_runs` over the program `p`.
 fn steps_of(var ref p: Program, phase: str) -> List<StepRow> {
     let s = p.s;
+<<<<<<< HEAD
     var out: List<StepRow> = [];
     let now = live_flag(p, phase);
+=======
+    var out: List<List<str>> = [];
+    // The `LiveWhen` flags, looked up once for both moments.
+    let known = enum_flags(p, live_when_type());
+    let now = flag_value(known, phase);
+>>>>>>> claude/cool-moser-2264b9
     if now < 0 { return out; }
     let quiet = sink_new(s);
     let pkgs = package_decls(p);
-    let compile = live_flag(p, live_default_flag());
+    let compile = flag_value(known, live_default_flag());
     // `chain_fn` keeps functions of the user's files only, which all lie
     // in `user_lo .. user_hi` (selfhost/check/snapshot.pilot).
     var f = s.user_lo;

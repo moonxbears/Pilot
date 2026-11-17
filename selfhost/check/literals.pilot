@@ -171,14 +171,13 @@ pub fn check_number_text(var ref inf: Infer, var ref sink: DiagSink, n: i64) {
 /// LIT003 for string node `n`: each escape in its token that `ESCAPES`
 /// does not declare (stdlib/core/lex/literal_value.pilot). The token is
 /// read from the source, so an f-string's text is checked outside its
-/// holes; `seen` holds the tokens already checked, by where they start.
-pub fn check_string_escapes(var ref inf: Infer, var ref sink: DiagSink, n: i64, var ref seen: List<i64>) {
+/// holes; `seen` holds the tokens already checked, by where they start
+/// (a map, so each string is one lookup, not a scan of all before it).
+pub fn check_string_escapes(var ref inf: Infer, var ref sink: DiagSink, n: i64, var ref seen: Map<i64, bool>) {
     let s = inf.p.s;
     let at = span_start(s, n);
-    for done in seen {
-        if done == at { return; }
-    }
-    seen.push(at);
+    if seen.has(at) { return; }
+    seen.set(at, true);
     for bad in string_escape_problems(node_text(s, n)) {
         sink_error(sink, n, "LIT003", f"unknown escape `{bad.text}` in a string; the escapes are {escapes_text()}");
     }

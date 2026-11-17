@@ -120,10 +120,11 @@ fn check_type_node(ref inf: Infer, ref b: Bounds, var ref sink: DiagSink, t: i64
     let p = inf.p;
     let s = p.s;
     let name = node_name(s, t);
-    if !name_is_written(s, t) || name.find(".", 0) >= 0 { return; }
-    if visible_tparam(p, t, name) > 0 { return; }
+    // Every return before the checks below is silent: the cheap lookup first.
     let d = prog_type_decl(p, name);
     if d < 0 { return; }
+    if !name_is_written(s, t) || name.find(".", 0) >= 0 { return; }
+    if visible_tparam(p, t, name) > 0 { return; }
     let wanted = tparam_count(p, name);
     var required = 0;
     for td in prog_tparam_defaults(p, name) { if td < 0 { required = required + 1; } }

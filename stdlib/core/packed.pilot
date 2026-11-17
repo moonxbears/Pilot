@@ -88,7 +88,10 @@ pub struct PackedBuffer<T: IValue> : IObject {
 pub fn packed_buffer<T: IValue>(width: i64, signed: bool) -> PackedBuffer<T> {
     var known = false;
     for w in PACKED_WIDTHS {
-        if w == width { known = true; }
+        if w == width {
+            known = true;
+            break;
+        }
     }
     if !known {
         fault(f"PACK002: a packed element is 1, 2, 4 or 8 bytes wide, not {width}");

@@ -124,6 +124,8 @@ pub fn incremental_reparse_cst(
                 target_idx = i;
                 target_start = ch_start;
                 target_txt = txt;
+                // The first child that holds the edit wins: stop here.
+                break;
             }
         }
         cur_off = ch_end;

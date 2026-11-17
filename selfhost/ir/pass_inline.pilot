@@ -94,22 +94,34 @@ pub fn inline_issues(ref m: IrModule) -> List<IrIssue> {
 
 /// Whether the call `inst` is one to inline. A function calling itself is
 /// never inlined: if it is inline, `inline_recursive` holds for it.
-fn should_inline(ref m: IrModule, inst: IrInst) -> bool {
+/// `recursive` caches `inline_recursive` per callee (0 not asked, 1 yes,
+/// 2 no) when `cache` holds.
+fn should_inline(ref m: IrModule, inst: IrInst, cache: bool, var ref recursive: List<i64>) -> bool {
     if inst.opcode != op_call_direct() || inst.subop >= m.functions.len { return false; }
     let g = m.functions[inst.subop];
     if g.inline == ir_inline_none() || g.blocks.len == 0 { return false; }
-    return !inline_recursive(m, inst.subop);
+    if !cache { return !inline_recursive(m, inst.subop); }
+    if recursive[inst.subop] == 0 { recursive[inst.subop] = if inline_recursive(m, inst.subop) { 1 } else { 2 }; }
+    return recursive[inst.subop] == 2;
 }
 
 /// Inlines every call in `f` that should be; true when it inlined one.
 pub fn inline_calls(var ref f: IrFunction, ref m: IrModule) -> bool {
+    // `inline_recursive` walks only inline functions' bodies, so when `f`
+    // is not inline, inlining into it changes no body that walk reads and
+    // each callee's answer holds for the whole call.
+    let cache = f.inline == ir_inline_none();
+    var recursive: List<i64> = [];
+    if cache {
+        for _g in m.functions { recursive.push(0); }
+    }
     var changed = false;
     var b: u32 = 0;
     while b < f.blocks.len {
         var i = 0;
         while i < f.blocks[b].insts.len {
             let inst = f.blocks[b].insts[i];
-            if should_inline(m, inst) {
+            if should_inline(m, inst, cache, recursive) {
                 inline_one(f, m.functions[inst.subop], b, i);
                 changed = true;
                 // The rest of block `b` moved to the continuation, which is

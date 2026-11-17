@@ -3303,6 +3303,27 @@ Retiring the hand-written tokenizers (PROP-021 §8) deleted Pilot code that thre
 - **Seed cost:** on the seed a text-enum comparison compares strings, not integers. `TokenTagKind` is compared in the seed-run self-hosted parser, so its hot path pays that on the seed only.
 - **Converted:** `CacheField` (`stdlib/pilot/lex/cache.pilot`), `TokenTagKind` (`selfhost/lexer.pilot`), `WiringLevel` (`selfhost/gate/ledger/wiring.pilot`). `CACHE_LABELS`/`cache_label`, `TOKEN_TAG_NAMES`/`token_tag_name` and `WIRING_LEVEL_LABELS`/`wiring_level_label` are deleted, and their callers use `as str` or print the value.
 
+## `PROP-033` — The Analyzer Skips Units Whose Diagnostics Are Thrown Away
+
+**Status: PROPOSED 2026-11-17 — awaiting owner approval. No Rust has been touched.**
+
+On every `pilot run` / `pilot check`, `analyze` (`crates/pilot-cli/src/run.rs` ~443-470) runs `selfhost/analyzer.pilot` over the whole linked program, then keeps only the diagnostics whose file is a user file (`if !user.contains(&file) { return None; }`). `analyze_program` (`selfhost/analyzer.pilot` ~1306-1331) runs `analyze_unit` (every `verify_*` pass, Pass 7, Pass 8, `is_suppressed` parent walks) over every unit, stdlib included, and the stdlib is usually most of a linked program's nodes. Passes 1-3 (layouts and inference over all nodes) must stay whole-program, because user code needs stdlib layouts. Only the per-unit checking can be skipped.
+
+The analyzer cannot tell a user unit from a stdlib unit today. The only unit query is `ast_node_unit`, and no query gives a unit's path.
+
+| File | Change |
+| :--- | :--- |
+| `crates/pilot-cli/src/run.rs` | Pass the unit indices of the user files (the `user` list `analyze` already builds) to the pipeline. |
+| `crates/pilot-analysis/src/pipeline.rs` | `AnalysisPipeline::analyze` takes that list and hands it to the analyzer registry. |
+| `crates/pilot-analysis/src/infer.rs` | One new read-only op, `ast_unit_is_user(unit) -> 0/1`, next to `ast_node_unit`. |
+| `selfhost/analyzer.pilot` (Pilot) | In `analyze_program`, call `analyze_unit` only when `ast_unit_is_user(unit)` is 1. |
+
+**Behaviour:** `pilot run` and `pilot check` give the same diagnostics, because the skipped ones were filtered out anyway. One difference: an analyzer fault raised inside a stdlib unit would no longer be reported. Other callers of `AnalysisPipeline::analyze`, such as the milestone tests, pass "every unit is user" and keep today's behaviour.
+
+**Rust LOC:** about +10 lines, an addition to the seed. It is weighed against a per-case saving on every conformance case on all engines. Measure before/after with `pilot test tests/conformance` before landing.
+
+**Acceptance:** `pilot test`, `--ir` and `--emit c` keep their results. `cargo test -p pilot-analysis` and `-p pilot-cli` show no new failures. `cargo fmt --check` passes. `paused_max_total_rust_loc()` is updated only with the owner's approval.
+
 ## `PROP-003` — Wave 3, Itemized: Parser Desugarings and VM Helpers That Can Leave Rust Now
 
 **Status: itemized 2026-11-15. Slices 3A, 3B and 3C APPROVED by the owner 2026-11-15 ("Approve 3A–3C"). 3A and 3B BUILT 2026-11-15; 3C DEFERRED TO `PROP-005` BY THE OWNER 2026-11-15 (larger than itemized; see below); 3D–3F still drafts.** Owner asked to start PROP-003 ("lets do prop-003"). Each slice is approved and built on its own.

@@ -88,20 +88,26 @@ pub fn float_bits(x: f64, fmt: FloatFormat) -> u64 {
     // normal exponent (`1 - bias`): what stays below 1 there is subnormal.
     var e: i64 = 0;
     var k: i64 = 512;
-    while k >= 1 {
-        let p = two_to(k);
-        if v >= p {
-            v = v / p;
-            e = e + k;
+    // Every step divides by at least 2: below 2 none fires.
+    if v >= 2.0 {
+        while k >= 1 {
+            let p = two_to(k);
+            if v >= p {
+                v = v / p;
+                e = e + k;
+            }
+            k = k / 2;
         }
-        k = k / 2;
     }
     let min_e = 1 - fmt.bias;
     k = 512;
     while k >= 1 {
-        if v < 1.0 && e - k >= min_e && v * two_to(k) < 2.0 {
-            v = v * two_to(k);
-            e = e - k;
+        if v < 1.0 && e - k >= min_e {
+            let p = two_to(k);
+            if v * p < 2.0 {
+                v = v * p;
+                e = e - k;
+            }
         }
         k = k / 2;
     }

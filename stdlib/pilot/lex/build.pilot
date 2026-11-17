@@ -207,19 +207,8 @@ fn nfa_fragment(var ref n: Nfa, ref p: Pattern, var ref end_out: List<i64>) -> i
 // Building the table
 // ------------------------------------------------------------------------------
 
-/// `xs` written as `a,b,c`. Joined by halves, so each character is copied
-/// about log2(n) times rather than once per later item (a key of hundreds
-/// of states is built often).
-fn join_ints(ref xs: List<i64>) -> str => join_ints_in(xs, 0, xs.len() as i64);
-
-fn join_ints_in(ref xs: List<i64>, lo: i64, hi: i64) -> str {
-    if hi - lo == 0 { return ""; }
-    if hi - lo == 1 { return f"{xs[lo]}"; }
-    let mid = lo + (hi - lo) / 2;
-    return join_ints_in(xs, lo, mid) + "," + join_ints_in(xs, mid, hi);
-}
-
-/// `xs` sorted ascending, in place (insertion sort: a closure is short).
+/// `xs` sorted ascending, in place (insertion sort: the lists sorted here
+/// are a DFA state's accepting NFA states, a handful at most).
 fn sort_ints(var ref xs: List<i64>) {
     var i = 1;
     while i < xs.len() as i64 {
@@ -234,33 +223,159 @@ fn sort_ints(var ref xs: List<i64>) {
     }
 }
 
-/// The eps-closure of `seeds`, as a sorted list of NFA states.
-fn closure(ref seeds: List<i64>, ref eps_off: List<i64>, ref eps_dst: List<i64>, var ref mark: List<i64>, stamp: i64) -> List<i64> {
+/// The modulus the builder's hashes are kept under, so no product of a hash
+/// and a 20-bit factor leaves an `i64`.
+const HASH_MOD: i64 = 1000000007;
+
+/// A hash of NFA state `s` for `closure`'s order-independent set hash.
+fn state_hash(s: i64) -> i64 => ((s + 1) * 2654435761) % 4294967291;
+
+/// The eps-closure of `seeds` into `out` (unordered, each state once), every
+/// state of it marked `stamp` in `mark`; returns the set's hash, the sum of
+/// its states' `state_hash`, which does not depend on their order.
+fn closure(ref seeds: List<i64>, ref eps_off: List<i64>, ref eps_dst: List<i64>, var ref mark: List<i64>, stamp: i64, var ref out: List<i64>) -> i64 {
     var stack: List<i64> = [];
-    var out: List<i64> = [];
+    var h = 0;
     for s in seeds {
         if mark[s] != stamp {
             mark[s] = stamp;
             stack.push(s);
             out.push(s);
+            h = h + state_hash(s);
         }
     }
     while stack.len() > 0 {
         let s = stack.pop();
         var k = eps_off[s];
-        while k < eps_off[s + 1] {
+        let stop = eps_off[s + 1];
+        while k < stop {
             let t = eps_dst[k];
             if mark[t] != stamp {
                 mark[t] = stamp;
                 stack.push(t);
                 out.push(t);
+                h = h + state_hash(t);
             }
             k = k + 1;
         }
     }
-    // Only the states reached are sorted, not every NFA state scanned.
-    sort_ints(out);
-    return out;
+    return h;
+}
+
+/// `n` slots of -1: an empty open-addressing table of ids.
+fn empty_slots(n: i64) -> List<i64> {
+    var xs: List<i64> = [];
+    var i = 0;
+    while i < n {
+        xs.push(-1);
+        i = i + 1;
+    }
+    return xs;
+}
+
+/// The DFA state whose NFA states are exactly the set just closed under
+/// `stamp` (`size` states, hash `h`), or -1. A candidate of the same hash
+/// and size is that set when every state of it carries the stamp.
+fn find_set(ref slots: List<i64>, ref dhash: List<i64>, ref members: List<List<i64>>, ref mark: List<i64>, stamp: i64, h: i64, size: i64) -> i64 {
+    let cap = slots.len() as i64;
+    var at = h % cap;
+    while slots[at] >= 0 {
+        let id = slots[at];
+        if dhash[id] == h && members[id].len() as i64 == size {
+            var same = true;
+            for s in members[id] {
+                if mark[s] != stamp {
+                    same = false;
+                    break;
+                }
+            }
+            if same { return id; }
+        }
+        at = at + 1;
+        if at == cap { at = 0; }
+    }
+    return -1;
+}
+
+/// The entry of `lists` that is the list `xs` (hash `h`), or -1.
+fn find_ints(ref slots: List<i64>, ref hashes: List<i64>, ref lists: List<List<i64>>, ref xs: List<i64>, h: i64) -> i64 {
+    let cap = slots.len() as i64;
+    var at = h % cap;
+    while slots[at] >= 0 {
+        let id = slots[at];
+        if hashes[id] == h && same_ints(lists[id], xs) { return id; }
+        at = at + 1;
+        if at == cap { at = 0; }
+    }
+    return -1;
+}
+
+/// Puts `id` (hash `h`) in the first free slot of its probe.
+fn put_slot(var ref slots: List<i64>, h: i64, id: i64) {
+    let cap = slots.len() as i64;
+    var at = h % cap;
+    while slots[at] >= 0 {
+        at = at + 1;
+        if at == cap { at = 0; }
+    }
+    slots[at] = id;
+}
+
+/// Adds `set` (hash `h`) as entry `members.len()` of a table: a new DFA
+/// state, or a new list of targets. Returns its id. The table grows to keep
+/// at most half its slots full.
+fn add_set(var ref slots: List<i64>, var ref dhash: List<i64>, var ref members: List<List<i64>>, set: List<i64>, h: i64) -> i64 {
+    let id = members.len() as i64;
+    members.push(set);
+    dhash.push(h);
+    if (id + 1) * 2 > slots.len() as i64 {
+        slots = empty_slots(slots.len() as i64 * 2 + 1);
+        var k = 0;
+        while k <= id {
+            put_slot(slots, dhash[k], k);
+            k = k + 1;
+        }
+    } else {
+        put_slot(slots, h, id);
+    }
+    return id;
+}
+
+/// Whether the signature runs from `x` equal those at `from .. to`, the
+/// last signature written: the same last intervals and target groups. The
+/// runs of `x` end where the next state's begin, at or before `from`.
+fn same_runs(ref last: List<i64>, ref group: List<i64>, x: i64, from: i64, to: i64) -> bool {
+    if x + (to - from) > from { return false; }
+    var k = 0;
+    while from + k < to {
+        if last[x + k] != last[from + k] || group[x + k] != group[from + k] { return false; }
+        k = k + 1;
+    }
+    // Both signatures end at the last interval, so equal runs up to `to`
+    // cover the whole row of `x` as well.
+    return true;
+}
+
+/// Whether `a` and `b` are the same list.
+fn same_ints(ref a: List<i64>, ref b: List<i64>) -> bool {
+    if a.len() != b.len() { return false; }
+    var i = 0;
+    while i < a.len() as i64 {
+        if a[i] != b[i] { return false; }
+        i = i + 1;
+    }
+    return true;
+}
+
+/// Whether intervals `x` and `y` take every one of `groups` states to the
+/// same state in the `intervals`-wide table `gnext`.
+fn same_column(ref gnext: List<i64>, groups: i64, intervals: i64, x: i64, y: i64) -> bool {
+    var g = 0;
+    while g < groups {
+        if gnext[g * intervals + x] != gnext[g * intervals + y] { return false; }
+        g = g + 1;
+    }
+    return true;
 }
 
 fn build_error(code: str, message: str) -> LexBuildError => LexBuildError { code: code, message: message };
@@ -396,7 +511,10 @@ pub fn build_table(ref decls: List<TokenDecl>) -> LexBuild {
         i = i + 1;
     }
 
-    // 3. Subset construction over the byte intervals.
+    // 3. Subset construction over the byte intervals. A DFA state is found
+    //    again by its set's hash (`closure`), checked against the stamp
+    //    marks, so no set is sorted or written out; states are numbered in
+    //    the order they are first reached, as before.
     var mark: List<i64> = [];
     i = 0;
     while i < ns {
@@ -405,55 +523,73 @@ pub fn build_table(ref decls: List<TokenDecl>) -> LexBuild {
     }
     var stamp = 0;
     var members: List<List<i64>> = [];
-    var index: Map<str, i64> = Map<str, i64>();
+    var dhash: List<i64> = [];
+    var slots = empty_slots(1021);
     var dnext: List<i64> = [];
     var daccept: List<i64> = [];
     var dstarts: List<i64> = [];
     for r in roots {
         var seeds: List<i64> = [r];
-        let first = closure(seeds, eps_off, eps_dst, mark, stamp);
-        stamp = stamp + 1;
-        let first_key = join_ints(first);
-        if !index.has(first_key) {
-            index.set(first_key, members.len());
-            members.push(first);
+        var first: List<i64> = [];
+        let h = closure(seeds, eps_off, eps_dst, mark, stamp, first);
+        var id = find_set(slots, dhash, members, mark, stamp, h, first.len() as i64);
+        if id < 0 {
+            id = add_set(slots, dhash, members, first, h);
         }
-        dstarts.push(index[first_key]);
+        stamp = stamp + 1;
+        dstarts.push(id);
     }
     let start_states = members.len();
     var reported: Map<str, i64> = Map<str, i64>();
     // The targets of the current DFA state's byte transitions, by interval:
     // each NFA transition adds its target to the intervals its range spans.
+    // `bhash` is each bucket's order-dependent hash. A bucket's targets
+    // decide the state it leads to, so each list of targets is closed once
+    // for the whole build (`memo_*`, found by that hash): most buckets of
+    // most states are a target already met.
     var buckets: List<List<i64>> = [];
+    var bhash: List<i64> = [];
     i = 0;
     while i < intervals {
         buckets.push([]);
+        bhash.push(0);
         i = i + 1;
     }
+    var memo_slots = empty_slots(1021);
+    var memo_seeds: List<List<i64>> = [];
+    var memo_hash: List<i64> = [];
+    var memo_id: List<i64> = [];
+    var acc: List<i64> = [];
     var cur = 0;
     while cur < members.len() {
-        // What this DFA state accepts.
-        var best = -1;
+        // What this DFA state accepts: its accepting NFA states, in
+        // ascending order, so ties are reported in a fixed order.
+        acc = [];
         for s in members[cur] {
+            if n.accept[s] >= 0 {
+                acc.push(s);
+            }
+        }
+        sort_ints(acc);
+        var best = -1;
+        for s in acc {
             let a = n.accept[s];
-            if a >= 0 {
-                if best < 0 || prio[a] > prio[best] {
+            if best < 0 || prio[a] > prio[best] {
+                best = a;
+            } else if prio[a] == prio[best] && a != best {
+                var lo_d = best;
+                var hi_d = a;
+                if a < best {
+                    lo_d = a;
+                    hi_d = best;
+                }
+                let key = f"{lo_d},{hi_d}";
+                if !reported.has(key) {
+                    reported.set(key, 1);
+                    errors.push(build_error("LEX002", f"`{names[lo_d]}` and `{names[hi_d]}` both match the same text with priority {prio[a]}; give one of them a higher priority"));
+                }
+                if a < best {
                     best = a;
-                } else if prio[a] == prio[best] && a != best {
-                    var lo_d = best;
-                    var hi_d = a;
-                    if a < best {
-                        lo_d = a;
-                        hi_d = best;
-                    }
-                    let key = f"{lo_d},{hi_d}";
-                    if !reported.has(key) {
-                        reported.set(key, 1);
-                        errors.push(build_error("LEX002", f"`{names[lo_d]}` and `{names[hi_d]}` both match the same text with priority {prio[a]}; give one of them a higher priority"));
-                    }
-                    if a < best {
-                        best = a;
-                    }
                 }
             }
         }
@@ -465,9 +601,12 @@ pub fn build_table(ref decls: List<TokenDecl>) -> LexBuild {
         for s in members[cur] {
             let lo = n.lo[s];
             if lo >= 0 {
+                let t = n.to[s];
                 var k = interval_of[lo];
-                while k <= interval_of[n.hi[s]] {
-                    buckets[k].push(n.to[s]);
+                let last = interval_of[n.hi[s]];
+                while k <= last {
+                    buckets[k].push(t);
+                    bhash[k] = (bhash[k] * 31 + t + 1) % HASH_MOD;
                     k = k + 1;
                 }
             }
@@ -477,18 +616,34 @@ pub fn build_table(ref decls: List<TokenDecl>) -> LexBuild {
             if buckets[c].len() == 0 {
                 dnext.push(-1);
             } else {
-                let set = closure(buckets[c], eps_off, eps_dst, mark, stamp);
-                buckets[c] = [];
-                stamp = stamp + 1;
-                let key = join_ints(set);
-                if index.has(key) {
-                    dnext.push(index[key]);
+                let bh = bhash[c];
+                let known = find_ints(memo_slots, memo_hash, memo_seeds, buckets[c], bh);
+                if known >= 0 {
+                    dnext.push(memo_id[known]);
                 } else {
-                    let id = members.len();
-                    index.set(key, id);
-                    members.push(set);
+                    var set: List<i64> = [];
+                    let h = closure(buckets[c], eps_off, eps_dst, mark, stamp, set);
+                    var id = find_set(slots, dhash, members, mark, stamp, h, set.len() as i64);
+                    if id < 0 {
+                        id = add_set(slots, dhash, members, set, h);
+                    }
+                    stamp = stamp + 1;
+                    var kept: List<i64> = [];
+                    for t in buckets[c] {
+                        kept.push(t);
+                    }
+                    let _ = add_set(memo_slots, memo_hash, memo_seeds, kept, bh);
+                    memo_id.push(id);
                     dnext.push(id);
                 }
+            }
+            c = c + 1;
+        }
+        c = 0;
+        while c < intervals {
+            if buckets[c].len() > 0 {
+                buckets[c] = [];
+                bhash[c] = 0;
             }
             c = c + 1;
         }
@@ -511,28 +666,87 @@ pub fn build_table(ref decls: List<TokenDecl>) -> LexBuild {
         part.push(first_split[key]);
         i = i + 1;
     }
+    // Each round numbers the groups in order of their first state, as a
+    // state's signature (its group and its intervals' target groups) is
+    // first met. A row is kept as its runs of equal targets (a third of a
+    // million runs for the toolchain's 1.5 million cells), and a signature
+    // as its runs of equal target groups, found by hash and compared run
+    // by run.
+    var run_start: List<i64> = [];
+    var run_last: List<i64> = [];
+    var run_to: List<i64> = [];
+    i = 0;
+    while i < dstates {
+        run_start.push(run_last.len() as i64);
+        let base = i * intervals;
+        var c = 0;
+        while c < intervals {
+            let t = dnext[base + c];
+            if c > 0 && t == dnext[base + c - 1] {
+                run_last[run_last.len() - 1] = c;
+            } else {
+                run_last.push(c);
+                run_to.push(t);
+            }
+            c = c + 1;
+        }
+        i = i + 1;
+    }
+    run_start.push(run_last.len() as i64);
+    let sig_cap = dstates * 2 + 1;
     var changed = true;
     while changed {
-        var sig_ids: Map<str, i64> = Map<str, i64>();
+        var sig_start: List<i64> = [];
+        var sig_last: List<i64> = [];
+        var sig_group: List<i64> = [];
+        var sig_slots = empty_slots(sig_cap);
+        var reps: List<i64> = [];
         var next_part: List<i64> = [];
-        var next_groups = 0;
         i = 0;
         while i < dstates {
-            var parts: List<i64> = [part[i]];
-            var c = 0;
-            while c < intervals {
-                let t = dnext[i * intervals + c];
-                parts.push(if t < 0 { -1 } else { part[t] });
-                c = c + 1;
+            let from = sig_last.len() as i64;
+            sig_start.push(from);
+            var r = run_start[i];
+            let stop = run_start[i + 1];
+            while r < stop {
+                let t = run_to[r];
+                let g = if t < 0 { -1 } else { part[t] };
+                if sig_last.len() as i64 > from && sig_group[sig_group.len() - 1] == g {
+                    sig_last[sig_last.len() - 1] = run_last[r];
+                } else {
+                    sig_last.push(run_last[r]);
+                    sig_group.push(g);
+                }
+                r = r + 1;
             }
-            let sig = join_ints(parts);
-            if !sig_ids.has(sig) {
-                sig_ids.set(sig, next_groups);
-                next_groups = next_groups + 1;
+            var h = part[i] + 1;
+            var k = from;
+            while k < sig_last.len() as i64 {
+                h = (h * 1000003 + sig_last[k] * 65599 + sig_group[k] + 1) % HASH_MOD;
+                k = k + 1;
             }
-            next_part.push(sig_ids[sig]);
+            let to = sig_last.len() as i64;
+            var at = h % sig_cap;
+            var g = -1;
+            while g < 0 && sig_slots[at] >= 0 {
+                let cand = sig_slots[at];
+                let rep = reps[cand];
+                if part[rep] == part[i] && same_runs(sig_last, sig_group, sig_start[rep], from, to) {
+                    g = cand;
+                } else {
+                    at = at + 1;
+                    if at == sig_cap { at = 0; }
+                }
+            }
+            if g < 0 {
+                g = reps.len() as i64;
+                reps.push(i);
+                sig_slots[at] = g;
+            }
+            next_part.push(g);
             i = i + 1;
         }
+        let next_groups = reps.len() as i64;
         changed = next_groups != groups;
         groups = next_groups;
         part = next_part;
@@ -569,24 +783,39 @@ pub fn build_table(ref decls: List<TokenDecl>) -> LexBuild {
         i = i + 1;
     }
 
-    // 5. Merge intervals whose columns are equal into one byte class.
-    var class_ids: Map<str, i64> = Map<str, i64>();
+    // 5. Merge intervals whose columns are equal into one byte class,
+    //    numbered in order of first interval; columns are found by hash.
+    var class_rep: List<i64> = [];
     var class_of_interval: List<i64> = [];
+    let col_cap = intervals * 2 + 1;
+    var col_slots = empty_slots(col_cap);
     var classes = 0;
     var c = 0;
     while c < intervals {
-        var cells: List<i64> = [];
+        var h = 1;
         var g = 0;
         while g < groups {
-            cells.push(gnext[g * intervals + c]);
+            h = (h * 1000003 + gnext[g * intervals + c] + 2) % HASH_MOD;
             g = g + 1;
         }
-        let col = join_ints(cells);
-        if !class_ids.has(col) {
-            class_ids.set(col, classes);
-            classes = classes + 1;
+        var at = h % col_cap;
+        var found = -1;
+        while found < 0 && col_slots[at] >= 0 {
+            let cand = col_slots[at];
+            if same_column(gnext, groups, intervals, class_rep[cand], c) {
+                found = cand;
+            } else {
+                at = at + 1;
+                if at == col_cap { at = 0; }
+            }
         }
-        class_of_interval.push(class_ids[col]);
+        if found < 0 {
+            found = classes;
+            classes = classes + 1;
+            class_rep.push(c);
+            col_slots[at] = found;
+        }
+        class_of_interval.push(found);
         c = c + 1;
     }
     var next: List<i64> = [];

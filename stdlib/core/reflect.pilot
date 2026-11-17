@@ -830,16 +830,21 @@ pub comptime fn reflect_hydrate_symbol_context() -> SymbolContext {
     loop {
         if !(nid < total_nodes) { break; }
         let orig = __engine(ReflectEngine.orig_kind, nid);
-        let sym_id = __engine(ReflectEngine.node_sym, nid);
-        if sym_id > 0 {
-            let sym_name = __engine(ReflectEngine.sym_str, sym_id);
-            if sym_name != "" {
-                if orig == 0 || orig == 8 || orig == 10 {
-                    scopes[nid] = sym_name;
-                } else if orig == 3 || orig == 13 || orig == 14 || orig == 18 {
-                    methods[nid] = sym_name;
-                } else if orig == 11 {
-                    extensions[nid] = sym_name;
+        // Only these node kinds are kept: their symbol is read for nothing else.
+        let scope_kind = orig == 0 || orig == 8 || orig == 10;
+        let method_kind = orig == 3 || orig == 13 || orig == 14 || orig == 18;
+        if scope_kind || method_kind || orig == 11 {
+            let sym_id = __engine(ReflectEngine.node_sym, nid);
+            if sym_id > 0 {
+                let sym_name = __engine(ReflectEngine.sym_str, sym_id);
+                if sym_name != "" {
+                    if scope_kind {
+                        scopes[nid] = sym_name;
+                    } else if method_kind {
+                        methods[nid] = sym_name;
+                    } else {
+                        extensions[nid] = sym_name;
+                    }
                 }
             }
         }
@@ -900,13 +905,16 @@ pub comptime fn reflect_hydrate_package_context() -> PackageContext {
     loop {
         if !(nid < total_nodes) { break; }
         let orig = __engine(ReflectEngine.orig_kind, nid);
-        let sym_id = __engine(ReflectEngine.node_sym, nid);
-        if sym_id > 0 {
-            let sym_name = __engine(ReflectEngine.sym_str, sym_id);
-            if orig == 0 && pkg_name == "" && sym_name != "" {
-                pkg_name = sym_name;
-            } else if orig == 1 && sym_name != "" {
-                mounted[sym_name] = sym_name;
+        // Only the first package node and mounts are kept.
+        if (orig == 0 && pkg_name == "") || orig == 1 {
+            let sym_id = __engine(ReflectEngine.node_sym, nid);
+            if sym_id > 0 {
+                let sym_name = __engine(ReflectEngine.sym_str, sym_id);
+                if orig == 0 && sym_name != "" {
+                    pkg_name = sym_name;
+                } else if orig == 1 && sym_name != "" {
+                    mounted[sym_name] = sym_name;
+                }
             }
         }
         nid = nid + 1;

@@ -44,6 +44,8 @@ pub struct Regex : IObject {
 
     /// Whether the pattern matches anywhere in `text`.
     pub fn is_match(ref self, text: str) -> bool {
+        // A pure literal is found by the substring search alone (pike_search).
+        if self.prog.literal { return text.find(self.prog.prefix, 0) >= 0; }
         var vm = new_vm_slots(self.prog, false);
         return pike_search(self.prog, vm, text, 0, -1, false, false);
     }
@@ -54,6 +56,14 @@ pub struct Regex : IObject {
     /// The leftmost match starting at or after byte `pos`, or `none`. `^`
     /// and `\b` still look at the text before `pos`.
     pub fn find_at(ref self, text: str, pos: i64) -> Match? {
+        if pos > text.len() as i64 { return none; }
+        if self.prog.literal {
+            // As pike_search: where the literal is found is the match.
+            let at = text.find(self.prog.prefix, pos);
+            if at < 0 { return none; }
+            let end = at + (self.prog.prefix.len() as i64);
+            return Match { start: at, end: end, text: text.slice(at, end) };
+        }
         var vm = new_vm_slots(self.prog, false);
         if !pike_search(self.prog, vm, text, pos, -1, false, false) { return none; }
         return make_match(text, vm.found);
@@ -62,6 +72,7 @@ pub struct Regex : IObject {
     /// The match starting exactly at byte `pos` (Python's `re.match` at 0),
     /// or `none`.
     pub fn match_at(ref self, text: str, pos: i64) -> Match? {
+        if pos > text.len() as i64 { return none; }
         var vm = new_vm_slots(self.prog, false);
         if !pike_search(self.prog, vm, text, pos, -1, true, false) { return none; }
         return make_match(text, vm.found);
@@ -79,6 +90,7 @@ pub struct Regex : IObject {
 
     /// As `captures`, for a match starting at or after byte `pos`.
     pub fn captures_at(ref self, text: str, pos: i64) -> Captures? {
+        if pos > text.len() as i64 { return none; }
         var vm = new_vm(self.prog);
         if !pike_search(self.prog, vm, text, pos, -1, false, false) { return none; }
         return Captures { text: text, slots: vm.found_slots(), names: self.prog.names };

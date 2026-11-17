@@ -37,13 +37,16 @@ fn reverse_postorder(ref f: IrFunction) -> List<u32> {
     for b in f.blocks { seen.push(false); }
     var post: List<u32> = [];
     // Iterative depth-first search: a stack of (block, next successor index).
+    // Each entry keeps its block's successors, worked out once on entry
+    // rather than each time the block is back on top.
     var stack: List<u32> = [0];
     var next: List<i64> = [0];
+    var succs: List<List<u32>> = [block_successors(f, 0)];
     seen[0] = true;
     while stack.len > 0 {
         let top = stack.len - 1;
         let b = stack[top];
-        let succ = block_successors(f, b);
+        let succ = succs[top];
         if next[top] < succ.len() {
             let s = succ[next[top]];
             next[top] = next[top] + 1;
@@ -51,11 +54,13 @@ fn reverse_postorder(ref f: IrFunction) -> List<u32> {
                 seen[s] = true;
                 stack.push(s);
                 next.push(0);
+                succs.push(block_successors(f, s));
             }
         } else {
             post.push(b);
             let _ = stack.pop();
             let _ = next.pop();
+            let _ = succs.pop();
         }
     }
     var out: List<u32> = [];
@@ -187,13 +192,15 @@ pub fn dom_holds(d: DomIntervals, a: u32, b: u32) -> bool => d.opened[a] <= d.op
 /// The operand positions of `inst` that hold values (the others name blocks,
 /// counts or pool entries).
 pub fn value_positions(ref f: IrFunction, inst: IrInst) -> List<i64> {
-    let a = ir_args(f, inst);
     var out: List<i64> = [];
     let op = inst.opcode;
     if op == op_const_bits() || op == op_const_float() || op == op_const_bytes() { return out; }
+    // Only `cond_br` reads its operands; the rest need just their count,
+    // which is `args_len`, so skip building the operand list for them.
+    let n: i64 = inst.args_len;
     if op == op_jump() {
         var i = 1;
-        while i < a.len() { out.push(i); i = i + 1; }
+        while i < n { out.push(i); i = i + 1; }
         return out;
     }
     if op == op_switch_table() {
@@ -201,6 +208,7 @@ pub fn value_positions(ref f: IrFunction, inst: IrInst) -> List<i64> {
         return out;
     }
     if op == op_cond_br() {
+        let a = ir_args(f, inst);
         out.push(0);
         var i = 0;
         while i < a[2] { out.push(3 + i); i = i + 1; }
@@ -210,7 +218,7 @@ pub fn value_positions(ref f: IrFunction, inst: IrInst) -> List<i64> {
         return out;
     }
     var i = 0;
-    while i < a.len() { out.push(i); i = i + 1; }
+    while i < n { out.push(i); i = i + 1; }
     return out;
 }
 

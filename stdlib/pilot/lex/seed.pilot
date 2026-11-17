@@ -50,8 +50,12 @@ pub fn seed_table_text(ref m: ModalLexer, full_key: str, var ref errors: List<Le
             kinds.push(emit_index(e.emit));
         } else {
             var listed = false;
+            let quoted = f"`{name}`";
             for x in errors {
-                if x.message.contains(f"`{name}`") { listed = true; }
+                if x.message.contains(quoted) {
+                    listed = true;
+                    break;
+                }
             }
             if !listed {
                 errors.push(LexBuildError { code: "LEX008", message: f"the token family `{name}` has no kind the seed parser reads; add it to stdlib/core/lex/seed_kinds.pilot" });

@@ -177,15 +177,19 @@ pub fn suffixed_number_tokens() -> List<TokenDecl> {
         let n = w.len() as i64;
         var known = !letter;
         for l in lengths {
-            if l == n { known = true; }
+            if l == n {
+                known = true;
+                break;
+            }
         }
         if !known { lengths.push(n); }
     }
+    let numbers = number_tokens();
     var out: List<TokenDecl> = [];
-    for d in number_tokens() {
+    for d in numbers {
         out.push(acting(TokenRole::Operand, token_over(d.name + SUFFIXED, d.priority - 1, seq([d.pattern, suffix()]))));
     }
-    for d in number_tokens() {
+    for d in numbers {
         for n in lengths {
             var words: List<str> = [];
             for w in SEED_WORDS {

@@ -117,8 +117,11 @@ fn text_row(n: i64, call: str, args: List<ProbeArg>, at: ProbeAt) -> PlannedProb
 fn fn_statements(ref p: Program, f: i64) -> List<i64> {
     let s = p.s;
     var found: List<i64> = [];
-    var n = 0;
-    while n < s.count {
+    // A user function's nodes all lie in `user_lo .. user_hi`.
+    let user = in_user_file(s, f);
+    var n = if user { s.user_lo } else { 0 };
+    let end = if user { s.user_hi } else { s.count };
+    while n < end {
         let up = p.parents[n];
         if up >= 0 && kind(s, up) == nk_block() && unit_of(s, n) == unit_of(s, f) && enclosing_fn(p, n) == f {
             found.push(n);
@@ -158,8 +161,11 @@ fn by_code(ref p: Program, f: i64) -> str {
     let s = p.s;
     let name = node_name(s, f);
     var deepest = 0;
-    var n = 0;
-    while n < s.count {
+    // A user function's nodes all lie in `user_lo .. user_hi`.
+    let user = in_user_file(s, f);
+    var n = if user { s.user_lo } else { 0 };
+    let end = if user { s.user_hi } else { s.count };
+    while n < end {
         if unit_of(s, n) == unit_of(s, f) && enclosing_fn(p, n) == f {
             if kind(s, n) == nk_call() {
                 let callee = lhs(s, n);
@@ -251,7 +257,21 @@ fn flag_text(v: i64) -> ProbeArg => text_arg(f"{v}");
 /// The probes that measure the covered functions of the program.
 pub fn coverage_plan(var ref p: Program) -> List<PlannedProbe> {
     let s = p.s;
+<<<<<<< HEAD
     var out: List<PlannedProbe> = [];
+=======
+    var out: List<List<any>> = [];
+    // No `[Coverage]` row anywhere: no function is covered, written on it
+    // or inherited from a container.
+    var any_row = false;
+    for row in s.attrs {
+        if sym_text(s, row[1]) == coverage_attr() {
+            any_row = true;
+            break;
+        }
+    }
+    if !any_row { return out; }
+>>>>>>> claude/cool-moser-2264b9
     let pkgs = package_decls(p);
     let quiet = sink_new(s);
     let speed = flag_value(enum_flags(p, coverage_mode_type()), "Speed");

@@ -180,8 +180,8 @@ fn cov_exit(u: str, now: i64) {
     cov_add("frames", -1);
     let f = cov_get("frames");
     let n = cov_get(f"frame#{f}|n");
-    let ops = cov_get("ops") - cov_get(f"frame#{f}|ops");
     if n < 0 { return; }
+    let ops = cov_get("ops") - cov_get(f"frame#{f}|ops");
     // The calls with the smallest and the largest input size.
     if !coverage_ints.has(u + "|lo_n") || n < cov_get(u + "|lo_n") {
         coverage_ints.set(u + "|lo_n", n);
@@ -253,9 +253,9 @@ fn cov_measured(u: str) -> str {
     return cov_order(best) + " measured";
 }
 
-/// The distinct lines of `u`'s statements that never ran, in order.
-fn cov_missed(u: str) -> List<i64> {
-    let lines = cov_split(cov_text(u + "|lines"));
+/// The distinct lines of `u`'s statements (their `lines`) that never ran,
+/// in order.
+fn cov_missed(u: str, ref lines: List<str>) -> List<i64> {
     var missed: List<i64> = [];
     var i = 0;
     while i < lines.len() {
@@ -263,7 +263,10 @@ fn cov_missed(u: str) -> List<i64> {
             let line = cov_int(lines[i]);
             var seen = false;
             for m in missed {
-                if m == line { seen = true; }
+                if m == line {
+                    seen = true;
+                    break;
+                }
             }
             if !seen { missed.push(line); }
         }
@@ -287,8 +290,8 @@ fn cov_missed(u: str) -> List<i64> {
     return sorted;
 }
 
-fn cov_ran(u: str) -> i64 {
-    let all = cov_split(cov_text(u + "|lines")).len();
+/// How many of `u`'s `all` statements ran.
+fn cov_ran(u: str, all: i64) -> i64 {
     var ran = 0;
     var i = 0;
     while i < all {
@@ -313,9 +316,10 @@ fn cov_emit(line: str, outs: i64) {
 /// The report line of unit `u`.
 fn cov_unit_line(u: str) -> str {
     let modes = cov_get(u + "|modes");
-    let all = cov_split(cov_text(u + "|lines")).len();
-    var line = "[coverage] " + cov_text(u + "|name") + ": " + cov_statements(cov_ran(u), all);
-    let missed = cov_missed(u);
+    let lines = cov_split(cov_text(u + "|lines"));
+    let all = lines.len() as i64;
+    var line = "[coverage] " + cov_text(u + "|name") + ": " + cov_statements(cov_ran(u, all), all);
+    let missed = cov_missed(u, lines);
     if missed.len() > 0 {
         var shown = "";
         for m in missed {
@@ -348,16 +352,21 @@ fn cov_group_line(g: str) -> str {
     var ops = 0;
     var time = 0;
     var i = 0;
-    while i < cov_get("units") {
+    let units = cov_get("units");
+    while i < units {
         let u = cov_text(f"unit#{i}");
         var member = false;
         for x in cov_split(cov_text(u + "|groups")) {
-            if x == g { member = true; }
+            if x == g {
+                member = true;
+                break;
+            }
         }
         if member {
+            let n = cov_split(cov_text(u + "|lines")).len() as i64;
             fns = fns + 1;
-            ran = ran + cov_ran(u);
-            all = all + cov_split(cov_text(u + "|lines")).len();
+            ran = ran + cov_ran(u, n);
+            all = all + n;
             calls = calls + cov_get(u + "|calls");
             ops = ops + cov_get(u + "|ops");
             time = time + cov_get(u + "|time");
@@ -372,16 +381,22 @@ fn cov_group_line(g: str) -> str {
 
 /// Reports every unit, then every group, where each one's outputs say.
 pub fn coverage_report() {
+    // Reporting writes no count, so both counts are read once; a line with
+    // no outputs is not built (cov_emit would drop it).
+    let units = cov_get("units");
     var i = 0;
-    while i < cov_get("units") {
+    while i < units {
         let u = cov_text(f"unit#{i}");
-        cov_emit(cov_unit_line(u), cov_get(u + "|outs"));
+        let outs = cov_get(u + "|outs");
+        if outs != 0 { cov_emit(cov_unit_line(u), outs); }
         i = i + 1;
     }
+    let groups = cov_get("groups");
     i = 0;
-    while i < cov_get("groups") {
+    while i < groups {
         let g = cov_text(f"group#{i}");
-        cov_emit(cov_group_line(g), cov_get(g + "|outs"));
+        let outs = cov_get(g + "|outs");
+        if outs != 0 { cov_emit(cov_group_line(g), outs); }
         i = i + 1;
     }
 }

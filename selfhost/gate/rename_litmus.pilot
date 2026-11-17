@@ -453,6 +453,7 @@ fn rl_rename_stderr(body: str, program_src: str, rmap: i64) -> str {
     return out;
 }
 
+<<<<<<< HEAD
 /// Copies `<root>/<rel>` to `<sandbox_dir>/<rel>`, renaming identifiers in
 /// a `.pilot` file and the expectations of a `.stderr` file. Whether it was
 /// written.
@@ -466,6 +467,38 @@ fn rl_copy_renamed_file(root: str, rel: str, sandbox_dir: str, rmap: i64, violat
         let program = path.slice(0, path.len() - 7) + ".pilot";
         let program_src = if gate_fs_exists(program) { gate_fs_read_text(program) } else { "" };
         out_text = rl_rename_stderr(file_text, program_src, rmap);
+=======
+/// Copies every file under `<root>/<src_rel>` to `<sandbox>/<dst_rel>`,
+/// renaming identifiers in `.pilot` files. Returns the number of files copied.
+fn rl_copy_renamed_tree(root: str, src_rel: str, sandbox_dir: str, dst_rel: str, rmap: i64, violations: i64) -> usize {
+    let base = gm_join_path(root, src_rel);
+    let files = gm_split_lines(gate_fs_walk_files(base));
+    let n = glist_len(files);
+    var copied = 0;
+    var i = 0;
+    while i < n {
+        let path = glist_get(files, i);
+        let rel = path.slice(base.len() + 1, path.len());
+        let file_text = gate_fs_read_text(path);
+        var out_text = file_text;
+        if gm_ends_with(rel, ".pilot") {
+            out_text = rl_rename_pilot_identifiers(file_text, rmap);
+        } else if gm_ends_with(rel, ".stderr") {
+            // Only `<file>.pilot:` locations read the program's source.
+            let program = path.slice(0, path.len() - 7) + ".pilot";
+            let src = if gm_find(file_text, ".pilot:", 0) >= 0 { gate_fs_read_text(program) } else { "" };
+            out_text = rl_rename_stderr(file_text, src, rmap);
+        }
+        let out_path = gm_join_path(sandbox_dir, dst_rel + "/" + rel);
+        if gate_fs_write_text(out_path, out_text) {
+            copied = copied + 1;
+        } else {
+            let _ = glist_push(violations, rl_violation(out_path, out_path,
+                "Failed to write a renamed file into the litmus sandbox",
+                "Check write permissions for the TempDirGuard sandbox"));
+        }
+        i = i + 1;
+>>>>>>> claude/cool-moser-2264b9
     }
     let out_path = gm_join_path(sandbox_dir, rel);
     if gate_fs_write_text(out_path, out_text) { return true; }

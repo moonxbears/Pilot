@@ -93,8 +93,11 @@ fn live_count(stderr: str) -> str? {
 /// `template` with `{src}` and `{bin}` filled in.
 fn filled(ref template: List<str>, src: str, bin: str) -> List<str> {
     var out: List<str> = [];
+    // The runtime directory is looked for on disk, so only for a template
+    // that names it.
     for t in template {
-        out.push(t.replace("{src}", src).replace("{bin}", bin).replace("{rt}", c_runtime_dir()));
+        let named = t.replace("{src}", src).replace("{bin}", bin);
+        out.push(if named.find("{rt}", 0) >= 0 { named.replace("{rt}", c_runtime_dir()) } else { named });
     }
     return out;
 }

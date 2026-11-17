@@ -178,6 +178,8 @@ pub struct LuaDialect : ISourceDialect {
     }
     pub fn call(name: str, args: List<str>) -> str => f"{name}({joined(args)})";
     pub fn intrinsic(name: str, args: List<str>, phys: List<IrTypePhysics>, literal: List<bool>, ret: IrTypePhysics) -> str? {
+        // Only the two print operations have a spelling here.
+        if name != "rt_print" && name != "rt_eprint" { return none; }
         var text = "";
         for a in args {
             if text.len() > 0 { text = text + " .. \" \" .. "; }

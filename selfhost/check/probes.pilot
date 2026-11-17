@@ -467,8 +467,16 @@ fn traced_statement(ref p: Program, n: i64) -> bool {
 
 /// The probes of every function in the user's files that `[Debug]` applies
 /// to, written on it or inherited (selfhost/check/attr_inherit.pilot).
+<<<<<<< HEAD
 pub fn probe_plan(ref p: Program) -> List<PlannedProbe> {
     var out: List<PlannedProbe> = [];
+=======
+pub fn probe_plan(ref p: Program) -> List<List<any>> {
+    var out: List<List<any>> = [];
+    // No hook to call: no probe either way, and the scan below only fills
+    // `traced` (its findings go to a discarded sink).
+    if nl_get(p.fns, debug_hook()).len() == 0 { return out; }
+>>>>>>> claude/cool-moser-2264b9
     let traced = Map<str, DebugSettings>();
     let quiet = sink_new(p.s);
     let pkgs = package_decls(p);
@@ -488,7 +496,7 @@ pub fn probe_plan(ref p: Program) -> List<PlannedProbe> {
         }
         f = f + 1;
     }
-    if !any_traced || nl_get(p.fns, debug_hook()).len() == 0 { return out; }
+    if !any_traced { return out; }
     let levels = debug_levels(p);
     var n = 0;
     n = p.s.user_lo;
