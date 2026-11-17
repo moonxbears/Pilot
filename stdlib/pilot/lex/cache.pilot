@@ -116,6 +116,27 @@ pub fn modes_key(ref modes: List<LexMode>) -> str {
     return b.to_string();
 }
 
+/// The labelled lines of a cache file after its key text, in the order
+/// `lexer_text` writes them and `read_lexer` reads them. Each field's text
+/// (`field as str`) is the word that starts its line, so the writer and the
+/// reader cannot disagree (a text enum, PROP-032).
+pub enum CacheField : u8 {
+    Key = "key",
+    Modes = "modes",
+    Bases = "bases",
+    ModeOf = "mode_of",
+    Enters = "enters",
+    Shares = "shares",
+    Names = "names",
+    ClassOf = "class_of",
+    Size = "size",
+    Starts = "starts",
+    Next = "next",
+    Accept = "accept",
+    Actions = "actions",
+    EntersMode = "enters_mode",
+}
+
 /// `h` as 16 lowercase hex digits.
 pub fn hex64(h: u64) -> str {
     let digits = "0123456789abcdef";
@@ -194,23 +215,23 @@ fn shared_with(ref m: ModalLexer, i: i64) -> i64 {
 pub fn lexer_text(ref m: ModalLexer, key: str) -> str {
     var b = text.string_builder_new();
     b.append(CACHE_FORMAT + "\n");
-    b.append(f"key {key.len()}\n");
+    b.append(f"{CacheField::Key} {key.len()}\n");
     b.append(key);
-    b.append(words_line("modes", m.modes));
-    b.append(ints_line("bases", m.bases));
-    b.append(ints_line("mode_of", m.mode_of));
+    b.append(words_line(CacheField::Modes as str, m.modes));
+    b.append(ints_line(CacheField::Bases as str, m.bases));
+    b.append(ints_line(CacheField::ModeOf as str, m.mode_of));
     for i in 0 .. m.tables.len() {
-        b.append(ints_line("enters", m.enters[i]));
+        b.append(ints_line(CacheField::Enters as str, m.enters[i]));
         let t = m.tables[i];
         let shares = shared_with(m, i as i64);
-        b.append(f"shares {shares}\n");
+        b.append(f"{CacheField::Shares} {shares}\n");
         if shares < 0 {
-            b.append(words_line("names", t.names));
-            b.append(ints_line("class_of", t.class_of));
-            b.append(f"size {t.classes} {t.states}\n");
-            b.append(ints_line("starts", t.starts));
-            b.append(ints_line("next", t.next));
-            b.append(ints_line("accept", t.accept));
+            b.append(words_line(CacheField::Names as str, t.names));
+            b.append(ints_line(CacheField::ClassOf as str, t.class_of));
+            b.append(f"{CacheField::Size} {t.classes} {t.states}\n");
+            b.append(ints_line(CacheField::Starts as str, t.starts));
+            b.append(ints_line(CacheField::Next as str, t.next));
+            b.append(ints_line(CacheField::Accept as str, t.accept));
         }
         var acts: List<i64> = [];
         var goes: List<str> = [];
@@ -220,8 +241,8 @@ pub fn lexer_text(ref m: ModalLexer, key: str) -> str {
             acts.push(a.trails);
             goes.push(a.enters);
         }
-        b.append(ints_line("actions", acts));
-        b.append(words_line("enters_mode", goes));
+        b.append(ints_line(CacheField::Actions as str, acts));
+        b.append(words_line(CacheField::EntersMode as str, goes));
     }
     return b.to_string();
 }
@@ -274,14 +295,14 @@ struct Reader : IObject {
         return w.slice(1, w.len());
     }
 
-    fn expect(var ref self, label: str) {
-        if .next_word() != label { .bad = true; }
+    fn expect(var ref self, field: CacheField) {
+        if .next_word() != field as str { .bad = true; }
     }
 
     /// A line written by `ints_line`; a run `value*times` is read as
     /// `times` copies of the value.
-    fn ints(var ref self, label: str) -> List<i64> {
-        .expect(label);
+    fn ints(var ref self, field: CacheField) -> List<i64> {
+        .expect(field);
         let n = .int();
         var parts: List<List<i64>> = [];
         var single: List<i64> = [];
@@ -310,8 +331,8 @@ struct Reader : IObject {
         return joined(parts);
     }
 
-    fn names(var ref self, label: str) -> List<str> {
-        .expect(label);
+    fn names(var ref self, field: CacheField) -> List<str> {
+        .expect(field);
         let n = .int();
         var out: List<str> = [];
         var i = 0;
@@ -325,14 +346,14 @@ struct Reader : IObject {
 
 /// A table's automaton as `lexer_text` writes it (its actions empty).
 fn read_automaton(var ref r: Reader) -> LexTable {
-    let names = r.names("names");
-    let class_of = r.ints("class_of");
-    r.expect("size");
+    let names = r.names(CacheField::Names);
+    let class_of = r.ints(CacheField::ClassOf);
+    r.expect(CacheField::Size);
     let classes = r.int();
     let states = r.int();
-    let starts = r.ints("starts");
-    let next = r.ints("next");
-    let accept = r.ints("accept");
+    let starts = r.ints(CacheField::Starts);
+    let next = r.ints(CacheField::Next);
+    let accept = r.ints(CacheField::Accept);
     return LexTable { names: names, class_of: class_of, classes: classes, states: states, starts: starts, next: next, accept: accept, actions: [] };
 }
 
@@ -342,25 +363,25 @@ pub fn read_lexer(src: str, key: str) -> ModalLexer? {
     let first = CACHE_FORMAT + "\n";
     if !src.starts_with(first) { return none; }
     var r = Reader { src: src, at: first.len(), bad: false };
-    r.expect("key");
+    r.expect(CacheField::Key);
     let n = r.int();
     let from = r.at + 1;
     if r.bad || from + n > src.len() || src.slice(from, from + n) != key { return none; }
     r.at = from + n;
-    let modes = r.names("modes");
-    let bases = r.ints("bases");
-    let mode_of = r.ints("mode_of");
+    let modes = r.names(CacheField::Modes);
+    let bases = r.ints(CacheField::Bases);
+    let mode_of = r.ints(CacheField::ModeOf);
     var tables: List<LexTable> = [];
     var enters: List<List<i64>> = [];
     var i = 0;
     while i < modes.len() && !r.bad {
-        enters.push(r.ints("enters"));
-        r.expect("shares");
+        enters.push(r.ints(CacheField::Enters));
+        r.expect(CacheField::Shares);
         let shares = r.int();
         if shares >= i { return none; }
         let auto = if shares >= 0 { tables[shares] } else { read_automaton(r) };
-        let acts = r.ints("actions");
-        let goes = r.names("enters_mode");
+        let acts = r.ints(CacheField::Actions);
+        let goes = r.names(CacheField::EntersMode);
         var actions: List<TokenAction> = [];
         var k = 0;
         while k < goes.len() && 3 * k + 2 < acts.len() {

@@ -51,9 +51,12 @@ pub fn core_tokens_with(operators: List<TokenDecl>) -> List<TokenDecl> {
 /// mode (every token, the operators and the f-string openers), one mode per
 /// f-string quoting, and the hole mode (the main mode's tokens, with braces
 /// that enter and leave it).
+/// The mode a source starts in.
+pub const MAIN_MODE: str = "main";
+
 [StandIn("lex.token_attribute", "each token is a declaration marked [Token(..)] that the builder collects", "the token declarations are returned by this function, listed by hand", "PROP-021")]
 pub fn core_modes(operators: List<TokenDecl>) -> List<LexMode> {
-    var modes: List<LexMode> = [lex_mode("main", modal_tokens(operators, false))];
+    var modes: List<LexMode> = [lex_mode(MAIN_MODE, modal_tokens(operators, false))];
     for m in fstring_modes() {
         modes.push(m);
     }

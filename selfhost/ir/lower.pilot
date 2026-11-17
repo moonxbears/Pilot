@@ -853,9 +853,17 @@ pub fn lower_binary(var ref lw: Lowerer, n: i64) -> u32 {
     // Each side is lowered against the other's type (`x == none`,
     // `c == ::Red`), as far as the lowering knows it.
     // Arithmetic (`"<" + line`) takes each side as it is.
-    // An operand that is a union is used as the value it holds.
-    let a = engine_arg(lw, if pred < 0 { lower_expr(lw, lhs(s, n)) } else { lower_hinted(lw, lhs(s, n), value_type(lw, rhs(s, n))) }, value_type(lw, lhs(s, n)), lhs(s, n));
-    let b = engine_arg(lw, if pred < 0 { lower_expr(lw, rhs(s, n)) } else { lower_hinted(lw, rhs(s, n), value_type(lw, lhs(s, n))) }, value_type(lw, rhs(s, n)), rhs(s, n));
+    // An operand that is a union is used as the value it holds; a text
+    // enum in arithmetic (`"[" + f`) as its text.
+    var a = ir_no_value();
+    var b = ir_no_value();
+    if pred < 0 {
+        a = engine_value(lw, lower_expr(lw, lhs(s, n)), value_type(lw, lhs(s, n)), lhs(s, n));
+        b = engine_value(lw, lower_expr(lw, rhs(s, n)), value_type(lw, rhs(s, n)), rhs(s, n));
+    } else {
+        a = engine_arg(lw, lower_hinted(lw, lhs(s, n), value_type(lw, rhs(s, n))), value_type(lw, lhs(s, n)), lhs(s, n));
+        b = engine_arg(lw, lower_hinted(lw, rhs(s, n), value_type(lw, lhs(s, n))), value_type(lw, rhs(s, n)), rhs(s, n));
+    }
     if native != "" { return emit(lw, op_call_intrinsic(), intrinsic_index(lw, native), physics_of(lw, n), [a, b], n); }
     if ir_op != 0 { return emit(lw, ir_op, 0, physics_of(lw, n), [a, b], n); }
     return emit(lw, op_cmp(), pred, physics_of(lw, n), [a, b], n);
@@ -935,6 +943,10 @@ pub fn lower_cast(var ref lw: Lowerer, n: i64, value: i64) -> u32 {
     if is_scalar_literal(p, value) && in_register(to) {
         let code = emit(lw, op_const_bits(), 0, to, [pool_int(lw, scalar_code(node_name(p.s, value)))], n);
         return if to_scalar { emit(lw, op_call_intrinsic(), intrinsic_index(lw, scalar_op()), to, [code], n) } else { code };
+    }
+    let src = value_type(lw, value);
+    if !in_register(to) && ty_is_named(p.tt, src) && is_text_enum(p.s, ty_decl(p.tt, src)) {
+        return lower_enum_text(lw, value, src, to, n);
     }
     let v = lower_expr(lw, value);
     // A value outside a register (a string) is converted as the seed does:
@@ -1112,7 +1124,7 @@ pub fn lower_fn_call(var ref lw: Lowerer, callee: i64, ref pre: List<u32>, ref a
     for v in pre { args.push(v); }
     for a in arg_nodes {
         if kind(s, a) == nk_call_arg() { return unsupported(lw, n); }
-        args.push(engine_arg(lw, lower_expr(lw, a), value_type(lw, a), a));
+        args.push(engine_value(lw, lower_expr(lw, a), value_type(lw, a), a));
     }
     if some v = lower_generator_op(lw, native, args, phy, n) { return v; }
     return engine_call(lw, native, args, phy, type_of(lw.inf, n), n);

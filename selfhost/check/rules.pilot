@@ -675,6 +675,15 @@ fn check_cast(var ref inf: Infer, var ref sink: DiagSink, n: i64) {
     let src = type_of(inf, lhs(s, n));
     let dst = prog_annot_type(p, rhs(s, n));
     if !ty_is_named(p.tt, src) || !ty_is_named(p.tt, dst) || ty_is_open(p.tt, src) || ty_is_open(p.tt, dst) { return; }
+    // A text enum (PROP-032) casts to its text, and to no integer.
+    if is_text_enum(s, ty_decl(p.tt, src)) {
+        if is_text(p, dst) { return; }
+        if is_integer_class(prog_value_class(p, dst)) {
+            sink_error(sink, n, "ENUM001",
+                f"`{ty_display(p.tt, src)}` is a text enum and has no integer value; `as {ty_display(p.tt, prog_slot_type(p, literal_slot(nk_str())))}` gives its text");
+            return;
+        }
+    }
     if assignable(inf, src, dst, lhs(s, n)) { return; }
     if prog_value_class(p, src) != "" && prog_value_class(p, dst) != "" { return; }
     // A one-character literal is cast as the character it holds.

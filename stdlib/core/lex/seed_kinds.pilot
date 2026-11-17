@@ -23,6 +23,8 @@
 [EnforceCoreNaming]
 pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Lex.SeedKinds;
 
+use Pilot.Core.Lex.Strings;
+
 /// The seed's `TokenFlags` bits that a family decides.
 pub const SEED_IS_RAW_STRING: u8 = 8;
 pub const SEED_IS_INTERPOLATED: u8 = 16;
@@ -200,7 +202,7 @@ pub const SEED_FAMILY_KINDS: List<FamilyKind> = [
 
 pub const SEED_SKIPPED: List<str> = ["space",];
 
-pub const SEED_INNER: List<str> = ["fstring_text", "fstring_quote", "hole_open", "fstring_close",];
+pub const SEED_INNER: List<str> = [FSTRING_TEXT, FSTRING_QUOTE, HOLE_OPEN, FSTRING_CLOSE,];
 
 /// What the seed reads for one family.
 pub struct SeedEntry : IValue {

@@ -1,0 +1,2 @@
+error[ENUM001]: `Light` is a text enum and has no integer value; `as str` gives its text
+err_enum001_text_int_cast.pilot:10:11

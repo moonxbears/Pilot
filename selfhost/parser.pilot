@@ -58,16 +58,16 @@ fn sh_parse_macro_arg(arena: i64, tape: i64, ctx: i64) -> i64 {
     let cur = __engine("map_get", ctx, "pos");
     let tcnt = sh_token_count(tape);
     if cur >= tcnt { return -1; }
-    let tag = sh_token_tag(tape, cur);
+    let tag = sh_token_tag_kind(tape, cur);
     let txt = sh_token_text(tape, cur);
 
-    if tag == "LBrace" {
+    if tag == TokenTagKind::LBrace {
         return sh_parse_block(arena, tape, ctx);
     }
     if txt == nameof(return) || txt == nameof(let) || txt == "var" || txt == "if" || txt == "while" || txt == nameof(loop) {
         return sh_parse_statement(arena, tape, ctx);
     }
-    if (tag == "Ident" || tag == "SeedKw") && cur + 1 < tcnt && sh_token_text(tape, cur + 1) == "=" {
+    if (tag == TokenTagKind::Ident || tag == TokenTagKind::SeedKw) && cur + 1 < tcnt && sh_token_text(tape, cur + 1) == "=" {
         return sh_parse_statement(arena, tape, ctx);
     }
     let expr_nid = sh_parse_expr_bp(arena, tape, ctx, 0);
@@ -89,7 +89,7 @@ fn sh_invoke_macro(arena: i64, tape: i64, ctx: i64, name: str) -> i64 {
     while true {
         let p = __engine("map_get", ctx, "pos");
         if p >= tcnt { break; }
-        if sh_token_tag(tape, p) == "RParen" {
+        if sh_token_tag_kind(tape, p) == TokenTagKind::RParen {
             __engine("map_set", ctx, "pos", p + 1);
             break;
         }
@@ -101,7 +101,7 @@ fn sh_invoke_macro(arena: i64, tape: i64, ctx: i64, name: str) -> i64 {
         let c_pos = __engine("map_get", ctx, "pos");
         if c_pos < tcnt && sh_token_text(tape, c_pos) == "," {
             __engine("map_set", ctx, "pos", c_pos + 1);
-        } else if c_pos < tcnt && sh_token_tag(tape, c_pos) == "RParen" {
+        } else if c_pos < tcnt && sh_token_tag_kind(tape, c_pos) == TokenTagKind::RParen {
             __engine("map_set", ctx, "pos", c_pos + 1);
             break;
         } else if c_pos == p {
@@ -159,8 +159,8 @@ fn sh_parse_quote_template(arena: i64, tape: i64, ctx: i64) -> i64 {
     let tcnt = sh_token_count(tape);
     if cur >= tcnt { return -1; }
 
-    let tag = sh_token_tag(tape, cur);
-    if tag == "LBrace" {
+    let tag = sh_token_tag_kind(tape, cur);
+    if tag == TokenTagKind::LBrace {
         let blk = sh_parse_block(arena, tape, ctx);
         let bcnt = sh_ast_child_count(arena, blk);
         if bcnt == 1 {
@@ -184,17 +184,17 @@ fn sh_parse_primary(arena: i64, tape: i64, ctx: i64) -> i64 {
     let tcnt = sh_token_count(tape);
     if cur >= tcnt { return -1; }
 
-    let tag = sh_token_tag(tape, cur);
+    let tag = sh_token_tag_kind(tape, cur);
     let text = sh_token_text(tape, cur);
 
     // Homoiconic splice holes: `$*seq`, `$hole`, `$(hole)`
-    if tag == "Op" && text == "$" {
+    if tag == TokenTagKind::Op && text == "$" {
         if cur + 2 < tcnt && sh_token_text(tape, cur + 1) == "*" {
             let sname = sh_token_text(tape, cur + 2);
             __engine("map_set", ctx, "pos", cur + 3);
             return sh_ast_alloc_splat(arena, sname, -1);
         }
-        if cur + 3 < tcnt && sh_token_tag(tape, cur + 1) == "LParen" {
+        if cur + 3 < tcnt && sh_token_tag_kind(tape, cur + 1) == TokenTagKind::LParen {
             let p_name = sh_token_text(tape, cur + 2);
             __engine("map_set", ctx, "pos", cur + 4);
             return sh_ast_alloc_splice(arena, p_name, -1);
@@ -207,14 +207,14 @@ fn sh_parse_primary(arena: i64, tape: i64, ctx: i64) -> i64 {
     }
 
     // Alternate variadic splat syntax: `*$seq`
-    if tag == "Op" && text == "*" && cur + 2 < tcnt && sh_token_text(tape, cur + 1) == "$" {
+    if tag == TokenTagKind::Op && text == "*" && cur + 2 < tcnt && sh_token_text(tape, cur + 1) == "$" {
         let vname = sh_token_text(tape, cur + 2);
         __engine("map_set", ctx, "pos", cur + 3);
         return sh_ast_alloc_splat(arena, vname, -1);
     }
 
     // Homoiconic compile-time unquote escape: `~expr` or `~(expr)`
-    if tag == "Op" && text == "~" {
+    if tag == TokenTagKind::Op && text == "~" {
         __engine("map_set", ctx, "pos", cur + 1);
         let u_expr = sh_parse_expr_bp(arena, tape, ctx, 50);
         return sh_ast_alloc_unquote(arena, u_expr);
@@ -227,50 +227,50 @@ fn sh_parse_primary(arena: i64, tape: i64, ctx: i64) -> i64 {
     }
 
     // Verbatim `raw("...")` quotation
-    if tag == "Ident" && text == "raw" && cur + 2 < tcnt && sh_token_tag(tape, cur + 1) == "LParen" {
+    if tag == TokenTagKind::Ident && text == "raw" && cur + 2 < tcnt && sh_token_tag_kind(tape, cur + 1) == TokenTagKind::LParen {
         let raw_txt = sh_token_text(tape, cur + 2);
         var next_p = cur + 3;
-        if next_p < tcnt && sh_token_tag(tape, next_p) == "RParen" {
+        if next_p < tcnt && sh_token_tag_kind(tape, next_p) == TokenTagKind::RParen {
             next_p = next_p + 1;
         }
         __engine("map_set", ctx, "pos", next_p);
         return sh_ast_alloc_raw(arena, raw_txt);
     }
 
-    if tag == "IntLit" {
+    if tag == TokenTagKind::IntLit {
         __engine("map_set", ctx, "pos", cur + 1);
         return sh_ast_alloc_node(arena, "IntLit", text);
     }
 
-    if tag == "StrLit" || tag == "FStrLit" {
+    if tag == TokenTagKind::StrLit || tag == TokenTagKind::FStrLit {
         __engine("map_set", ctx, "pos", cur + 1);
         return sh_ast_alloc_node(arena, "StrLit", text);
     }
 
-    if tag == "Ident" && (text == "true" || text == "false") {
+    if tag == TokenTagKind::Ident && (text == "true" || text == "false") {
         __engine("map_set", ctx, "pos", cur + 1);
         return sh_ast_alloc_node(arena, "BoolLit", text);
     }
 
     // Prefix `await expr` / `await(expr)` and `spawn { ... }` / `select { ... }`
-    if tag == "Ident" && text == "await" {
+    if tag == TokenTagKind::Ident && text == "await" {
         __engine("map_set", ctx, "pos", cur + 1);
         let awaited = sh_parse_expr_bp(arena, tape, ctx, 50);
         return sh_ast_alloc_unary(arena, "await", awaited);
     }
-    if tag == "Ident" && text == "each" {
+    if tag == TokenTagKind::Ident && text == "each" {
         __engine("map_set", ctx, "pos", cur + 1);
         let adapted = sh_parse_expr_bp(arena, tape, ctx, 50);
         return sh_ast_alloc_unary(arena, "each", adapted);
     }
-    if tag == "Ident" && (text == "spawn" || text == "select") && cur + 1 < tcnt && sh_token_tag(tape, cur + 1) == "LBrace" {
+    if tag == TokenTagKind::Ident && (text == "spawn" || text == "select") && cur + 1 < tcnt && sh_token_tag_kind(tape, cur + 1) == TokenTagKind::LBrace {
         __engine("map_set", ctx, "pos", cur + 1);
         let s_blk = sh_parse_block(arena, tape, ctx);
         return sh_ast_alloc_unary(arena, text, s_blk);
     }
 
     // 3-Tier dynamic `for binding in iterable { body } [then fallback]`
-    if tag == "Ident" && text == "for" && cur + 2 < tcnt {
+    if tag == TokenTagKind::Ident && text == "for" && cur + 2 < tcnt {
         let b_name = sh_token_text(tape, cur + 1);
         if sh_token_text(tape, cur + 2) == "in" {
             __engine("map_set", ctx, "pos", cur + 3);
@@ -289,13 +289,13 @@ fn sh_parse_primary(arena: i64, tape: i64, ctx: i64) -> i64 {
         }
     }
 
-    if tag == "Ident" || tag == "SeedKw" {
-        let nxt_tag = if cur + 1 < tcnt { sh_token_tag(tape, cur + 1) } else { "" };
-        if (text == "splat" || text == "pairs" || text == "flat") && nxt_tag == "LParen" {
+    if tag == TokenTagKind::Ident || tag == TokenTagKind::SeedKw {
+        let nxt_tag = if cur + 1 < tcnt { sh_token_tag_kind(tape, cur + 1) } else { TokenTagKind::Eof };
+        if (text == "splat" || text == "pairs" || text == "flat") && nxt_tag == TokenTagKind::LParen {
             __engine("map_set", ctx, "pos", cur + 2);
             let operand = sh_parse_expr_bp(arena, tape, ctx, 0);
             let cp = __engine("map_get", ctx, "pos");
-            if cp < tcnt && sh_token_tag(tape, cp) == "RParen" {
+            if cp < tcnt && sh_token_tag_kind(tape, cp) == TokenTagKind::RParen {
                 __engine("map_set", ctx, "pos", cp + 1);
             }
             var op_sym = "*";
@@ -308,16 +308,16 @@ fn sh_parse_primary(arena: i64, tape: i64, ctx: i64) -> i64 {
 
         let is_prefix_proj = text == "call" || text == "splice" || text == "frame" || text == "sig" || text == "grad" || text == "plan";
         if is_prefix_proj && cur + 2 < tcnt {
-            let p1_tag = sh_token_tag(tape, cur + 1);
-            let p2_tag = sh_token_tag(tape, cur + 2);
-            if (p1_tag == "Ident" || p1_tag == "SeedKw") && p2_tag == "LParen" {
+            let p1_tag = sh_token_tag_kind(tape, cur + 1);
+            let p2_tag = sh_token_tag_kind(tape, cur + 2);
+            if (p1_tag == TokenTagKind::Ident || p1_tag == TokenTagKind::SeedKw) && p2_tag == TokenTagKind::LParen {
                 let callee_text = sh_token_text(tape, cur + 1);
                 __engine("map_set", ctx, "pos", cur + 3);
                 let call_nid = sh_ast_alloc_node(arena, "CallExpr", callee_text);
                 while true {
                     let ap = __engine("map_get", ctx, "pos");
                     if ap >= tcnt { break; }
-                    if sh_token_tag(tape, ap) == "RParen" {
+                    if sh_token_tag_kind(tape, ap) == TokenTagKind::RParen {
                         __engine("map_set", ctx, "pos", ap + 1);
                         break;
                     }
@@ -328,7 +328,7 @@ fn sh_parse_primary(arena: i64, tape: i64, ctx: i64) -> i64 {
                     let cp = __engine("map_get", ctx, "pos");
                     if cp < tcnt && sh_token_text(tape, cp) == "," {
                         __engine("map_set", ctx, "pos", cp + 1);
-                    } else if cp < tcnt && sh_token_tag(tape, cp) == "RParen" {
+                    } else if cp < tcnt && sh_token_tag_kind(tape, cp) == TokenTagKind::RParen {
                         __engine("map_set", ctx, "pos", cp + 1);
                         break;
                     } else if cp == ap {
@@ -340,9 +340,9 @@ fn sh_parse_primary(arena: i64, tape: i64, ctx: i64) -> i64 {
         }
 
         // Check expression-position macro expansion, call-quoting, OR standard `CallExpr`
-        let nxt_tag = if cur + 1 < tcnt { sh_token_tag(tape, cur + 1) } else { "" };
-        let is_cq = nxt_tag == "CallQuoteShallow" || nxt_tag == "CallQuoteDeep" || nxt_tag == "CallQuoteAbi" || nxt_tag == "CallQuoteSignal" || nxt_tag == "CallQuoteAdjoint" || nxt_tag == "CallQuoteEffect";
-        if cur + 1 < tcnt && (nxt_tag == "LParen" || is_cq) {
+        let nxt_tag = if cur + 1 < tcnt { sh_token_tag_kind(tape, cur + 1) } else { TokenTagKind::Eof };
+        let is_cq = nxt_tag == TokenTagKind::CallQuoteShallow || nxt_tag == TokenTagKind::CallQuoteDeep || nxt_tag == TokenTagKind::CallQuoteAbi || nxt_tag == TokenTagKind::CallQuoteSignal || nxt_tag == TokenTagKind::CallQuoteAdjoint || nxt_tag == TokenTagKind::CallQuoteEffect;
+        if cur + 1 < tcnt && (nxt_tag == TokenTagKind::LParen || is_cq) {
             if !is_cq && sh_has_macro_name(ctx, text) {
                 return sh_invoke_macro(arena, tape, ctx, text);
             }
@@ -351,7 +351,7 @@ fn sh_parse_primary(arena: i64, tape: i64, ctx: i64) -> i64 {
             while true {
                 let ap = __engine("map_get", ctx, "pos");
                 if ap >= tcnt { break; }
-                if sh_token_tag(tape, ap) == "RParen" {
+                if sh_token_tag_kind(tape, ap) == TokenTagKind::RParen {
                     __engine("map_set", ctx, "pos", ap + 1);
                     break;
                 }
@@ -362,7 +362,7 @@ fn sh_parse_primary(arena: i64, tape: i64, ctx: i64) -> i64 {
                 let cp = __engine("map_get", ctx, "pos");
                 if cp < tcnt && sh_token_text(tape, cp) == "," {
                     __engine("map_set", ctx, "pos", cp + 1);
-                } else if cp < tcnt && sh_token_tag(tape, cp) == "RParen" {
+                } else if cp < tcnt && sh_token_tag_kind(tape, cp) == TokenTagKind::RParen {
                     __engine("map_set", ctx, "pos", cp + 1);
                     break;
                 } else if cp == ap {
@@ -375,7 +375,7 @@ fn sh_parse_primary(arena: i64, tape: i64, ctx: i64) -> i64 {
         return sh_ast_alloc_node(arena, "IdentExpr", text);
     }
 
-    if (tag == "Op" || tag == "CallQuoteShallow") && (text == "!" || text == "-") {
+    if (tag == TokenTagKind::Op || tag == TokenTagKind::CallQuoteShallow) && (text == "!" || text == "-") {
         __engine("map_set", ctx, "pos", cur + 1);
         let operand = sh_parse_primary(arena, tape, ctx);
         let nid = sh_ast_alloc_node(arena, "UnaryExpr", text);
@@ -383,17 +383,17 @@ fn sh_parse_primary(arena: i64, tape: i64, ctx: i64) -> i64 {
         return nid;
     }
 
-    if tag == "LParen" {
+    if tag == TokenTagKind::LParen {
         __engine("map_set", ctx, "pos", cur + 1);
         let inner = sh_parse_expr_bp(arena, tape, ctx, 0);
         let ncur = __engine("map_get", ctx, "pos");
-        if ncur < tcnt && sh_token_tag(tape, ncur) == "RParen" {
+        if ncur < tcnt && sh_token_tag_kind(tape, ncur) == TokenTagKind::RParen {
             __engine("map_set", ctx, "pos", ncur + 1);
         }
         return inner;
     }
 
-    if tag == "LBrace" {
+    if tag == TokenTagKind::LBrace {
         return sh_parse_block(arena, tape, ctx);
     }
 
@@ -409,15 +409,15 @@ fn sh_parse_expr_bp(arena: i64, tape: i64, ctx: i64, min_bp: i64) -> i64 {
         let cur = __engine("map_get", ctx, "pos");
         if cur >= tcnt { break; }
 
-        let tag = sh_token_tag(tape, cur);
+        let tag = sh_token_tag_kind(tape, cur);
         let op_text = sh_token_text(tape, cur);
 
-        if tag == "Op" {
-            if op_text == "->" && cur + 1 < tcnt && sh_token_tag(tape, cur + 1) == "LBrace" {
+        if tag == TokenTagKind::Op {
+            if op_text == "->" && cur + 1 < tcnt && sh_token_tag_kind(tape, cur + 1) == TokenTagKind::LBrace {
                 __engine("map_set", ctx, "pos", cur + 2);
                 let proj_nid = sh_ast_alloc_node(arena, "ArrowProjection", "->");
                 sh_ast_add_child(arena, proj_nid, lhs);
-                while __engine("map_get", ctx, "pos") < tcnt && sh_token_tag(tape, __engine("map_get", ctx, "pos")) != "RBrace" {
+                while __engine("map_get", ctx, "pos") < tcnt && sh_token_tag_kind(tape, __engine("map_get", ctx, "pos")) != TokenTagKind::RBrace {
                     let fp = __engine("map_get", ctx, "pos");
                     let f_txt = sh_token_text(tape, fp);
                     if f_txt != "," {
@@ -427,7 +427,7 @@ fn sh_parse_expr_bp(arena: i64, tape: i64, ctx: i64, min_bp: i64) -> i64 {
                     __engine("map_set", ctx, "pos", fp + 1);
                 }
                 let rb_pos = __engine("map_get", ctx, "pos");
-                if rb_pos < tcnt && sh_token_tag(tape, rb_pos) == "RBrace" { __engine("map_set", ctx, "pos", rb_pos + 1); }
+                if rb_pos < tcnt && sh_token_tag_kind(tape, rb_pos) == TokenTagKind::RBrace { __engine("map_set", ctx, "pos", rb_pos + 1); }
                 lhs = proj_nid;
                 continue;
             }
@@ -469,16 +469,16 @@ fn sh_parse_statement(arena: i64, tape: i64, ctx: i64) -> i64 {
     let tcnt = sh_token_count(tape);
     if cur >= tcnt { return -1; }
 
-    let tag = sh_token_tag(tape, cur);
+    let tag = sh_token_tag_kind(tape, cur);
     let text = sh_token_text(tape, cur);
 
     // Block statement `{ ... }`
-    if tag == "LBrace" {
+    if tag == TokenTagKind::LBrace {
         return sh_parse_block(arena, tape, ctx);
     }
 
     // `let name [: Type] = expr;` or `var name [: Type] = expr;`
-    if (tag == "SeedKw" && text == nameof(let)) || (tag == "Ident" && text == "var") {
+    if (tag == TokenTagKind::SeedKw && text == nameof(let)) || (tag == TokenTagKind::Ident && text == "var") {
         let is_var = text == "var";
         var vpos = cur + 1;
         var vname = "";
@@ -528,7 +528,7 @@ fn sh_parse_statement(arena: i64, tape: i64, ctx: i64) -> i64 {
         let cond_nid = sh_parse_expr_bp(arena, tape, ctx, 0);
         var then_nid = -1;
         let p_cur = __engine("map_get", ctx, "pos");
-        if p_cur < tcnt && sh_token_tag(tape, p_cur) == "LBrace" {
+        if p_cur < tcnt && sh_token_tag_kind(tape, p_cur) == TokenTagKind::LBrace {
             then_nid = sh_parse_block(arena, tape, ctx);
         }
         let if_nid = sh_ast_alloc_node(arena, "IfExpr", "");
@@ -538,7 +538,7 @@ fn sh_parse_statement(arena: i64, tape: i64, ctx: i64) -> i64 {
         if e_cur < tcnt && sh_token_text(tape, e_cur) == "else" {
             __engine("map_set", ctx, "pos", e_cur + 1);
             let after_else = __engine("map_get", ctx, "pos");
-            let else_nid = if after_else < tcnt && sh_token_tag(tape, after_else) == "LBrace" {
+            let else_nid = if after_else < tcnt && sh_token_tag_kind(tape, after_else) == TokenTagKind::LBrace {
                 sh_parse_block(arena, tape, ctx)
             } else {
                 sh_parse_statement(arena, tape, ctx)
@@ -551,7 +551,7 @@ fn sh_parse_statement(arena: i64, tape: i64, ctx: i64) -> i64 {
     }
 
     // `while cond { ... }`
-    if tag == "Ident" && text == "while" {
+    if tag == TokenTagKind::Ident && text == "while" {
         __engine("map_set", ctx, "pos", cur + 1);
         let w_cond = sh_parse_expr_bp(arena, tape, ctx, 0);
         let w_body = sh_parse_block(arena, tape, ctx);
@@ -562,7 +562,7 @@ fn sh_parse_statement(arena: i64, tape: i64, ctx: i64) -> i64 {
     }
 
     // `loop { ... }`
-    if tag == "SeedKw" && text == nameof(loop) {
+    if tag == TokenTagKind::SeedKw && text == nameof(loop) {
         __engine("map_set", ctx, "pos", cur + 1);
         let l_body = sh_parse_block(arena, tape, ctx);
         let l_nid = sh_ast_alloc_node(arena, "LoopStmt", "");
@@ -571,11 +571,11 @@ fn sh_parse_statement(arena: i64, tape: i64, ctx: i64) -> i64 {
     }
 
     // `return [expr];`
-    if tag == "SeedKw" && text == nameof(return) {
+    if tag == TokenTagKind::SeedKw && text == nameof(return) {
         __engine("map_set", ctx, "pos", cur + 1);
         let ret_nid = sh_ast_alloc_node(arena, "ReturnStmt", "");
         let r_cur = __engine("map_get", ctx, "pos");
-        if r_cur < tcnt && sh_token_text(tape, r_cur) != ";" && sh_token_tag(tape, r_cur) != "RBrace" {
+        if r_cur < tcnt && sh_token_text(tape, r_cur) != ";" && sh_token_tag_kind(tape, r_cur) != TokenTagKind::RBrace {
             let val_nid = sh_parse_expr_bp(arena, tape, ctx, 0);
             if val_nid >= 0 {
                 sh_ast_add_child(arena, ret_nid, val_nid);
@@ -589,11 +589,11 @@ fn sh_parse_statement(arena: i64, tape: i64, ctx: i64) -> i64 {
     }
 
     // `yield [expr];`
-    if (tag == "Ident" || tag == "SeedKw") && text == nameof(yield) {
+    if (tag == TokenTagKind::Ident || tag == TokenTagKind::SeedKw) && text == nameof(yield) {
         __engine("map_set", ctx, "pos", cur + 1);
         let y_nid = sh_ast_alloc_node(arena, "YieldStmt", "");
         let y_cur = __engine("map_get", ctx, "pos");
-        if y_cur < tcnt && sh_token_text(tape, y_cur) != ";" && sh_token_tag(tape, y_cur) != "RBrace" {
+        if y_cur < tcnt && sh_token_text(tape, y_cur) != ";" && sh_token_tag_kind(tape, y_cur) != TokenTagKind::RBrace {
             let val_nid = sh_parse_expr_bp(arena, tape, ctx, 0);
             if val_nid >= 0 { sh_ast_add_child(arena, y_nid, val_nid); }
         }
@@ -603,11 +603,11 @@ fn sh_parse_statement(arena: i64, tape: i64, ctx: i64) -> i64 {
     }
 
     // `break [expr];`
-    if (tag == "Ident" || tag == "SeedKw") && text == "break" {
+    if (tag == TokenTagKind::Ident || tag == TokenTagKind::SeedKw) && text == "break" {
         __engine("map_set", ctx, "pos", cur + 1);
         let brk_nid = sh_ast_alloc_node(arena, "BreakStmt", "");
         let b_cur = __engine("map_get", ctx, "pos");
-        if b_cur < tcnt && sh_token_text(tape, b_cur) != ";" && sh_token_tag(tape, b_cur) != "RBrace" {
+        if b_cur < tcnt && sh_token_text(tape, b_cur) != ";" && sh_token_tag_kind(tape, b_cur) != TokenTagKind::RBrace {
             let val_nid = sh_parse_expr_bp(arena, tape, ctx, 0);
             if val_nid >= 0 { sh_ast_add_child(arena, brk_nid, val_nid); }
         }
@@ -617,11 +617,11 @@ fn sh_parse_statement(arena: i64, tape: i64, ctx: i64) -> i64 {
     }
 
     // `continue [bounds];`
-    if (tag == "Ident" || tag == "SeedKw") && text == "continue" {
+    if (tag == TokenTagKind::Ident || tag == TokenTagKind::SeedKw) && text == "continue" {
         __engine("map_set", ctx, "pos", cur + 1);
         let cont_nid = sh_ast_alloc_node(arena, "ContinueStmt", "");
         let c_cur = __engine("map_get", ctx, "pos");
-        if c_cur < tcnt && sh_token_text(tape, c_cur) != ";" && sh_token_tag(tape, c_cur) != "RBrace" {
+        if c_cur < tcnt && sh_token_text(tape, c_cur) != ";" && sh_token_tag_kind(tape, c_cur) != TokenTagKind::RBrace {
             let val_nid = sh_parse_expr_bp(arena, tape, ctx, 0);
             if val_nid >= 0 { sh_ast_add_child(arena, cont_nid, val_nid); }
         }
@@ -631,10 +631,10 @@ fn sh_parse_statement(arena: i64, tape: i64, ctx: i64) -> i64 {
     }
 
     // `context(...) { ... }` ambient contextual scope
-    if tag == "Ident" && text == "context" && cur + 1 < tcnt && sh_token_tag(tape, cur + 1) == "LParen" {
+    if tag == TokenTagKind::Ident && text == "context" && cur + 1 < tcnt && sh_token_tag_kind(tape, cur + 1) == TokenTagKind::LParen {
         __engine("map_set", ctx, "pos", cur + 2);
         let ctx_nid = sh_ast_alloc_node(arena, "ContextScope", "");
-        while __engine("map_get", ctx, "pos") < tcnt && sh_token_tag(tape, __engine("map_get", ctx, "pos")) != "RParen" {
+        while __engine("map_get", ctx, "pos") < tcnt && sh_token_tag_kind(tape, __engine("map_get", ctx, "pos")) != TokenTagKind::RParen {
             let p_pos = __engine("map_get", ctx, "pos");
             let b_var = sh_token_text(tape, p_pos);
             var next_p = p_pos + 1;
@@ -653,7 +653,7 @@ fn sh_parse_statement(arena: i64, tape: i64, ctx: i64) -> i64 {
             }
         }
         let rp_pos = __engine("map_get", ctx, "pos");
-        if rp_pos < tcnt && sh_token_tag(tape, rp_pos) == "RParen" {
+        if rp_pos < tcnt && sh_token_tag_kind(tape, rp_pos) == TokenTagKind::RParen {
             __engine("map_set", ctx, "pos", rp_pos + 1);
         }
         let body_nid = sh_parse_block(arena, tape, ctx);
@@ -662,7 +662,7 @@ fn sh_parse_statement(arena: i64, tape: i64, ctx: i64) -> i64 {
     }
 
     // `steal [from] Target [ [m1, m2, ...] ];`
-    if tag == "Ident" && text == "steal" {
+    if tag == TokenTagKind::Ident && text == "steal" {
         __engine("map_set", ctx, "pos", cur + 1);
         let s_pos = __engine("map_get", ctx, "pos");
         if s_pos < tcnt && sh_token_text(tape, s_pos) == "from" {
@@ -673,9 +673,9 @@ fn sh_parse_statement(arena: i64, tape: i64, ctx: i64) -> i64 {
         __engine("map_set", ctx, "pos", target_pos + 1);
         let steal_nid = sh_ast_alloc_node(arena, "StealDecl", target_name);
         let b_pos = __engine("map_get", ctx, "pos");
-        if b_pos < tcnt && sh_token_tag(tape, b_pos) == "LBracket" {
+        if b_pos < tcnt && sh_token_tag_kind(tape, b_pos) == TokenTagKind::LBracket {
             __engine("map_set", ctx, "pos", b_pos + 1);
-            while __engine("map_get", ctx, "pos") < tcnt && sh_token_tag(tape, __engine("map_get", ctx, "pos")) != "RBracket" {
+            while __engine("map_get", ctx, "pos") < tcnt && sh_token_tag_kind(tape, __engine("map_get", ctx, "pos")) != TokenTagKind::RBracket {
                 let m_pos = __engine("map_get", ctx, "pos");
                 let m_txt = sh_token_text(tape, m_pos);
                 if m_txt != "," {
@@ -685,7 +685,7 @@ fn sh_parse_statement(arena: i64, tape: i64, ctx: i64) -> i64 {
                 __engine("map_set", ctx, "pos", m_pos + 1);
             }
             let rb_pos = __engine("map_get", ctx, "pos");
-            if rb_pos < tcnt && sh_token_tag(tape, rb_pos) == "RBracket" {
+            if rb_pos < tcnt && sh_token_tag_kind(tape, rb_pos) == TokenTagKind::RBracket {
                 __engine("map_set", ctx, "pos", rb_pos + 1);
             }
         }
@@ -697,7 +697,7 @@ fn sh_parse_statement(arena: i64, tape: i64, ctx: i64) -> i64 {
     }
 
     // Statement-position homoiconic macro invocation `<macro_name>(...);`
-    if (tag == "Ident" || tag == "SeedKw") && cur + 1 < tcnt && sh_token_tag(tape, cur + 1) == "LParen" {
+    if (tag == TokenTagKind::Ident || tag == TokenTagKind::SeedKw) && cur + 1 < tcnt && sh_token_tag_kind(tape, cur + 1) == TokenTagKind::LParen {
         if sh_has_macro_name(ctx, text) {
             let expanded = sh_invoke_macro(arena, tape, ctx, text);
             let m_after = __engine("map_get", ctx, "pos");
@@ -709,7 +709,7 @@ fn sh_parse_statement(arena: i64, tape: i64, ctx: i64) -> i64 {
     }
 
     // Assignment `lhs = rhs;` (including `$lhs = rhs;` inside `quote` templates)
-    if (tag == "Ident" || tag == "SeedKw") && cur + 1 < tcnt && sh_token_text(tape, cur + 1) == "=" {
+    if (tag == TokenTagKind::Ident || tag == TokenTagKind::SeedKw) && cur + 1 < tcnt && sh_token_text(tape, cur + 1) == "=" {
         let lhs_id = sh_ast_alloc_node(arena, "IdentExpr", text);
         __engine("map_set", ctx, "pos", cur + 2);
         let rhs_id = sh_parse_expr_bp(arena, tape, ctx, 0);
@@ -722,7 +722,7 @@ fn sh_parse_statement(arena: i64, tape: i64, ctx: i64) -> i64 {
         sh_ast_add_child(arena, asg, rhs_id);
         return asg;
     }
-    if tag == "Op" && text == "$" && cur + 2 < tcnt && sh_token_text(tape, cur + 2) == "=" {
+    if tag == TokenTagKind::Op && text == "$" && cur + 2 < tcnt && sh_token_text(tape, cur + 2) == "=" {
         let sl_lhs = sh_ast_alloc_splice(arena, sh_token_text(tape, cur + 1), -1);
         __engine("map_set", ctx, "pos", cur + 3);
         let sl_rhs = sh_parse_expr_bp(arena, tape, ctx, 0);
@@ -748,7 +748,7 @@ fn sh_parse_statement(arena: i64, tape: i64, ctx: i64) -> i64 {
 fn sh_parse_block(arena: i64, tape: i64, ctx: i64) -> i64 {
     let cur = __engine("map_get", ctx, "pos");
     let tcnt = sh_token_count(tape);
-    if cur >= tcnt || sh_token_tag(tape, cur) != "LBrace" { return -1; }
+    if cur >= tcnt || sh_token_tag_kind(tape, cur) != TokenTagKind::LBrace { return -1; }
 
     __engine("map_set", ctx, "pos", cur + 1);
     let block_nid = sh_ast_alloc_node(arena, "BlockExpr", "");
@@ -756,7 +756,7 @@ fn sh_parse_block(arena: i64, tape: i64, ctx: i64) -> i64 {
     while true {
         let p_cur = __engine("map_get", ctx, "pos");
         if p_cur >= tcnt { break; }
-        if sh_token_tag(tape, p_cur) == "RBrace" {
+        if sh_token_tag_kind(tape, p_cur) == TokenTagKind::RBrace {
             __engine("map_set", ctx, "pos", p_cur + 1);
             break;
         }
@@ -800,9 +800,9 @@ fn sh_parse_syntax_decl(arena: i64, tape: i64, ctx: i64) -> void {
     var pcount = 0;
     var has_variadic = 0;
 
-    if pos < tcnt && sh_token_tag(tape, pos) == "LParen" {
+    if pos < tcnt && sh_token_tag_kind(tape, pos) == TokenTagKind::LParen {
         pos = pos + 1;
-        while pos < tcnt && sh_token_tag(tape, pos) != "RParen" {
+        while pos < tcnt && sh_token_tag_kind(tape, pos) != TokenTagKind::RParen {
             var is_var_p = 0;
             if sh_token_text(tape, pos) == "$" { pos = pos + 1; }
             if pos < tcnt && sh_token_text(tape, pos) == "*" {
@@ -811,7 +811,7 @@ fn sh_parse_syntax_decl(arena: i64, tape: i64, ctx: i64) -> void {
                 pos = pos + 1;
             }
             if pos < tcnt && sh_token_text(tape, pos) == "$" { pos = pos + 1; }
-            if pos < tcnt && sh_token_tag(tape, pos) != "RParen" && sh_token_text(tape, pos) != "," {
+            if pos < tcnt && sh_token_tag_kind(tape, pos) != TokenTagKind::RParen && sh_token_text(tape, pos) != "," {
                 let p_name = sh_token_text(tape, pos);
                 __engine("map_set", ctx, "m_" + m_idx + "_p_" + pcount, p_name);
                 __engine("map_set", ctx, "m_" + m_idx + "_pvar_" + pcount, is_var_p);
@@ -820,7 +820,7 @@ fn sh_parse_syntax_decl(arena: i64, tape: i64, ctx: i64) -> void {
                 // Skip optional `: ast` / `: type` parameter annotation
                 if pos < tcnt && sh_token_text(tape, pos) == ":" {
                     pos = pos + 1;
-                    while pos < tcnt && sh_token_text(tape, pos) != "," && sh_token_tag(tape, pos) != "RParen" {
+                    while pos < tcnt && sh_token_text(tape, pos) != "," && sh_token_tag_kind(tape, pos) != TokenTagKind::RParen {
                         pos = pos + 1;
                     }
                 }
@@ -829,7 +829,7 @@ fn sh_parse_syntax_decl(arena: i64, tape: i64, ctx: i64) -> void {
                 pos = pos + 1;
             }
         }
-        if pos < tcnt && sh_token_tag(tape, pos) == "RParen" {
+        if pos < tcnt && sh_token_tag_kind(tape, pos) == TokenTagKind::RParen {
             pos = pos + 1;
         }
     }
@@ -886,11 +886,11 @@ pub fn sh_parse_program(src: str) -> i64 {
     var pending_async = 0;
     while pos < tcnt {
         __engine("map_set", ctx, "pos", pos);
-        let tag = sh_token_tag(tape, pos);
+        let tag = sh_token_tag_kind(tape, pos);
         let text = sh_token_text(tape, pos);
 
         // Skip leading `[Attr(...)]` prefix via O(1) bracket mate
-        if tag == "LBracket" {
+        if tag == TokenTagKind::LBracket {
             let mate = sh_token_matching_bracket(tape, pos);
             pos = if mate > pos { mate + 1 } else { pos + 1 };
         } else if text == "pub" || text == "priv" || text == "pure" || text == "static" || text == "noalloc" {
@@ -921,10 +921,10 @@ pub fn sh_parse_program(src: str) -> i64 {
             let d_name = if pos < tcnt { sh_token_text(tape, pos) } else { "" };
             let d_nid = sh_ast_alloc_node(arena, decl_k, d_name);
             sh_ast_add_child(arena, root, d_nid);
-            while pos < tcnt && sh_token_tag(tape, pos) != "LBrace" && sh_token_text(tape, pos) != ";" {
+            while pos < tcnt && sh_token_tag_kind(tape, pos) != TokenTagKind::LBrace && sh_token_text(tape, pos) != ";" {
                 pos = pos + 1;
             }
-            if pos < tcnt && sh_token_tag(tape, pos) == "LBrace" {
+            if pos < tcnt && sh_token_tag_kind(tape, pos) == TokenTagKind::LBrace {
                 let mate_b = sh_token_matching_bracket(tape, pos);
                 pos = if mate_b > pos { mate_b + 1 } else { pos + 1 };
             } else if pos < tcnt {
@@ -939,7 +939,7 @@ pub fn sh_parse_program(src: str) -> i64 {
             pos = pos + 1;
             let ad_nid = sh_ast_alloc_node(arena, "AdapterDecl", from_t + "->" + to_t);
             sh_ast_add_child(arena, root, ad_nid);
-            if pos < tcnt && sh_token_tag(tape, pos) == "LBrace" {
+            if pos < tcnt && sh_token_tag_kind(tape, pos) == TokenTagKind::LBrace {
                 __engine("map_set", ctx, "pos", pos);
                 let body_nid = sh_parse_block(arena, tape, ctx);
                 sh_ast_add_child(arena, ad_nid, body_nid);
@@ -957,7 +957,7 @@ pub fn sh_parse_program(src: str) -> i64 {
             }
             sh_ast_add_child(arena, root, fn_nid);
 
-            while pos < tcnt && sh_token_tag(tape, pos) != "LBrace" {
+            while pos < tcnt && sh_token_tag_kind(tape, pos) != TokenTagKind::LBrace {
                 pos = pos + 1;
             }
             __engine("map_set", arena, fn_nid + "_sig", sh_capture_fn_sig_tokens(tape, sig_start, pos));

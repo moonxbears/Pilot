@@ -1249,6 +1249,27 @@ pub let ERRORS = [
         reference: "selfhost/check/layout_attrs.pilot; Rust E0587",
     },
     ErrorDef {
+        code: "ENUM001",
+        title: "Integer Cast of a Text Enum",
+        description: "A text enum (its variants write string literals) is cast to an integer type; it has no integer value, and `as str` gives its text",
+        category: "Types",
+        reference: "selfhost/check/rules.pilot (check_cast); proposals.md PROP-032",
+    },
+    ErrorDef {
+        code: "ENUM002",
+        title: "Text Enum Variant Without Text",
+        description: "A variant of a text enum writes an integer or no value; every variant of a text enum writes a string literal",
+        category: "Types",
+        reference: "selfhost/check/layout_attrs.pilot (check_text_enum); proposals.md PROP-032",
+    },
+    ErrorDef {
+        code: "ENUM003",
+        title: "Repeated Text Enum Text",
+        description: "Two variants of a text enum write the same text, so their text cannot tell them apart",
+        category: "Types",
+        reference: "selfhost/check/layout_attrs.pilot (check_text_enum); proposals.md PROP-032",
+    },
+    ErrorDef {
         code: "FLAGS001",
         title: "Too Many Flags",
         description: "A `[Flags]` enum has more single-bit variants than the type it is declared over has bits, or a variant past those bits",

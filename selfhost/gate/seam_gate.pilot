@@ -367,7 +367,7 @@ pub fn execute_seam_gate(workspace_root: str, ref _opts: GateRunOptions) -> Gate
             || row.level == ::Complete || row.level == ::Simulated;
         if needs_evidence && row.evidence.len() == 0 {
             glist_push(violations, sg_violation("GATE014", ledger_file, 1, 1, label,
-                wiring_level_label(row.level) + " capability has no evidence",
+                (row.level as str) + " capability has no evidence",
                 "Name the command, test or (for SIMULATED) the fake's location"));
         }
         let at_most_draft = row.level == ::Spec || row.level == ::Draft || row.level == ::Simulated;
@@ -381,7 +381,7 @@ pub fn execute_seam_gate(workspace_root: str, ref _opts: GateRunOptions) -> Gate
                 named_stand_ins.set(token, 1);
                 if !at_most_draft {
                     glist_push(violations, sg_violation("GATE018", ledger_file, 1, 1, label + " <- " + token,
-                        wiring_level_label(row.level) + " capability rests on a stand-in",
+                        (row.level as str) + " capability rests on a stand-in",
                         "Keep the row at DRAFT until the stand-in is replaced"));
                 }
             }

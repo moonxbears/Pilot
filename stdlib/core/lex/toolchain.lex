@@ -1,6 +1,6 @@
 pilot-lex-cache 4
 key 30
-declarations f00c3769901c9a45
+declarations c8f684a4407601e3
 modes 10 =main =fstring_double =fstring_double_raw =fstring_double_triple =fstring_double_triple_raw =fstring_single =fstring_single_raw =fstring_single_triple =fstring_single_triple_raw =fstring_hole
 bases 10 0 168 171 174 178 182 185 188 192 196
 mode_of 364 0*168 1*3 2*3 3*4 4*4 5*3 6*3 7*4 8*4 9*168

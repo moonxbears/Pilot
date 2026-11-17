@@ -1058,6 +1058,14 @@ impl BytecodeCompiler {
             // `Low = 5` gives the variant its value; the next variant
             // without one counts on from it.
             let value = arena.field_default(NodeId(vid));
+            // `Key = "key"` gives the variant its text (PROP-032). The
+            // checker requires every variant of such an enum to write one.
+            if let Some(CMap::Val(text)) = self.eval_cmap(arena, value) {
+                if text.is_str() {
+                    map.insert(v_nm, CMap::Val(text));
+                    continue;
+                }
+            }
             let val = if value.is_none() {
                 next
             } else {
@@ -1066,7 +1074,9 @@ impl BytecodeCompiler {
                     None => {
                         self.error(
                             codes::SEED,
-                            format!("the value of `{e_nm}.{v_nm}` must be an integer literal"),
+                            format!(
+                                "the value of `{e_nm}.{v_nm}` must be an integer or string literal"
+                            ),
                         );
                         next
                     }

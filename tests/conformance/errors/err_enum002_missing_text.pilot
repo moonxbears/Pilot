@@ -1,0 +1,11 @@
+// ENUM002: a variant of a text enum that writes no text is refused (its
+// text is not taken from its name). `Amber` is at line 6, column 5.
+enum Light {
+    Red = "stop",
+    Green = "go",
+    Amber,
+}
+
+fn main() {
+    print(Light::Red as str);
+}

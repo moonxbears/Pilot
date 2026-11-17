@@ -4,29 +4,32 @@
 // ==============================================================================
 pub pkg selfhost;
 
-pub enum TokenTagKind {
-    SeedKw,
-    Ident,
-    IntLit,
-    StrLit,
-    FStrLit,
-    InfixDot,
-    PrefixDot,
-    CallQuoteShallow,
-    CallQuoteDeep,
-    CallQuoteAbi,
-    CallQuoteSignal,
-    CallQuoteAdjoint,
-    CallQuoteEffect,
-    LParen,
-    RParen,
-    LBracket,
-    RBracket,
-    LBrace,
-    RBrace,
-    Op,
-    Punct,
-    Eof,
+/// The kind of a token. Its text (`kind as str`) is the name
+/// `pilotdb_render_tokens` prints: the variant's own name (a text enum,
+/// PROP-032).
+pub enum TokenTagKind : u8 {
+    SeedKw = "SeedKw",
+    Ident = "Ident",
+    IntLit = "IntLit",
+    StrLit = "StrLit",
+    FStrLit = "FStrLit",
+    InfixDot = "InfixDot",
+    PrefixDot = "PrefixDot",
+    CallQuoteShallow = "CallQuoteShallow",
+    CallQuoteDeep = "CallQuoteDeep",
+    CallQuoteAbi = "CallQuoteAbi",
+    CallQuoteSignal = "CallQuoteSignal",
+    CallQuoteAdjoint = "CallQuoteAdjoint",
+    CallQuoteEffect = "CallQuoteEffect",
+    LParen = "LParen",
+    RParen = "RParen",
+    LBracket = "LBracket",
+    RBracket = "RBracket",
+    LBrace = "LBrace",
+    RBrace = "RBrace",
+    Op = "Op",
+    Punct = "Punct",
+    Eof = "Eof",
 }
 
 fn sh_is_digit(b: i64) -> bool {
@@ -116,7 +119,7 @@ pub fn sh_tokenize(src: str) -> i64 {
                 }
             }
             let s_text = src.slice(start, pos);
-            let s_tag = if is_fstr { "FStrLit" } else { "StrLit" };
+            let s_tag = if is_fstr { TokenTagKind::FStrLit } else { TokenTagKind::StrLit };
             __engine("map_set", tape, count + "_text", s_text);
             __engine("map_set", tape, count + "_tag", s_tag);
             __engine("map_set", tape, count + "_match", -1);
@@ -125,7 +128,7 @@ pub fn sh_tokenize(src: str) -> i64 {
             count = count + 1;
         } else if b == 46 { // '.'
             let is_infix = prev_token_is_infix_predecessor && (prev_token_end == pos);
-            let dot_tag = if is_infix { "InfixDot" } else { "PrefixDot" };
+            let dot_tag = if is_infix { TokenTagKind::InfixDot } else { TokenTagKind::PrefixDot };
             __engine("map_set", tape, count + "_text", ".");
             __engine("map_set", tape, count + "_tag", dot_tag);
             __engine("map_set", tape, count + "_match", -1);
@@ -141,21 +144,21 @@ pub fn sh_tokenize(src: str) -> i64 {
             // !^( -> ReactiveSignal
             // !@( -> SymbolicAdjoint
             // !?( -> EffectDryRun
-            var call_quote_tag = "";
+            // `sigil_len` > 0 when a call quote was found.
+            var call_quote_tag = TokenTagKind::CallQuoteShallow;
             var sigil_len = 0;
             if pos + 1 < len && src.byte_at(pos + 1) == 40 { // !(
-                call_quote_tag = "CallQuoteShallow";
                 sigil_len = 1;
             } else if pos + 2 < len && src.byte_at(pos + 2) == 40 {
                 let nb = src.byte_at(pos + 1);
-                if nb == 33 { call_quote_tag = "CallQuoteDeep"; sigil_len = 2; }
-                else if nb == 38 { call_quote_tag = "CallQuoteAbi"; sigil_len = 2; }
-                else if nb == 94 { call_quote_tag = "CallQuoteSignal"; sigil_len = 2; }
-                else if nb == 64 { call_quote_tag = "CallQuoteAdjoint"; sigil_len = 2; }
-                else if nb == 63 { call_quote_tag = "CallQuoteEffect"; sigil_len = 2; }
+                if nb == 33 { call_quote_tag = TokenTagKind::CallQuoteDeep; sigil_len = 2; }
+                else if nb == 38 { call_quote_tag = TokenTagKind::CallQuoteAbi; sigil_len = 2; }
+                else if nb == 94 { call_quote_tag = TokenTagKind::CallQuoteSignal; sigil_len = 2; }
+                else if nb == 64 { call_quote_tag = TokenTagKind::CallQuoteAdjoint; sigil_len = 2; }
+                else if nb == 63 { call_quote_tag = TokenTagKind::CallQuoteEffect; sigil_len = 2; }
             }
 
-            if call_quote_tag != "" {
+            if sigil_len > 0 {
                 let sig_text = src.slice(pos, pos + sigil_len);
                 __engine("map_set", tape, count + "_text", sig_text);
                 __engine("map_set", tape, count + "_tag", call_quote_tag);
@@ -166,7 +169,7 @@ pub fn sh_tokenize(src: str) -> i64 {
                 pos = pos + sigil_len;
             } else if pos + 1 < len && src.byte_at(pos + 1) == 61 { // !=
                 __engine("map_set", tape, count + "_text", "!=");
-                __engine("map_set", tape, count + "_tag", "Op");
+                __engine("map_set", tape, count + "_tag", TokenTagKind::Op);
                 __engine("map_set", tape, count + "_match", -1);
                 prev_token_end = pos + 2;
                 prev_token_is_infix_predecessor = false;
@@ -174,7 +177,7 @@ pub fn sh_tokenize(src: str) -> i64 {
                 pos = pos + 2;
             } else {
                 __engine("map_set", tape, count + "_text", "!");
-                __engine("map_set", tape, count + "_tag", "Op");
+                __engine("map_set", tape, count + "_tag", TokenTagKind::Op);
                 __engine("map_set", tape, count + "_match", -1);
                 prev_token_end = pos + 1;
                 prev_token_is_infix_predecessor = false;
@@ -183,7 +186,7 @@ pub fn sh_tokenize(src: str) -> i64 {
             }
         } else if b == 40 { // '('
             __engine("map_set", tape, count + "_text", "(");
-            __engine("map_set", tape, count + "_tag", "LParen");
+            __engine("map_set", tape, count + "_tag", TokenTagKind::LParen);
             __engine("map_set", tape, count + "_match", -1);
             __engine("map_set", bracket_stack, b_top, count);
             b_top = b_top + 1;
@@ -193,7 +196,7 @@ pub fn sh_tokenize(src: str) -> i64 {
             pos = pos + 1;
         } else if b == 41 { // ')'
             __engine("map_set", tape, count + "_text", ")");
-            __engine("map_set", tape, count + "_tag", "RParen");
+            __engine("map_set", tape, count + "_tag", TokenTagKind::RParen);
             __engine("map_set", tape, count + "_match", -1);
             if b_top > 0 {
                 b_top = b_top - 1;
@@ -207,7 +210,7 @@ pub fn sh_tokenize(src: str) -> i64 {
             pos = pos + 1;
         } else if b == 91 { // '['
             __engine("map_set", tape, count + "_text", "[");
-            __engine("map_set", tape, count + "_tag", "LBracket");
+            __engine("map_set", tape, count + "_tag", TokenTagKind::LBracket);
             __engine("map_set", tape, count + "_match", -1);
             __engine("map_set", bracket_stack, b_top, count);
             b_top = b_top + 1;
@@ -217,7 +220,7 @@ pub fn sh_tokenize(src: str) -> i64 {
             pos = pos + 1;
         } else if b == 93 { // ']'
             __engine("map_set", tape, count + "_text", "]");
-            __engine("map_set", tape, count + "_tag", "RBracket");
+            __engine("map_set", tape, count + "_tag", TokenTagKind::RBracket);
             __engine("map_set", tape, count + "_match", -1);
             if b_top > 0 {
                 b_top = b_top - 1;
@@ -231,7 +234,7 @@ pub fn sh_tokenize(src: str) -> i64 {
             pos = pos + 1;
         } else if b == 123 { // '{'
             __engine("map_set", tape, count + "_text", "{");
-            __engine("map_set", tape, count + "_tag", "LBrace");
+            __engine("map_set", tape, count + "_tag", TokenTagKind::LBrace);
             __engine("map_set", tape, count + "_match", -1);
             __engine("map_set", bracket_stack, b_top, count);
             b_top = b_top + 1;
@@ -241,7 +244,7 @@ pub fn sh_tokenize(src: str) -> i64 {
             pos = pos + 1;
         } else if b == 125 { // '}'
             __engine("map_set", tape, count + "_text", "}");
-            __engine("map_set", tape, count + "_tag", "RBrace");
+            __engine("map_set", tape, count + "_tag", TokenTagKind::RBrace);
             __engine("map_set", tape, count + "_match", -1);
             if b_top > 0 {
                 b_top = b_top - 1;
@@ -256,7 +259,7 @@ pub fn sh_tokenize(src: str) -> i64 {
         } else if b == 59 || b == 44 || b == 58 { // ';', ',', ':'
             let p_txt = src.slice(pos, pos + 1);
             __engine("map_set", tape, count + "_text", p_txt);
-            __engine("map_set", tape, count + "_tag", "Punct");
+            __engine("map_set", tape, count + "_tag", TokenTagKind::Punct);
             __engine("map_set", tape, count + "_match", -1);
             prev_token_end = pos + 1;
             prev_token_is_infix_predecessor = false;
@@ -269,7 +272,7 @@ pub fn sh_tokenize(src: str) -> i64 {
             }
             let num_text = src.slice(start, pos);
             __engine("map_set", tape, count + "_text", num_text);
-            __engine("map_set", tape, count + "_tag", "IntLit");
+            __engine("map_set", tape, count + "_tag", TokenTagKind::IntLit);
             __engine("map_set", tape, count + "_match", -1);
             prev_token_end = pos;
             prev_token_is_infix_predecessor = true;
@@ -280,7 +283,7 @@ pub fn sh_tokenize(src: str) -> i64 {
                 pos = pos + 1;
             }
             let id_text = src.slice(start, pos);
-            let tag = if sh_is_seed_kw(id_text) { "SeedKw" } else { "Ident" };
+            let tag = if sh_is_seed_kw(id_text) { TokenTagKind::SeedKw } else { TokenTagKind::Ident };
             __engine("map_set", tape, count + "_text", id_text);
             __engine("map_set", tape, count + "_tag", tag);
             __engine("map_set", tape, count + "_match", -1);
@@ -304,7 +307,7 @@ pub fn sh_tokenize(src: str) -> i64 {
             }
             let op_text = src.slice(pos, pos + op_len);
             __engine("map_set", tape, count + "_text", op_text);
-            __engine("map_set", tape, count + "_tag", "Op");
+            __engine("map_set", tape, count + "_tag", TokenTagKind::Op);
             __engine("map_set", tape, count + "_match", -1);
             prev_token_end = pos + op_len;
             prev_token_is_infix_predecessor = false;
@@ -325,17 +328,13 @@ pub fn sh_token_text(tape: i64, idx: i64) -> str {
     return __engine("map_get", tape, idx + "_text");
 }
 
-pub fn sh_token_tag(tape: i64, idx: i64) -> str {
+/// The kind of token `idx`.
+pub fn sh_token_tag_kind(tape: i64, idx: i64) -> TokenTagKind {
     return __engine("map_get", tape, idx + "_tag");
 }
 
-pub pure fn token_tag_name(kind: TokenTagKind) -> str {
-    return "Ident";
-}
-
-pub fn sh_token_tag_kind(tape: i64, idx: i64) -> TokenTagKind {
-    return ::Ident;
-}
+/// The name of token `idx`'s kind, as `pilotdb_render_tokens` prints it.
+pub fn sh_token_tag(tape: i64, idx: i64) -> str => sh_token_tag_kind(tape, idx) as str;
 
 pub fn sh_token_matching_bracket(tape: i64, idx: i64) -> i64 {
     let m = __engine("map_get", tape, idx + "_match");

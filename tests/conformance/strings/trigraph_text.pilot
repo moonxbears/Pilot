@@ -1,0 +1,15 @@
+// A Pilot string holds the bytes written in it; `??=` is three bytes. The
+// emitted C writes the string's bytes into a C string literal as they are,
+// and `cc -std=c11` (selfhost/cli/test_emit.pilot, native_build.pilot)
+// replaces trigraphs in it before anything else: `??=` becomes `#`, `??(`
+// `[`, `??)` `]`. So the emitted C writes each `?` that a `?` follows as
+// `\?` (C11 6.4.4.4; selfhost/transpile/c_family.pilot without_trigraphs).
+//
+// Expected, worked by hand: the strings unchanged -> "a??=b", "x??(y??)",
+// and "???=" (three `?`s: the second and third escaped, so no `??=` is
+// left for the C compiler) -> "???=".
+fn main() {
+    print("a??=b");
+    print("x??(y??)");
+    print("???=");
+}

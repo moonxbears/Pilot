@@ -1,0 +1,2 @@
+error[ENUM003]: `Light.Go` has the same text as `Light.Green`: "go"
+err_enum003_duplicate_text.pilot:6:5

@@ -1,0 +1,2 @@
+error[ENUM002]: `Light.Amber` must write a string literal: `Light` is a text enum
+err_enum002_missing_text.pilot:6:5

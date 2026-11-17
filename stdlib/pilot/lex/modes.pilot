@@ -76,9 +76,23 @@ pub fn build_modes(ref modes: List<LexMode>) -> ModalBuild {
             mode_of.push(bases.len() as i64 - 1);
             j = j + 1;
         }
-        let built = build_table(m.tokens);
-        for e in built.errors {
-            errors.push(LexBuildError { code: e.code, message: f"in mode `{m.name}`: {e.message}" });
+        // A mode with an earlier mode's automaton (the f-string hole mode
+        // has the main mode's tokens; only its braces change mode) reuses
+        // that table with its own actions instead of building it again.
+        var same = -1;
+        var k = 0;
+        while same < 0 && k < tables.len() as i64 {
+            if same_automaton_decls(modes[k].tokens, m.tokens) { same = k; }
+            k = k + 1;
+        }
+        if same >= 0 {
+            tables.push(with_actions(tables[same], m.tokens));
+        } else {
+            let built = build_table(m.tokens);
+            for e in built.errors {
+                errors.push(LexBuildError { code: e.code, message: f"in mode `{m.name}`: {e.message}" });
+            }
+            tables.push(built.table);
         }
         var to: List<i64> = [];
         for d in m.tokens {
@@ -91,7 +105,6 @@ pub fn build_modes(ref modes: List<LexMode>) -> ModalBuild {
                 errors.push(LexBuildError { code: "LEX005", message: f"in mode `{m.name}`: `{d.name}` enters mode `{d.enters}`, which is not declared" });
             }
         }
-        tables.push(built.table);
         enters.push(to);
     }
     let kinds = mode_of.len() as i64 * LEX_CONTEXT_KINDS.len() as i64;

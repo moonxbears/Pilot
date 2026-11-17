@@ -182,9 +182,9 @@ fn sa_harvest_distributive_block(
     var j = open_brace_idx + 1;
     var item_has_lang = false;
     while j < close_idx {
-        let tag = sh_token_tag(tape, j);
+        let tag = sh_token_tag_kind(tape, j);
         let txt = sh_token_text(tape, j);
-        if tag == "LBracket" {
+        if tag == TokenTagKind::LBracket {
             let rb = sh_token_matching_bracket(tape, j);
             var ak = j + 1;
             while ak < rb {
@@ -192,11 +192,11 @@ fn sa_harvest_distributive_block(
                 ak = ak + 1;
             }
             j = if rb > j { rb + 1 } else { j + 1 };
-        } else if tag == "LBrace" {
+        } else if tag == TokenTagKind::LBrace {
             let mb = sh_token_matching_bracket(tape, j);
             item_has_lang = false;
             j = if mb > j { mb + 1 } else { j + 1 };
-        } else if (tag == "Ident" || tag == "SeedKw") && j + 1 < close_idx {
+        } else if (tag == TokenTagKind::Ident || tag == TokenTagKind::SeedKw) && j + 1 < close_idx {
             let nx = sh_token_text(tape, j + 1);
             if nx == "<" || nx == ":" || nx == "{" || nx == ";" {
                 if !seed_registry_contains(seed_reg, txt) && txt != "pub" && txt != "priv" {
@@ -274,8 +274,8 @@ pub fn harvest_core_vocabulary_and_audit(
                                 tape, i + 1, txt, is_part, enforce_naming, rel, seed_reg, vocab, violations
                             );
                         } else {
-                            let nx_tag = sh_token_tag(tape, i + 1);
-                            if nx_tag == "Ident" || nx_tag == "SeedKw" {
+                            let nx_tag = sh_token_tag_kind(tape, i + 1);
+                            if nx_tag == TokenTagKind::Ident || nx_tag == TokenTagKind::SeedKw {
                                 if !seed_registry_contains(seed_reg, nx_txt) {
                                     let _ = gset_insert(vocab, nx_txt);
                                 }

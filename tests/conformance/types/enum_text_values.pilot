@@ -1,0 +1,54 @@
+// PROP-032: an enum whose variants write string literals is a text enum.
+// `v as str` is the variant's text, printing a value prints its text, and
+// comparing and `switch` work as on any enum. Expected, worked by hand from
+// the declarations below:
+//   CacheField::Key as str        key
+//   label(::ModeOf)               mode_of
+//   print(f), f = ::ModeOf        mode_of
+//   f"[{f}]"                      [mode_of]
+//   (f as str) + "!"              mode_of!
+//   (f as str).len()              7 (m o d e _ o f)
+//   f == ::ModeOf, f != ::Key     true, true
+//   f == ::EntersMode             false
+//   advice(::Green)               walk (the switch's arm, not the text)
+//   Light::Red as str             stop
+//   each of [::Key, ::EntersMode] key, enters_mode
+pub enum CacheField : u8 {
+    Key = "key",
+    ModeOf = "mode_of",
+    EntersMode = "enters_mode",
+}
+
+enum Light {
+    Red = "stop",
+    Green = "go",
+}
+
+fn label(f: CacheField) -> str => f as str;
+
+fn advice(l: Light) -> str {
+    switch l {
+        case ::Red: return "wait";
+        case ::Green: return "walk";
+    }
+    return "";
+}
+
+fn main() {
+    print(CacheField::Key as str);
+    let f: CacheField = ::ModeOf;
+    print(label(f));
+    print(f);
+    print(f"[{f}]");
+    print((f as str) + "!");
+    print((f as str).len());
+    print(f == CacheField::ModeOf);
+    print(f != CacheField::Key);
+    print(f == CacheField::EntersMode);
+    print(advice(Light::Green));
+    print(Light::Red as str);
+    let fields: List<CacheField> = [CacheField::Key, CacheField::EntersMode,];
+    for x in fields {
+        print(x as str);
+    }
+}

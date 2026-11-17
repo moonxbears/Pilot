@@ -116,13 +116,17 @@ pub fn is_tag_enum(ref s: Snap, d: i64) -> bool {
 
 /// The tag of variant `name` of payload-free enum type `t`: its written
 /// value (`Low = 5`), else one more than the variant before it, from 0.
+/// A text enum's variants are `0 .. n-1`.
 pub fn variant_tag(var ref p: Program, t: i64, name: str) -> i64? {
     if !ty_is_named(p.tt, t) || !is_tag_enum(p.s, ty_decl(p.tt, t)) { return none; }
+    // A text enum (PROP-032) is tagged in declaration order; its texts
+    // are read from a table by tag (`text_enum_table`).
+    let text = is_text_enum(p.s, ty_decl(p.tt, t));
     var next = 0;
     for v in children(p.s, ty_decl(p.tt, t)) {
         let written = field_default(p.s, v);
         var value = next;
-        if written >= 0 {
+        if written >= 0 && !text {
             guard some w = prog_const(p, written) else { return none; }
             value = w;
         }
@@ -130,6 +134,15 @@ pub fn variant_tag(var ref p: Program, t: i64, name: str) -> i64? {
         next = value + 1;
     }
     return none;
+}
+
+/// The texts of text enum `d` (PROP-032), by tag.
+pub fn variant_texts(ref s: Snap, d: i64) -> List<str> {
+    var out: List<str> = [];
+    for v in children(s, d) {
+        if kind(s, v) == nk_variant() { out.push(str_value(s, field_default(s, v))); }
+    }
+    return out;
 }
 
 /// The physics of the unknown type.

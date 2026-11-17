@@ -1,0 +1,24 @@
+// Every field of a lexer cache file (stdlib/pilot/lex/cache.pilot) has one
+// label: the field's text, as `CacheField` is a text enum (PROP-032).
+// Printing a field prints its text. Expected, from the file
+// format lexer_text writes (one line per field, in this order): key, modes,
+// bases, mode_of, enters, shares, names, class_of, size, starts, next,
+// accept, actions, enters_mode.
+use pilot.lex.cache;
+
+fn main() {
+    print(CacheField::Key);
+    print(CacheField::Modes);
+    print(CacheField::Bases);
+    print(CacheField::ModeOf);
+    print(CacheField::Enters);
+    print(CacheField::Shares);
+    print(CacheField::Names);
+    print(CacheField::ClassOf);
+    print(CacheField::Size);
+    print(CacheField::Starts);
+    print(CacheField::Next);
+    print(CacheField::Accept);
+    print(CacheField::Actions);
+    print(CacheField::EntersMode);
+}

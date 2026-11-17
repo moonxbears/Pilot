@@ -1,0 +1,11 @@
+// ENUM002: once one variant writes a string literal, the enum is a text
+// enum and every variant writes one. `B` writes an integer: line 6,
+// column 5.
+enum Mixed {
+    A = "a",
+    B = 2,
+}
+
+fn main() {
+    print(Mixed::A as str);
+}

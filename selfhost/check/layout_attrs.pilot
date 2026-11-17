@@ -174,7 +174,52 @@ fn check_flags(var ref p: Program, var ref sink: DiagSink, d: i64) {
     }
 }
 
-/// LAYOUT001-LAYOUT003 and FLAGS001-FLAGS002 over the user's files.
+/// Whether enum `d` is a text enum (PROP-032): one of its variants writes a
+/// string literal as its value (`Key = "key"`).
+pub fn is_text_enum(ref s: Snap, d: i64) -> bool {
+    if d < 0 || kind(s, d) != nk_adt() { return false; }
+    for v in children(s, d) {
+        if kind(s, v) != nk_variant() { continue; }
+        let w = field_default(s, v);
+        if w >= 0 && kind(s, w) == nk_str() { return true; }
+    }
+    return false;
+}
+
+/// ENUM002: every variant of text enum `d` writes a string literal.
+/// ENUM003: no two of them write the same text.
+fn check_text_enum(var ref p: Program, var ref sink: DiagSink, d: i64) {
+    let s = p.s;
+    let name = node_name(s, d);
+    var texts: List<str> = [];
+    var owners: List<str> = [];
+    for v in children(s, d) {
+        if kind(s, v) != nk_variant() { continue; }
+        let vn = node_name(s, v);
+        let w = field_default(s, v);
+        if w < 0 || kind(s, w) != nk_str() {
+            sink_error(sink, v, "ENUM002", f"`{name}.{vn}` must write a string literal: `{name}` is a text enum");
+            continue;
+        }
+        let text = str_value(s, w);
+        var i = 0;
+        var repeated = false;
+        while i < texts.len() && !repeated {
+            if texts[i] == text {
+                sink_error(sink, v, "ENUM003", f"`{name}.{vn}` has the same text as `{name}.{owners[i]}`: " + "\"" + text + "\"");
+                repeated = true;
+            }
+            i = i + 1;
+        }
+        if !repeated {
+            texts.push(text);
+            owners.push(vn);
+        }
+    }
+}
+
+/// LAYOUT001-LAYOUT003, FLAGS001-FLAGS002 and ENUM002-ENUM003 over the
+/// user's files.
 pub fn check_layout_attrs(var ref inf: Infer, var ref sink: DiagSink) {
     let p = inf.p;
     let s = p.s;
@@ -186,6 +231,7 @@ pub fn check_layout_attrs(var ref inf: Infer, var ref sink: DiagSink) {
             if k == nk_struct() { check_align(p, sink, d); }
             if k == nk_adt() {
                 if some _ = prog_attr_args(p, d, flags_attr()) { check_flags(p, sink, d); }
+                if is_text_enum(s, d) { check_text_enum(p, sink, d); }
             }
         }
         d = d + 1;

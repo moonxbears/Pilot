@@ -1,0 +1,2 @@
+error[ENUM002]: `Mixed.B` must write a string literal: `Mixed` is a text enum
+err_enum002_mixed_values.pilot:6:5

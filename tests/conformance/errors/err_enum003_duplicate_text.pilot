@@ -1,0 +1,11 @@
+// ENUM003: two variants of a text enum with the same text could not be
+// told apart by their text. `Go` repeats `Green`'s "go": line 6, column 5.
+enum Light {
+    Red = "stop",
+    Green = "go",
+    Go = "go",
+}
+
+fn main() {
+    print(Light::Red as str);
+}

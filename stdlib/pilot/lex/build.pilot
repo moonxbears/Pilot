@@ -265,6 +265,39 @@ fn closure(ref seeds: List<i64>, ref eps_off: List<i64>, ref eps_dst: List<i64>,
 
 fn build_error(code: str, message: str) -> LexBuildError => LexBuildError { code: code, message: message };
 
+/// Whether `a` and `b` give one automaton: the same tokens in the same
+/// order, each with the same name, priority, start condition and pattern.
+/// The role, mode change and trailing length are the table's actions, not
+/// its automaton.
+pub fn same_automaton_decls(ref a: List<TokenDecl>, ref b: List<TokenDecl>) -> bool {
+    if a.len() != b.len() { return false; }
+    var i = 0;
+    while i < a.len() {
+        let x = a[i];
+        let y = b[i];
+        if x.name != y.name || x.priority != y.priority || x.when != y.when || x.pattern.ops.len() != y.pattern.ops.len() { return false; }
+        var k = 0;
+        while k < x.pattern.ops.len() {
+            let p = x.pattern.ops[k];
+            let q = y.pattern.ops[k];
+            if p.kind != q.kind || p.lo != q.lo || p.hi != q.hi || p.n != q.n { return false; }
+            k = k + 1;
+        }
+        i = i + 1;
+    }
+    return true;
+}
+
+/// Table `t` with the actions of `decls`, which give its automaton
+/// (`same_automaton_decls`).
+pub fn with_actions(ref t: LexTable, ref decls: List<TokenDecl>) -> LexTable {
+    var actions: List<TokenAction> = [];
+    for d in decls {
+        actions.push(TokenAction { role: d.role, enters: d.enters, leaves: d.leaves, trails: d.trails });
+    }
+    return LexTable { names: t.names, class_of: t.class_of, classes: t.classes, states: t.states, starts: t.starts, next: t.next, accept: t.accept, actions: actions };
+}
+
 /// Compiles `decls` into a minimized lexer table. A declaration whose
 /// pattern matches the empty text is LEX004; two declarations of equal
 /// priority that match the same text are LEX002.

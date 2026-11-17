@@ -41,6 +41,7 @@
 | **`PROP-028`** | Fill the `bridge.proc_signal` Seam's `signal_handle` Sub-Op, So `pilot test --timeout` Can Stop a Hung Case | `+4` in `crates/pilot-vm/src/bridge.rs` | `APPROVED BY OWNER 2026-11-16 ("Approve PROP-028") AND BUILT` |
 | **`PROP-029`** | Seed Lexer: `!` Ends No Operand, So `!.on` Reads as `!self.on`, Closing Known Bug `seed.not_prefix_dot` | `0` (one argument in `crates/pilot-lexer/src/lexer.rs`) | `DRAFT 2026-11-16 — AWAITING OWNER APPROVAL` |
 | **`PROP-030`** | Seed: A `const` List or Map of Any Length Compiles (`materialize_cmap` Releases Each Element's Register), Closing Known Bug `seed.const_list_registers` | `+6` in `crates/pilot-vm/src/lib.rs` | `APPROVED BY OWNER 2026-11-16 ("Approve PROP-030") AND BUILT` |
+| **`PROP-032`** | Enums With Text Values (`enum CacheField { Key = "key", .. }`): `as str`, printing, `ENUM001`–`ENUM003` | about `+12` in `crates/pilot-vm/src/lib.rs` (`register_enum`) | `APPROVED BY OWNER 2026-11-16 ("Approve PROP-032")` |
 | **`PROP-003`** | Wave 3, itemized 2026-11-15: slices 3A–3F (struct `invariant` rule, dead f-string desugarer, `op_checked` to Pilot, contract rules, f-string scanner dedupe, small trims) | about `-270` now (most of the planned `-2,850` waits for `PROP-005`/`006`) | `3A + 3B BUILT 2026-11-15 (−29 RUST); 3C DEFERRED TO PROP-005; 3D–3F DRAFT` |
 | **`PROP-004`** | Retire Legacy `crates/pilot-analysis` Crate (`1,591` formatted `src` LOC; `647` packed) & Migrate Milestone Harnesses to `.pilot` | `-1,591` LOC (formatted) | `PLANNED (WAVE 4)` |
 | **`PROP-005`** | Replace Rust `BytecodeCompiler` (`24` `lower_*.rs` + `vm_gen.rs` + `codes.rs`) with `selfhost/vm/ir_to_pilc.pilot` | about `-7,950` LOC packed, about `-8,770` formatted (PROP-016) | `ITEMIZED 2026-11-15: 5A APPROVED AND BUILT (PILOT ONLY); 5B ITEMIZED (SLICES 5B.1–5B.6); D1/D2/D3/D5 DECIDED 2026-11-15, D4 OPEN; 5B.1 AND 5B.2 APPROVED AND BUILT (PILOT ONLY); 5B.3 APPROVED, IN PROGRESS (`ref<T>`, CLI AND DROP PLAN ROWS DONE; RUST AMENDMENT 5B.3a APPROVED AND BUILT 2026-11-16); 5B.4–5B.6 NOT APPROVED; 5C–5F NOT APPROVED; BOOTSTRAP T1/T2 NEEDS AN OWNER DECISION BEFORE 5E` |
@@ -2346,6 +2347,8 @@ The gate rebuilds the table and compares it byte for byte (`PROP-023`). Until `P
   - `lex/seed_table`;
   - `lex/err_lex008_no_seed_kind`.
 
+  On `--emit c` the seed form `??=` first came out as the C trigraph for `#`. The emitted C now writes each `?` that follows a `?` as `\?` (`without_trigraphs` in `selfhost/transpile/c_family.pilot`), tested by `strings/trigraph_text`.
+
   GATE024's failure path was checked by hand (`--check-table` against an edited file), not by a conformance program, because that would mean editing the checked-in table.
 
 **3.2 Slice 21H (Rust; needs approval). Strictly these files:**
@@ -3182,6 +3185,74 @@ Retiring the hand-written tokenizers (PROP-021 §8) deleted Pilot code that thre
 **As built (2026-11-16):** `milestone10` and `milestone60` edited as above (the `milestone60` test is renamed `test_60_3_and_60_4_selfhost_cli_test_runner_diff_test_and_crate_purge`). `milestone04` is **not** done: deleting `test_m4_3` trips the anti-cheat test-count pin, so every `pilot-analysis` milestone test fails. It was put back unchanged. Failures that remain and predate this change: `test_m10_1` (`FAULT: no function named tokenize`, `stdlib/pilot/lex.pilot` was replaced in PROP-021 21E), `test_60_3` (`selfhost/cli/build_cmd.pilot` does not exist), and `test_m4_3` (it calls the deleted `format_pilot_with_style`).
 
 **Amendment A1 (APPROVED 2026-11-16, owner: "Approve A1"):** also modify `crates/pilot-analysis/tests/common/anticheat.rs` line 221: the `MILESTONE_TEST_MANIFEST` count for `milestone04` goes from `4` to `3`. Then delete `test_m4_3`, `eval_fmt` and the `selfhost/fmt/fmt.pilot` audit rule in `milestone04` as planned, and set its `expected_test_count` to `3`. *Built 2026-11-16: the count pin passes; no `pilot-analysis` test names the deleted code. The three test files still fail, each on older missing items: `milestone04` on `stdlib/core/syntax/call_quote.pilot` lacking `pub syntax` (anti-cheat pass 9), `milestone10` on `tokenize` in `stdlib/pilot/lex.pilot`, `milestone60` on `selfhost/cli/diff_test.pilot` and `build_cmd.pilot`.*
+
+## `PROP-032` — Enums With Text Values (`enum CacheField { Key = "key", ModeOf = "mode_of", }`)
+
+**Status: APPROVED 2026-11-16 (owner: "Approve PROP-032").** Owner request (2026-11-16): "make enums available to have constant string values".
+
+### 1. What happens today (run 2026-11-16)
+
+- A variant's written value must be an integer literal. `enum Field : str { Key = "key", }` stops the seed with ``SEED001: the value of `Field.Key` must be an integer literal`` (`register_enum`, `crates/pilot-vm/src/lib.rs:1046`). The error is reported at `stdlib/core/operators/levels.pilot:1:1`, not at the variant: a location bug of its own, not fixed here.
+- The checker (`variant_values`, `selfhost/check/layout_attrs.pilot`) and PilIR (`variant_tag`, `selfhost/ir/layouts.pilot`) read values as integers only.
+- Printing an enum value prints its value on all three engines (`High = 9` prints `9`).
+- So code that needs a word per variant writes a `switch` by hand: `cache_label` (`stdlib/pilot/lex/cache.pilot`), `token_tag_name` (`selfhost/lexer.pilot`), `wiring_level_label` (`selfhost/gate/ledger/wiring.pilot`).
+
+### 2. Design
+
+- **Declaring:** an enum whose variants write string literals is a *text enum*. Every variant writes its text, and the texts are distinct. A base (`: u8`) is optional and sets the tag's width as today.
+- **Representation (PilIR, C):** variants are integer tags `0 .. n-1` in declaration order, exactly as an enum with no values. `==`, `!=` and `switch` stay integer operations. Each text enum has one constant table of its texts, read by tag.
+- **Reading the text:** `v as str` gives the variant's text. Printing a text enum value, alone or in an f-string hole, prints its text.
+- **What it costs (the owner's aim, 2026-11-16: "the call would be efficient as a const enum"):**
+  - A variant named in the source (`CacheField::Key as str`) folds to the string constant `"key"` at compile time. There is no lookup at run time.
+  - A value known only at run time costs one indexed load from a static table: `static const` data in the emitted C, never rebuilt per read.
+  - Comparing and `switch` cost the same as an integer enum's.
+  - The texts are written once, on their variants, so the declaration shows what each value stands for. No separate table or `switch` can fall out of step.
+- **Seed:** `register_enum` records each variant's string as its compile-time value (`CMap::Val`, which already holds strings: `eval_cmap`). `as str` is then the value itself, and printing prints it. The seed stays name-blind: an enum is text-valued because its written values are string literals, never by its base type's name.
+- **What keeps the two representations unobservable (checker):**
+  - `ENUM001`: an integer cast (`as i64`, `as u8`, ..) of a text enum value.
+  - `ENUM002`: an enum mixing text and integer values, or a text enum with a variant that writes no text.
+  - `ENUM003`: two variants of a text enum with the same text.
+  - `<`, `<=`, `>`, `>=` on a text enum have no operator: `METH001`, as for any type without one.
+- **Not in this proposal (possible follow-ups):**
+  - A variant with no text taking its own name. The seed would need the enum's base type, which it cannot know without naming a type.
+  - A lookup from text back to variant (`CacheField.from_text(s) -> CacheField?`).
+
+### 3. Rust (needs approval). Strictly this file:
+
+| File | Change |
+| :--- | :--- |
+| `crates/pilot-vm/src/lib.rs` | `register_enum`: a written value that is a string literal is stored as that string. An enum mixing string and integer values, or a text enum with a variant without a value, is `SEED001` (the checker reports `ENUM002` for the same program). |
+
+**Estimate:** about `+12` lines. This file has uncommitted changes from another session's approved work. Build after those land, or in coordination with that session.
+
+### 4. Pilot (no approval needed; listed for scope)
+
+| File | Change |
+| :--- | :--- |
+| `selfhost/check/layout_attrs.pilot` (or a new `selfhost/check/enum_text.pilot`) | Recognise text enums; `ENUM002`, `ENUM003`. |
+| `selfhost/check/infer.pilot` | Type `v as str` on a text enum as `str`; `ENUM001` for integer casts. |
+| `selfhost/diagnostics/errors.pilot` | Register `ENUM001`–`ENUM003`. |
+| `selfhost/ir/lower.pilot` (`lower_cast`) and the print/format lowering | `as str`, printing and f-string holes of a text enum read its constant text table by tag. |
+| `selfhost/ir/layouts.pilot` | `variant_tag` gives a text enum's variants `0 .. n-1`. |
+| `docs/keyword_matrix.md` (`enum` row), `docs/concept_matrix.md`, `pilot.md`, `rust.md`, `selfhost/gate/ledger/wiring.pilot` | Same-change sync. |
+
+`selfhost/ir/*` and `selfhost/check/infer.pilot` currently have uncommitted changes from the session working on the PilIR interpreter. That part is sequenced after it, or done in coordination.
+
+### 5. Acceptance (tests written first, expected output worked by hand)
+
+- `tests/conformance/types/enum_text_values.pilot`: `as str`, printing, an f-string hole, `==`/`!=`, an exhaustive `switch`, and a `: u8` text enum. All three engines agree.
+- `tests/conformance/errors/err_enum001_text_int_cast`, `err_enum002_mixed_values`, `err_enum002_missing_text`, `err_enum003_duplicate_text`.
+- `types/enum_explicit_values` and every other conformance program pass unchanged. `cargo test -p pilot-vm` and `cargo fmt --check` pass.
+- Then the three hand-written `switch` mappings above become text enums, and their callers use `as str`.
+
+### 6. As built (2026-11-16)
+
+- **Rust:** `register_enum` (`crates/pilot-vm/src/lib.rs`, `+10` lines, `1,080` → `1,090`): a written value whose compile-time value is a string is stored as that string. Mixed enums are left to the checker (`ENUM002`), which runs on every program the seed accepts; the seed adds no `SEED001` of its own for them.
+- **Checker:** `is_text_enum` and `check_text_enum` (`ENUM002`, `ENUM003`) in `selfhost/check/layout_attrs.pilot`; `ENUM001` in `selfhost/check/rules.pilot` `check_cast`; `ENUM001`–`ENUM003` registered in `selfhost/diagnostics/errors.pilot`.
+- **PilIR:** `variant_tag` gives a text enum's variants `0 .. n-1`, and `variant_texts` lists their texts (`selfhost/ir/layouts.pilot`). `lower_enum_text` (`selfhost/ir/lower_switch.pilot`) folds `Light::Red as str` to the constant `"stop"`. Any other value reads its text through one `switch_table` of string constants by tag (O(1)). `engine_value` does the same for arguments of native calls (`print`) and operands of arithmetic (`"[" + f`, the f-string holes). Comparisons and `switch` stay integer operations.
+- **Difference kept:** a text-enum value passed to a raw `__engine(..)` call keeps its tag on PilIR, and is the text on the seed (where the variant is a string). Inside one engine a value stored and read back through engine ops is consistent; only `Pilot.Core.*` may make such calls (`ENGINE001`).
+- **Seed cost:** on the seed a text-enum comparison compares strings, not integers. `TokenTagKind` is compared in the seed-run self-hosted parser, so its hot path pays that on the seed only.
+- **Converted:** `CacheField` (`stdlib/pilot/lex/cache.pilot`), `TokenTagKind` (`selfhost/lexer.pilot`), `WiringLevel` (`selfhost/gate/ledger/wiring.pilot`). `CACHE_LABELS`/`cache_label`, `TOKEN_TAG_NAMES`/`token_tag_name` and `WIRING_LEVEL_LABELS`/`wiring_level_label` are deleted, and their callers use `as str` or print the value.
 
 ## `PROP-003` — Wave 3, Itemized: Parser Desugarings and VM Helpers That Can Leave Rust Now
 

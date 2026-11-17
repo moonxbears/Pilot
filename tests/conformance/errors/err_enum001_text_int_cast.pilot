@@ -1,0 +1,11 @@
+// ENUM001: a text enum has no integer value, so an integer cast of one is
+// refused; `as str` gives its text. The cast starts at line 10, column 11.
+enum Light {
+    Red = "stop",
+    Green = "go",
+}
+
+fn main() {
+    let l: Light = ::Green;
+    print(l as i64);
+}

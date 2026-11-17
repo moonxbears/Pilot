@@ -82,6 +82,12 @@ pub const HOLE_MODE: str = "fstring_hole";
 /// The family of the `{` that opens an f-string hole.
 pub const HOLE_OPEN: str = "hole_open";
 
+/// The families inside an f-string's quoting mode: a run of text, a lone
+/// quote inside a triple-quoted one, and the closing quote.
+pub const FSTRING_TEXT: str = "fstring_text";
+pub const FSTRING_QUOTE: str = "fstring_quote";
+pub const FSTRING_CLOSE: str = "fstring_close";
+
 fn quotes(q: i64, triple: bool) -> Pattern => if triple { byte(q) * 3 } else { byte(q) };
 
 fn fprefix(raw: bool) -> Pattern => if raw { class(RAW_MARKS) + class(FSTRING_MARKS) | class(FSTRING_MARKS) + class(RAW_MARKS) } else { class(FSTRING_MARKS) };
@@ -127,10 +133,10 @@ fn fstring_mode(q: i64, triple: bool, raw: bool) -> LexMode {
     if !triple { stop.push(NEWLINE); }
     var piece: Pattern = any_but(stop) | lit("{{");
     if !raw { piece = piece | byte(BACKSLASH) + any_byte(); }
-    var tokens: List<TokenDecl> = [token("fstring_text", piece.some())];
-    if triple { tokens.push(token("fstring_quote", byte(q) | byte(q) * 2)); }
+    var tokens: List<TokenDecl> = [token(FSTRING_TEXT, piece.some())];
+    if triple { tokens.push(token(FSTRING_QUOTE, byte(q) | byte(q) * 2)); }
     tokens.push(entering(HOLE_MODE, token(HOLE_OPEN, lit("{"))));
-    tokens.push(acting(TokenRole::Operand, leaving(token("fstring_close", quotes(q, triple)))));
+    tokens.push(acting(TokenRole::Operand, leaving(token(FSTRING_CLOSE, quotes(q, triple)))));
     return lex_mode(fstring_mode_name(q, triple, raw), tokens);
 }
 
