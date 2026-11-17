@@ -1,0 +1,4 @@
+error[OWN001]: `h` is used after it was moved
+err_move_handed_back.pilot:25:11
+error[OWN001]: `a` is used after it was moved
+err_move_handed_back.pilot:29:11

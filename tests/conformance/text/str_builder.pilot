@@ -1,0 +1,66 @@
+// std.text.StrBuilder: text appended with `+=` (or `append`, its readable
+// pair, or a `b + x + y` chain) and read back in order; `len` counts bytes.
+//
+// Expected output, worked by hand:
+// * a new builder is empty: 0 and "[]".
+// * "ab", "42", "cd", "e", "f" give "ab42cdef" (8 bytes), read twice the
+//   same; then "!" gives "ab42cdef!" (9).
+// * `add_line` appends through a `var ref`: "x\n" then "y\n" is 4 bytes.
+// * "0,1,..,1999," is 10 one-digit numbers (20 bytes), 90 two-digit (270),
+//   900 three-digit (3600) and 1000 four-digit (5000): 8890 bytes in 2000
+//   pieces, each copied to its own offset. Bytes 20..26 are "10,11,".
+//   Number k (100..999) starts at 20 + 270 + 4 * (k - 100), so 283 starts
+//   at 1022 and bytes 1022..1030 are "283,284,".
+// * UTF-8 pieces are copied as bytes: "é" is 2 bytes (C3 A9) and "日本" 6
+//   (E6 97 A5, E6 9C AC), so "é日本" is 8 bytes, and "!" makes 9.
+
+use std.text;
+
+fn add_line(var ref b: StrBuilder, s: str) {
+    b += s + "\n";
+}
+
+fn main() {
+    var b = StrBuilder();
+    print(b.len());
+    print(f"[{b.to_string()}]");
+
+    b += "ab";
+    b += f"{42}";
+    b.append("cd");
+    b = b + "e" + "f";
+    print(b.len());
+    print(b.to_string());
+    print(b.to_string());
+    b += "!";
+    print(b.to_string());
+    print(b.len());
+
+    var lines = StrBuilder();
+    add_line(lines, "x");
+    add_line(lines, "y");
+    print(lines.len());
+    print(lines.to_string() == "x\ny\n");
+
+    var n = StrBuilder();
+    var i = 0;
+    while i < 2000 {
+        n += f"{i},";
+        i = i + 1;
+    }
+    let s = n.to_string();
+    print(n.len());
+    print(s.len());
+    print(s.slice(0, 6));
+    print(s.slice(20, 26));
+    print(s.slice(1022, 1030));
+    print(s.slice(8880, 8890));
+
+    var u = StrBuilder();
+    u += "é";
+    u += "日本";
+    print(u.len());
+    print(u.to_string());
+    u += "!";
+    print(u.to_string().len());
+}

@@ -516,7 +516,7 @@ import std.asyncio
 | :--- | :--- | :--- | :--- |
 | **`std.collections`** | `collections/collections.pilot` | `Counter`, `defaultdict`, `OrderedDict`, `ChainMap`, `deque`, `namedtuple`, `bisect_left`, `bisect_right`, `PriorityQueue`, `BitSet` | High-performance containers, frequency counters, double-ended queues, binary min-heaps, and SWAR 64-bit bitsets. |
 | **`std.itertools`** | `collections/itertools.pilot` | `chain`, `batched`, `compress`, `dropwhile`, `filterfalse`, `groupby`, `islice`, `pairwise`, `starmap`, `takewhile`, `product`, `permutations`, `combinations` | Zero-allocation iterator combinators, Cartesian products, groupings, and combinations. |
-| **`std.text`** | `text/text.pilot` | `StringBuilder`, `dedent`, `indent`, `wrap`, `fill`, `slugify` | High-throughput mutable string concatenation, text formatting, and wrapping. |
+| **`std.text`** | `text/text.pilot` | `StrBuilder`, `dedent`, `indent`, `wrap`, `fill`, `slugify` | High-throughput mutable string concatenation, text formatting, and wrapping. |
 
 ### 11.4 Mathematics & Randomness
 
