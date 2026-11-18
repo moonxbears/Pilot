@@ -1,7 +1,7 @@
 // ==============================================================================
 // FILE: selfhost/db/revision.pilot
-// Milestone 5.2: Incremental Compiler Database Revision Physics & Query Keys
-// Monotonic RevisionId, Durability Tiers, 128-bit Fingerprints & Query Keys
+// PilotDb revision ids, durability tiers, 128-bit fingerprints and query keys.
+// Reached only by the milestone05 Rust test; no `pilot` command runs it.
 // ==============================================================================
 pub lvl(0) pkg selfhost.db;
 

@@ -1,7 +1,9 @@
 // ==============================================================================
 // FILE: selfhost/cst/autofix.pilot
-// Milestone 8.3: Transactional Lossless CST Auto-Fix & Comment-Preserving Rewriter
-// Reverse byte-order disjointness solver, comment conservation proof, and diffs
+// Applies diagnostic fixes to source text as non-overlapping byte edits and
+// checks that comments are kept.
+// Reached only by the milestone08 and milestone09 Rust tests; no `pilot`
+// command runs it.
 // ==============================================================================
 pub lvl(0) pkg selfhost.cst;
 

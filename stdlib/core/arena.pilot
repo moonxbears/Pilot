@@ -2,7 +2,8 @@
 // FILE: stdlib/core/arena.pilot
 // ARENA SCOPES: `with arena a { .. }`
 // =========================================================================
-// `with arena a { .. }` (crates/pilot-parser with_scope.rs) runs the block
+// `with arena a { .. }` (the `with` syntax rule in
+// stdlib/core/syntax/lifecycle.pilot) runs the block
 // with `a` bound to the scope `arena()` starts; leaving the block, however
 // it is left, drops the scope and so ends it. `ArenaScope` is a `0b11`
 // guard, so it cannot leave the block (ESCAPE001-004).

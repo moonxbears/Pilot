@@ -1,8 +1,8 @@
 // ==============================================================================
 // FILE: selfhost/inspect/method_lens.pilot
-// Milestone 7.1: Zero-Black-Box 4-Tier Method Resolution Lens
-// Tier 1 (Explicit), Tier 2 (*Bundle), Tier 3 (Sub-Interface), Tier 4 (Base-Interface),
-// Tier 5 (Scoped ext), and Collision Modifiers (coalesce, with, without)
+// `pilot inspect` method lens text: which MethodTable tier supplies each member.
+// `pilot inspect` has no handler (seam cli.command_handler).
+// Reached only by the milestone07 Rust test; no `pilot` command runs it.
 // ==============================================================================
 pub lvl(0) pkg selfhost.inspect;
 

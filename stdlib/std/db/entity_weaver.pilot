@@ -1,12 +1,20 @@
 // ==============================================================================
 // FILE: stdlib/std/db/entity_weaver.pilot
 // Milestone 30: Self-Generating Typed Persistence & Schema Diffs ([Entity])
-// Synthesizes strongly-typed SQL column lenses, parameterized CRUD & batch
-// queries, optimistic locking, and schema-diff DDL migrations.
-// Enforces:
+// What exists: a hand-built `EntitySchemaDef`, primary-key and predicate
+// type checks, SQL text for CREATE TABLE, select-by-id, insert and an update
+// with an optimistic-lock version check, and a schema diff that emits DDL
+// (entity_diff_ddl). No typed column lenses and no batch queries. Building a
+// schema from an `[Entity]` struct (entity_weave_struct) is seam
+// `db.weave_entity`.
+// Codes used:
 //   GEN003: [Entity] Missing [Id] Primary Key Field
 //   GEN004: SQL Query Column Type Mismatch in Typed Predicate
 //   GEN006: Destructive Schema Column Drop Detected in diff_ddl Without [AllowDropColumn]
+// Code clash: GEN001-GEN003 are registered in selfhost/diagnostics/errors.pilot
+// as generator errors, and GEN004-GEN006 are not registered. The checker
+// emits none of the codes below; they appear only in the strings the
+// format_genNNN helpers here return.
 // ==============================================================================
 
 pub pkg std.db.entity;

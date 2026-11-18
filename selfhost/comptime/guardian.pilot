@@ -1,6 +1,7 @@
 // ==============================================================================
 // FILE: selfhost/comptime/guardian.pilot
-// Milestone 29: Capability-Sandboxed & Deterministic comptime Execution
+// Capability checks for comptime code. Reached only by the milestone29 Rust
+// test; no `pilot` command runs it.
 // Enforces:
 //   CTIME001: Unauthorized comptime Filesystem Access or .. Path Traversal Blocked
 //   CTIME002: Unauthorized comptime Network/Subprocess/FFI Call Blocked

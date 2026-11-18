@@ -1,11 +1,16 @@
 // ============================================================================
 // FILE: stdlib/polyglot/shm.pilot
-// Milestone 58.4 Legacy Compatibility: Shared-Memory Descriptors
+// Milestone 58.4 legacy shared-memory descriptors (plain records, no OS
+// mapping). An older, separate take on stdlib/std/polyglot/shm.pilot, which
+// is the real home (ShmBuffer / ShmView). No .pilot file imports this one;
+// it is kept only because the Rust test
+// crates/pilot-analysis/tests/milestone58_runtime_crypto_wire_db_and_polyglot.rs
+// reads it (create_shm_owned_buffer, project_shm_borrowed_view).
 // ============================================================================
 pub pkg polyglot.shm;
 
 // ------------------------------------------------------------------------------
-// Legacy Milestone 58 Compatibility Types
+// Legacy Milestone 58 types (kept for the milestone58 Rust test only)
 // ------------------------------------------------------------------------------
 
 pub struct ShmOwnedBuffer {

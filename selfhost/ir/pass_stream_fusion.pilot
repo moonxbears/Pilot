@@ -93,7 +93,8 @@ pub fn fuse_stream_pipeline(ref spec: StreamPipelineSpec) -> FusedLoopPlan {
 // ------------------------------------------------------------------------------
 
 /// Replaces the combinator chain in the caller's PilIR with the single fused
-/// loop the plan describes. The typed SSA IR it rewrites does not exist yet.
+/// loop the plan describes. Typed PilIR exists (selfhost/ir/model.pilot,
+/// `IrFunction`, `ir_add_block`), but this pass is not connected to it.
 pub fn rewrite_fused_pipeline(ref spec: StreamPipelineSpec, plan: FusedLoopPlan) -> i64 {
-    return seam("fusion.rewrite_ir", "typed PilIR function builder arrives in F5");
+    return seam("fusion.rewrite_ir", "stream fusion is not connected to typed PilIR (selfhost/ir/model.pilot); nothing rewrites the combinator chain into the fused loop");
 }

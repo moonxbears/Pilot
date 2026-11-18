@@ -6,6 +6,51 @@
 pub lvl(0) pkg selfhost.gate;
 
 use std.text;
+use pilot.lex.modes;
+use pilot.lex.seed;
+use pilot.parse.tape;
+
+/// The tokens of one file as the seed lexes them (the seed's own table, run
+/// by `pilot.parse.tape`), with each bracket's partner.
+struct SaTokens : IObject {
+    pub tape: Tape;
+    /// The index of the bracket closing or opening token `i`, or -1.
+    pub partner: List<i64>;
+}
+
+/// The tokens of `src`, lexed by `m`, with their bracket partners.
+fn sa_tokens(ref m: ModalLexer, src: str) -> SaTokens {
+    let t = tape_of(m, src);
+    var partner: List<i64> = [];
+    var open: List<i64> = [];
+    var i = 0;
+    while i < t.len() {
+        partner.push(-1);
+        let x = t.text_of(i);
+        if x == "(" || x == "[" || x == "{" {
+            open.push(i);
+        } else if (x == ")" || x == "]" || x == "}") && open.len() > 0 {
+            let o = open.pop() ?? -1;
+            partner[o] = i;
+            partner[i] = o;
+        }
+        i = i + 1;
+    }
+    return SaTokens { tape: t, partner: partner };
+}
+
+fn sa_text(ref k: SaTokens, i: i64) -> str => k.tape.text_of(i);
+
+fn sa_partner(ref k: SaTokens, i: i64) -> i64 => if i >= 0 && i < k.partner.len() { k.partner[i] } else { -1 };
+
+/// Whether token `i` is a word (a name or a keyword): it starts with a
+/// letter or `_`.
+fn sa_is_word(ref k: SaTokens, i: i64) -> bool {
+    let x = sa_text(k, i);
+    if x.len() == 0 { return false; }
+    let b = x.byte_at(0);
+    return sa_is_upper(b) || sa_is_lower(b) || b == 95;
+}
 
 pub pure fn sa_is_upper(b: i64) -> bool {
     return b >= 65 && b <= 90;
@@ -129,10 +174,10 @@ fn sa_check_core_type_naming(
     return 1;
 }
 
-fn sa_scan_inherits_attr(tape: i64, start_idx: i64, limit_idx: i64) -> bool {
+fn sa_scan_inherits_attr(ref tape: SaTokens, start_idx: i64, limit_idx: i64) -> bool {
     var k = start_idx;
     while k < limit_idx {
-        let t = sh_token_text(tape, k);
+        let t = sa_text(tape, k);
         if t == "{" || t == ";" { return false; }
         if t == nameof(IAttribute) { return true; }
         k = k + 1;
@@ -140,11 +185,11 @@ fn sa_scan_inherits_attr(tape: i64, start_idx: i64, limit_idx: i64) -> bool {
     return false;
 }
 
-fn sa_prev_has_lang_attr(tape: i64, kw_idx: i64) -> bool {
+fn sa_prev_has_lang_attr(ref tape: SaTokens, kw_idx: i64) -> bool {
     var k = kw_idx - 1;
     var steps = 0;
     while k >= 0 && steps < 28 {
-        let t = sh_token_text(tape, k);
+        let t = sa_text(tape, k);
         if t == ";" || t == "}" { return false; }
         if t == nameof(Lang) { return true; }
         k = k - 1;
@@ -153,11 +198,11 @@ fn sa_prev_has_lang_attr(tape: i64, kw_idx: i64) -> bool {
     return false;
 }
 
-fn sa_prev_is_partial(tape: i64, kw_idx: i64) -> bool {
+fn sa_prev_is_partial(ref tape: SaTokens, kw_idx: i64) -> bool {
     var k = kw_idx - 1;
     var steps = 0;
     while k >= 0 && steps < 6 {
-        let t = sh_token_text(tape, k);
+        let t = sa_text(tape, k);
         if t == nameof(partial) { return true; }
         if t == ";" || t == "}" || t == "]" { return false; }
         k = k - 1;
@@ -167,7 +212,7 @@ fn sa_prev_is_partial(tape: i64, kw_idx: i64) -> bool {
 }
 
 fn sa_harvest_distributive_block(
-    tape: i64,
+    ref tape: SaTokens,
     open_brace_idx: i64,
     kind_kw: str,
     block_is_partial: bool,
@@ -177,27 +222,26 @@ fn sa_harvest_distributive_block(
     vocab: i64,
     violations: i64
 ) -> i64 {
-    let close_idx = sh_token_matching_bracket(tape, open_brace_idx);
+    let close_idx = sa_partner(tape, open_brace_idx);
     if close_idx <= open_brace_idx { return open_brace_idx + 1; }
     var j = open_brace_idx + 1;
     var item_has_lang = false;
     while j < close_idx {
-        let tag = sh_token_tag_kind(tape, j);
-        let txt = sh_token_text(tape, j);
-        if tag == TokenTagKind::LBracket {
-            let rb = sh_token_matching_bracket(tape, j);
+        let txt = sa_text(tape, j);
+        if txt == "[" {
+            let rb = sa_partner(tape, j);
             var ak = j + 1;
             while ak < rb {
-                if sh_token_text(tape, ak) == nameof(Lang) { item_has_lang = true; }
+                if sa_text(tape, ak) == nameof(Lang) { item_has_lang = true; }
                 ak = ak + 1;
             }
             j = if rb > j { rb + 1 } else { j + 1 };
-        } else if tag == TokenTagKind::LBrace {
-            let mb = sh_token_matching_bracket(tape, j);
+        } else if txt == "{" {
+            let mb = sa_partner(tape, j);
             item_has_lang = false;
             j = if mb > j { mb + 1 } else { j + 1 };
-        } else if (tag == TokenTagKind::Ident || tag == TokenTagKind::SeedKw) && j + 1 < close_idx {
-            let nx = sh_token_text(tape, j + 1);
+        } else if sa_is_word(tape, j) && j + 1 < close_idx {
+            let nx = sa_text(tape, j + 1);
             if nx == "<" || nx == ":" || nx == "{" || nx == ";" {
                 if !seed_registry_contains(seed_reg, txt) && txt != nameof(pub) && txt != nameof(priv) {
                     let _ = gset_insert(vocab, txt);
@@ -212,9 +256,9 @@ fn sa_harvest_distributive_block(
                 // Advance to matching `}` or `;` of this distributive member
                 var k = j + 1;
                 while k < close_idx {
-                    let kt = sh_token_text(tape, k);
+                    let kt = sa_text(tape, k);
                     if kt == "{" {
-                        let cb = sh_token_matching_bracket(tape, k);
+                        let cb = sa_partner(tape, k);
                         j = if cb > k { cb + 1 } else { k + 1 };
                         break;
                     }
@@ -241,6 +285,14 @@ pub fn harvest_core_vocabulary_and_audit(
     violations: i64
 ) -> Map<str, bool> {
     let vocab = gset_new();
+    guard some lexer = read_seed_table_in(workspace_root) else {
+        let _ = glist_push(violations, sa_make_violation(
+            "GATE001", SEED_TABLE_FILE, 1, 1, "",
+            "the seed's lexer table cannot be read",
+            "Run the gate from the workspace root, with the table checked in"
+        ));
+        return vocab;
+    };
     let core_dir = gm_join_path(workspace_root, "stdlib/core");
     let files = gate_fs_walk_files(core_dir);
     let n_files = files.len();
@@ -260,21 +312,20 @@ pub fn harvest_core_vocabulary_and_audit(
             }
             let enforce_naming = gm_contains(src, "[EnforceCoreNaming]");
             if gm_contains(src, nameof(struct)) || gm_contains(src, nameof(interface)) {
-                let tape = sh_tokenize(src);
-                let count = sh_token_count(tape);
+                let tape = sa_tokens(lexer, src);
+                let count = tape.tape.len();
                 var i = 0;
                 while i < count {
-                    let txt = sh_token_text(tape, i);
+                    let txt = sa_text(tape, i);
                     if (txt == nameof(struct) || txt == nameof(interface)) && i + 1 < count {
                         let is_part = sa_prev_is_partial(tape, i);
-                        let nx_txt = sh_token_text(tape, i + 1);
+                        let nx_txt = sa_text(tape, i + 1);
                         if nx_txt == "{" {
                             i = sa_harvest_distributive_block(
                                 tape, i + 1, txt, is_part, enforce_naming, rel, seed_reg, vocab, violations
                             );
                         } else {
-                            let nx_tag = sh_token_tag_kind(tape, i + 1);
-                            if nx_tag == TokenTagKind::Ident || nx_tag == TokenTagKind::SeedKw {
+                            if sa_is_word(tape, i + 1) {
                                 if !seed_registry_contains(seed_reg, nx_txt) {
                                     let _ = gset_insert(vocab, nx_txt);
                                 }
@@ -1029,12 +1080,13 @@ fn sa_audit_airlock_boundary(root: str, violations: i64) -> i64 {
                 scanned = scanned + 1;
                 let rel = sa_strip_rel_prefix(root, full);
                 if rel != "stdlib/core/bridge_lang.pilot" {
-                    // Runtime `host_op` sites are checked by owner instead
-                    // (verify_airlock_abi, Amendment A1), so they do not count here.
+                    // Runtime `host_op` sites and the Stage-A natives' owners
+                    // are checked by owner instead (verify_airlock_abi,
+                    // Amendment A1; check 6), so they do not count here.
                     let src = gate_fs_read_text(full);
                     // A file that never spells `__engine` has no calls and
                     // no host_op sites; most files do not.
-                    let hits = if src.find("__engine", 0) < 0 { 0 } else { sa_count_engine_calls(src) - sa_count_host_op_sites(src) };
+                    let hits = if src.find("__engine", 0) < 0 { 0 } else { sa_count_engine_calls(src) - sa_count_host_op_sites(src) - native_owner_sites(rel) };
                     if hits > 0 {
                         let cap = if ratchet.has(rel) { ratchet.get(rel) } else { 0 };
                         if hits > cap {

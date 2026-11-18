@@ -1,0 +1,117 @@
+// The scorecard's rules: every veto, credit and debt, its points and what
+// it measures. Frozen: changing this file without an owner approval in
+// tools/score/approvals.pilot (read from the base commit) is itself a veto
+// (V7), so a change can never make its own score easier.
+//
+// How a change is scored (tools/score/main.pilot):
+//   - every finding is measured against the base commit by a tool (git and
+//     the ledgers), never reported by the author of the change;
+//   - credits add, debts subtract; a debt is refunded by the matching credit
+//     when the thing it counts is closed, so opening and closing in one
+//     change nets 0;
+//   - any veto makes the score 0 and the command exit 1. A veto only blocks:
+//     no score ever makes a change "done" (AGENTS.md section 9.1 does).
+pkg sc.rules;
+
+/// What a finding does to the score.
+pub enum Kind : u8 {
+    Veto = "VETO",
+    Credit = "CREDIT",
+    Debt = "DEBT",
+    Info = "INFO",
+    Unmeasured = "NOT MEASURED",
+    Owner = "OWNER",
+}
+
+/// One rule of the scorecard. `points` is earned (or owed, when negative)
+/// for every `per` units the rule counts: lines for line rules, items for
+/// the rest.
+pub struct Rule {
+    pub id: str;
+    pub kind: Kind;
+    pub points: i64;
+    pub per: i64;
+    pub title: str;
+}
+
+/// Every rule, in report order.
+pub const RULES: List<Rule> = [
+    Rule { id: "V1", kind: ::Veto, points: 0, per: 1, title: "Rust src lines above the base count plus approved lines" },
+    Rule { id: "V2", kind: ::Veto, points: 0, per: 1, title: "Rust test lines went up" },
+    Rule { id: "V3", kind: ::Veto, points: 0, per: 1, title: "Rust or Cargo file changed without an approval" },
+    Rule { id: "V4", kind: ::Veto, points: 0, per: 1, title: "__engine call sites went up" },
+    Rule { id: "V5", kind: ::Veto, points: 0, per: 1, title: "an existing test's expected output changed or vanished without an approval" },
+    Rule { id: "V6", kind: ::Veto, points: 0, per: 1, title: "fewer conformance programs than at base" },
+    Rule { id: "V7", kind: ::Veto, points: 0, per: 1, title: "a scorer file or the Rust ceiling changed without an approval" },
+    Rule { id: "V8", kind: ::Veto, points: 0, per: 1, title: "a wiring row set to COMPLETE (only the owner sets it)" },
+    Rule { id: "V10", kind: ::Veto, points: 0, per: 1, title: "a changed file over 1500 lines" },
+    Rule { id: "C1", kind: ::Credit, points: 1, per: 10, title: "Rust src lines deleted" },
+    Rule { id: "C2", kind: ::Credit, points: 1, per: 50, title: "Rust test lines deleted" },
+    Rule { id: "C3", kind: ::Credit, points: 10, per: 1, title: "concept matrix row reached REAL" },
+    Rule { id: "C3w", kind: ::Credit, points: 3, per: 1, title: "wiring row reached WIRED" },
+    Rule { id: "C4", kind: ::Credit, points: 5, per: 1, title: "seam closed" },
+    Rule { id: "C5", kind: ::Credit, points: 5, per: 1, title: "known bug fixed" },
+    Rule { id: "C6", kind: ::Credit, points: 1, per: 5, title: "__engine call sites removed" },
+    Rule { id: "C7", kind: ::Credit, points: 2, per: 1, title: "dead Pilot file deleted, nothing refers to it" },
+    Rule { id: "C8", kind: ::Credit, points: 2, per: 1, title: "new conformance pair (program and err_ program) with a worked header" },
+    Rule { id: "D1", kind: ::Debt, points: -5, per: 1, title: "seam opened" },
+    Rule { id: "D2", kind: ::Debt, points: -5, per: 1, title: "known bug added" },
+    Rule { id: "D3", kind: ::Debt, points: -10, per: 1, title: "concept matrix row left REAL" },
+    Rule { id: "D3w", kind: ::Debt, points: -3, per: 1, title: "wiring row went down a level or was removed" },
+    Rule { id: "O1", kind: ::Owner, points: 1, per: 1, title: "owner adjustment added in this change (by hand; a penalty counts even when vetoed, a reward does not)" },
+    Rule { id: "V7o", kind: ::Veto, points: 0, per: 1, title: "an owner ledger entry removed or changed (the ledger is append-only)" },
+    Rule { id: "I1", kind: ::Info, points: 0, per: 1, title: "measurement (scores nothing)" },
+    Rule { id: "U1", kind: ::Unmeasured, points: 0, per: 1, title: "rule this tool cannot measure; another command does" },
+];
+
+/// The rule called `id`; a veto with that id and no points when no rule is.
+pub fn rule(id: str) -> Rule {
+    var i = 0;
+    while i < RULES.len() {
+        if RULES[i].id == id { return RULES[i]; }
+        i = i + 1;
+    }
+    return Rule { id: id, kind: ::Veto, points: 0, per: 1, title: "unknown rule" };
+}
+
+/// The label a report prints for `k`.
+pub fn kind_label(k: Kind) -> str {
+    switch k {
+        case ::Veto: return "VETO";
+        case ::Credit: return "CREDIT";
+        case ::Debt: return "DEBT";
+        case ::Info: return "INFO";
+        case ::Unmeasured: return "NOT MEASURED";
+        case ::Owner: return "OWNER";
+    }
+    return "?";
+}
+
+/// Most new conformance pairs one directory earns credit for (C8).
+pub const MAX_PAIRS_PER_DIR: i64 = 2;
+/// Leading `//` lines a new program needs for its expected output to count
+/// as worked by hand in its header (C8).
+pub const MIN_HEADER_LINES: i64 = 3;
+/// Most lines any changed `.pilot` or `.rs` file may have (V10, MOD001).
+pub const MAX_FILE_LINES: i64 = 1500;
+
+/// Paths (a path, or a directory ending in `/`) whose change is V7 unless
+/// approved: the scorer itself and the anti-cheat test counts.
+pub const FROZEN_PATHS: List<str> = [
+    "tools/score/",
+    "crates/pilot-analysis/tests/common/anticheat.rs",
+];
+
+/// Where the owner's approvals live; read only from the base commit.
+pub const APPROVALS_PATH: str = "tools/score/approvals.pilot";
+
+/// The rules no static look at a change can measure, and the command that
+/// does (reported as NOT MEASURED, never scored).
+pub const UNMEASURED: List<str> = [
+    "V9 engines agree on every program: pilot test, pilot test --ir, pilot test --emit c",
+    "V11 rename litmus (hardcoded Pilot names): pilot gate --full",
+    "V12 no test over 60 s: pilot test timings",
+    "V13 tests fail when a changed body is replaced by a constant: no tool yet",
+    "V14 no new leak or hot-path allocation, C9/D4 runtime speed: pilot bench",
+    "status raised without a run that proves it (beyond COMPLETE): pilot gate --full",
+];

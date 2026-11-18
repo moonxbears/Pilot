@@ -124,6 +124,7 @@ pub fn check_with_steps(phase: str, plan: bool) -> (List<DiagRow>, RunPlan?, Lis
     let p = prog_new(s);
     let inf = infer_new(p, resolve_program(p, sink));
     check_all(inf, sink);
+    parse_compare_if_asked(p);
     var made: RunPlan? = none;
     if plan { made = plan_of(s, inf); }
     var failed = false;

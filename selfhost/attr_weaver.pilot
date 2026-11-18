@@ -1,10 +1,9 @@
 // ==============================================================================
 // FILE: selfhost/attr_weaver.pilot
-// 100% Pilot-Hosted Weight-Sorted Compile-Time Attribute Weaver
-// Table-Driven Open-Registry Architecture (Milestone 21):
-// Replaces closed if/else chains and O(N^2) scans with O(1) WeaverProtocolRegistry
-// indexed by base IAttribute sub-interfaces + deterministic (weight DESC, idx ASC)
-// topological attribute scheduler.
+// Attribute weaver: classifies attributes through WeaverProtocolRegistry and
+// applies them in (weight DESC, index ASC) order.
+// Reached only by the milestone21 and milestone50 Rust tests; no `pilot`
+// command runs it.
 // ==============================================================================
 
 pub pkg selfhost;
@@ -22,7 +21,6 @@ let WeaverHooks = {
     ast_attr_decl_arg: "ast_attr_decl_arg",
     ast_base_count: "ast_base_count",
     ast_base_at: "ast_base_at",
-    ast_emit_diag: "ast_emit_diag",
     sym_str: "sym_str",
     str_len: "str_len",
     str_byte_at: "str_byte_at",
@@ -299,7 +297,7 @@ pub fn weave_node_attributes(nid: i64, node_count: i64) -> i64 {
             if pillar == 4 || pillar == 5 {
                 let msg = "ATTR001: Reactive or formula attribute '[" + aname
                     + "]' cannot be attached to a 0-byte interface declaration";
-                __engine(WeaverHooks.ast_emit_diag, nid, 1, msg);
+                seam("analysis.diag_sink", msg);
             }
         }
 
@@ -308,7 +306,7 @@ pub fn weave_node_attributes(nid: i64, node_count: i64) -> i64 {
             if pillar == 2 {
                 let fmsg = "ATTR002: Function interceptor attribute '[" + aname
                     + "]' cannot be attached to a non-callable field or binding";
-                __engine(WeaverHooks.ast_emit_diag, nid, 1, fmsg);
+                seam("analysis.diag_sink", fmsg);
             }
         }
 

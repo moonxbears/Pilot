@@ -1,7 +1,10 @@
 // ==============================================================================
 // FILE: stdlib/std/polyglot/py_capi.pilot
-// Milestone 17.2: In-Process Python C-API Adapter & PEP 3118 Zero-Copy Buffers
-// PEP 384 Stable ABI, Vectorcall Fast-Path, GIL Guards (0b11), PyObj (0b10)
+// Milestone 17.2: Python C-API adapter types (planned in-process, not built)
+// Records for the stable ABI, vectorcall, GIL guards (0b11), PyObj (0b10)
+// and PEP 3118 buffers. Every call into Python is a seam: 18 seams `py.*`
+// (py.init, py.gil_acquire, py.vectorcall, py.buffer_acquire, ...), since
+// no libpython is loaded yet.
 // ==============================================================================
 pub pkg std.polyglot.py;
 

@@ -2,6 +2,8 @@
 
 > **Purpose:** Canonical reference for **human design continuity** and **AI agent recontextualization**. Capture every core ambition, design invariant, syntax pairing, Universal Foreign-Language Adapter architecture, `.pchor` sublanguage choreography model, boilerplate shortcut, MCP/code-assistance capability, and unified `pilot` toolchain goal driving the **100-Milestone Journey** ([`MILESTONES_100.md`](file:///home/moony/Documents/dev/projects/Pilot/MILESTONES_100.md)).
 
+> **This is the target design, not the current state.** Much of what follows is not built. What runs today, per engine, is recorded in [`docs/keyword_matrix.md`](docs/keyword_matrix.md), [`docs/concept_matrix.md`](docs/concept_matrix.md) and `selfhost/gate/ledger/wiring.pilot`; the order of work is [`docs/roadmap.md`](docs/roadmap.md). In particular, Pilot is not self-hosted yet (the bootstrap gate stops at seam `bootstrap.stage_compile`), and only the C11 backend exists (no LLVM, WASM, assembly or GPU backend).
+
 ---
 
 ## 1. Core Philosophy & North Star
@@ -188,7 +190,9 @@ pub blueprint PhysicsWorld {
 
 ## 6. Unified `pilot` All-in-One Toolchain & AI/MCP Co-Design
 
-`pilot` is a single self-hosted binary serving beginners (1-command scripting) and systems architects alike, backed by **one shared incremental compiler database (`PilotDb`)** and **one declarative `[Command]` registry**:
+Target: `pilot` as a single self-hosted binary serving beginners (1-command scripting) and systems architects alike, backed by **one shared incremental compiler database (`PilotDb`)** and **one declarative `[Command]` registry**:
+
+Today `pilot help` lists the commands that exist. Of the commands below, `ship`, `doc`, `absorb`, `migrate` and `mcp` do not exist yet, and `check --fix` is the only flag of those shown that is built.
 
 | Command | Responsibility |
 | :--- | :--- |
@@ -223,5 +227,5 @@ Whenever starting a task on Pilot, align every design and code change against th
 6. **Zero Legacy Clutter:** When replacing an older mechanism or shim, did you delete the superseded legacy code in the same milestone?
 7. **Three Mandatory Gates:** Does the change pass:
    - *Gate 1 (Adaptability):* Zero hardcoded names + Universal Rename Litmus.
-   - *Gate 2 (Bootstrap):* Deterministic self-compilation parity + strict compile-speed budget.
+   - *Gate 2 (Bootstrap):* Deterministic self-compilation parity (compile speed is not gated; decided 2026-11-10).
    - *Gate 3 (Performance):* Zero unintended allocations + C/Rust-competitive runtime execution.

@@ -1,8 +1,14 @@
 // ============================================================================
 // FILE: stdlib/core/effects.pilot
-// Milestone 58.3: Transactional Copy-on-Write Effect Dry-Run Sandbox (`!?`)
-// Implements a multi-key CoW key-value store & transactional overlay sandbox
-// with tombstones, isolated reads, rollback, and atomic commit in pure Pilot.
+// Milestone 58.3: a standalone string key-value store with an overlay
+// "sandbox". It is NOT connected to `!?` / `plan` (those stop at the
+// vm.call_quote seam); nothing outside this file calls it.
+// The store and the sandbox are engine maps (`map_*` engine ops; about 43
+// `__engine` calls on the legacy ratchet). A sandbox records writes and
+// deletes (tombstones) over a base store without touching it; reads see the
+// sandbox first, then the base. Rollback clears the sandbox; commit copies
+// its entries into the store one key at a time. `ShadowEffectFrame` is a
+// separate single-`i64` version of the same idea.
 // ============================================================================
 
 pub struct ShadowEffectFrame {

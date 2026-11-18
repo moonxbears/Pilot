@@ -3,14 +3,14 @@
 //! The checker is Pilot. It needs the whole linked program as the parser
 //! produced it: the program's files in link order, then the core
 //! declarations the CLI names (`cli_checker_decls()` in
-//! selfhost/cli/commands.pilot), which give the types of literals, the
+//! selfhost/cli/host.pilot), which give the types of literals, the
 //! members of the primitives and the root interfaces. This module links those
 //! files into one arena and serves the checker a faithful snapshot of it
 //! through the host operation `chk_snapshot`:
 //!
 //! | index | content |
 //! | --- | --- |
-//! | 0 | nodes, `NODE_COLUMNS` integers each (see `node_row`) |
+//! | 0 | nodes, `NODE_COLUMNS` integers each (see `NODE_COLUMNS`) |
 //! | 1 | the extra-children list |
 //! | 2 | symbol strings, indexed by symbol id |
 //! | 3 | type parameters, `[owner node, name symbol]` each |
@@ -605,35 +605,6 @@ pub fn run_on_program(path: &str, tool_files: &[String], decls: &[String], entry
     };
     let ops: pilot_vm::HostOpHandler = Box::new(move |op, _| match op {
         "chk_snapshot" => Some(Ok(snap.clone())),
-        _ => None,
-    });
-    let tool_paths: Vec<&str> = tool_files.iter().map(String::as_str).collect();
-    tool::eval_cli(&tool_paths, entry, ops)
-}
-
-/// `run_on_program` for a tool that checks the program itself
-/// (`checked_program` in selfhost/check/main.pilot). The tool hands its
-/// diagnostic rows to the host operation `chk_report`; `report` is given
-/// those in the user's files and answers with the number of errors, which
-/// the tool is told.
-pub fn run_checked_on_program(
-    path: &str,
-    tool_files: &[String],
-    decls: &[String],
-    entry: &str,
-    mut report: impl FnMut(Vec<Diag>) -> i64 + 'static,
-) -> i32 {
-    let Some((linked, files, snap)) = program_snapshot(path, decls) else {
-        return run::EXIT_FAILURE;
-    };
-    let ops: pilot_vm::HostOpHandler = Box::new(move |op, args| match op {
-        "chk_snapshot" => Some(Ok(snap.clone())),
-        "chk_report" => {
-            let rows = args.first().cloned().unwrap_or(HostValue::Null);
-            Some(Ok(HostValue::Int(report(user_diags(
-                &linked, &files, &rows,
-            )))))
-        }
         _ => None,
     });
     let tool_paths: Vec<&str> = tool_files.iter().map(String::as_str).collect();

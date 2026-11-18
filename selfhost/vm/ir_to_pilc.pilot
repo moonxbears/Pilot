@@ -1,0 +1,166 @@
+// ==============================================================================
+// FILE: selfhost/vm/ir_to_pilc.pilot
+// PROP-005 5D: optimised PilIR -> `.pilc` bytecode for the seed VM.
+// ==============================================================================
+// `pilot compile <file> [-o out.pilc]` and `pilot run --via-ir <file>` run the
+// program through the same pipeline as `pilot ir run` (check, lower, the
+// default passes), then write it as bytecode the seed VM runs
+// (crates/pilot-vm), instead of interpreting the PilIR:
+//   - address 0 calls the start-up code (placed last), then falls into function
+//     0 (the start function), whose return value is the exit code; the other
+//     functions follow in order;
+//   - a function's parameters arrive in r1..rN and are copied to their
+//     registers (selfhost/vm/pilc_regs.pilot) before its first block;
+//   - each instruction is lowered by selfhost/vm/pilc_lower.pilot (scalars,
+//     calls, control flow, globals), pilc_aggregates.pilot (records and
+//     tuples) and pilc_closures.pilot (function values);
+//   - calls and jumps are patched once their targets are placed.
+// The `.pilc` carries a debug trailer naming the program's files and each
+// instruction's source offset (stdlib/pilot/vm/pilc.pilot); the seed's loader
+// does not read it yet, so a runtime error of a compiled program is reported
+// at `<program>` (PROP-005 5D Rust item 1).
+pub lvl(0) pkg selfhost.vm;
+
+use selfhost.check.*;
+use selfhost.ir.*;
+use pilot.vm.pilc;
+
+/// The image of module `m` (already verified and optimised); `files` and
+/// `bases` name the program's files and their first offsets.
+pub fn pilc_from_module(ref m: IrModule, ref files: List<str>, ref bases: List<i64>) -> PilcImage {
+    var e = PilcEmit {
+        m: m, img: pilc_image_new(), entry: [], call_pc: [], call_fn: [], global_names: [], arity: [],
+        fn_values: [], field_names_global: "", f: ir_function_new("", ir_physics_unit()),
+        alloc: PilcAlloc { reg: [], addr: [], target: [], peak: 0 }, block_pc: [], jump_pc: [], jump_block: [], span: ir_no_span(),
+    };
+    for g in m.globals { e.global_names.push(global_name(e.global_names, g.name)); }
+    for f in m.functions {
+        e.entry.push(-1);
+        e.arity.push(if f.blocks.len() > 0 { f.blocks[0].params.len() } else { 0 });
+    }
+    pilc_find_fn_values(e);
+    // Address 0 calls the start-up code (the field table, pilc_aggregates.pilot;
+    // the function-value table, pilc_closures.pilot), placed after every
+    // function and thunk, then falls into the start function.
+    let startup = pilc_emit(e.img, pilc_ins(VmOp::OpCall, PILC_SCRATCH, 0, 0, 0), ir_no_span());
+    var fi = 0;
+    while fi < m.functions.len() {
+        e.entry[fi] = pilc_here(e.img);
+        lower_function(e, fi);
+        fi = fi + 1;
+    }
+    let thunks = pilc_emit_thunks(e);
+    pilc_patch_wide(e.img, startup, pilc_here(e.img));
+    pilc_emit_field_names(e);
+    pilc_emit_fn_table(e, thunks);
+    let _ = pilc_emit(e.img, pilc_ins(VmOp::OpRet, 0, VM_CONST_REG, 0, pilc_const_null(e.img)), ir_no_span());
+    var k = 0;
+    while k < e.call_pc.len() {
+        pilc_patch_wide(e.img, e.call_pc[k], e.entry[e.call_fn[k]]);
+        k = k + 1;
+    }
+    for p in files { e.img.files.push(p); }
+    for b in bases { e.img.bases.push(b); }
+    return e.img;
+}
+
+/// The name the VM keeps global `name` under: its own, or with `#` and a
+/// number when an earlier global has it.
+fn global_name(ref taken: List<str>, name: str) -> str {
+    var out = name;
+    var n = 1;
+    var clash = true;
+    while clash {
+        clash = false;
+        for t in taken { if t == out { clash = true; } }
+        if clash {
+            out = f"{name}#{n}";
+            n = n + 1;
+        }
+    }
+    return out;
+}
+
+fn lower_function(var ref e: PilcEmit, fi: i64) {
+    let f = e.m.functions[fi];
+    e.f = f;
+    e.alloc = pilc_allocate(f);
+    e.block_pc = [];
+    e.jump_pc = [];
+    e.jump_block = [];
+    for b in f.blocks { e.block_pc.push(-1); }
+    if f.blocks.len() == 0 { return; }
+    // The parameters arrive in r1..rN.
+    e.span = ir_no_span();
+    var dsts: List<i64> = [];
+    var srcs: List<i64> = [];
+    var k = 0;
+    for p in f.blocks[0].params {
+        if e.alloc.reg[p as i64] >= 0 {
+            dsts.push(e.alloc.reg[p as i64]);
+            srcs.push(k + 1);
+        }
+        k = k + 1;
+    }
+    if k > VM_MAX_CALL_ARGS { seam("vm.call_args", f"`{f.name}` takes {k} parameters; the VM passes at most {VM_MAX_CALL_ARGS} in registers and passing more is not built"); }
+    put_parallel_move(e, dsts, srcs);
+    for b in f.blocks {
+        e.block_pc[b.id as i64] = pilc_here(e.img);
+        for inst in b.insts {
+            e.span = f.spans[inst.span_id as i64];
+            pilc_lower_inst(e, inst);
+        }
+    }
+    k = 0;
+    while k < e.jump_pc.len() {
+        pilc_patch_wide(e.img, e.jump_pc[k], e.block_pc[e.jump_block[k]]);
+        k = k + 1;
+    }
+}
+
+// ------------------------------------------------------------------------------
+// Entry points
+// ------------------------------------------------------------------------------
+
+/// The program's files and their first offsets in the linked program.
+fn program_files(ref s: Snap, var ref files: List<str>, var ref bases: List<i64>) {
+    for f in s.files {
+        files.push(f.0);
+        bases.push(f.2);
+    }
+}
+
+/// `pilot compile` / `pilot run --via-ir`: checks the program the host
+/// links, lowers and optimises it as `pilot ir run` does, and writes its
+/// bytecode to `out`. With `disasm`, prints the image's text instead of
+/// writing it. The exit code is 0 when written, 1 when the program has an
+/// error.
+pub fn pilc_main_checked(out: str, disasm: bool) -> i64 {
+    let s = snap_load();
+    guard some inf = checked_program(s) else { return 1; };
+    let m = lower_program_rooted(inf, false);
+    let issues = verify_ir_module(m);
+    if issues.len() > 0 {
+        for i in issues { eprint(f"error[{i.code}]: in `{i.function}`: {i.message}"); }
+        return 1;
+    }
+    let failed = run_passes(m, default_passes());
+    if failed.len() > 0 {
+        for i in failed { eprint(f"error[{i.code}]: in `{i.function}`: {i.message}"); }
+        return 1;
+    }
+    var files: List<str> = [];
+    var bases: List<i64> = [];
+    program_files(s, files, bases);
+    let img = pilc_from_module(m, files, bases);
+    if disasm {
+        for line in pilc_disasm(img) { print(line); }
+        return 0;
+    }
+    let bytes = pilc_bytes(img);
+    if !pilc_write(out, bytes) {
+        eprint(f"error: cannot write `{out}`");
+        return 1;
+    }
+    return 0;
+}

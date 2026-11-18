@@ -1,5 +1,7 @@
 # Audit: Milestones vs. Actual Project State
 
+> **Historical snapshot (2026-11-09).** Its counts, test numbers and findings describe the project on that date and are not kept current. For the current state read `docs/keyword_matrix.md`, `docs/concept_matrix.md` and `selfhost/gate/ledger/wiring.pilot`; for the plan, `docs/roadmap.md`.
+
 - **Date:** 2026-11-09
 - **Audited revision:** `d3565a8` (M30 commit) plus the uncommitted edits to `MILESTONES_100.md`
 - **Scope:** all of `MILESTONES_100.md` — M1–M30 (marked done) checked against the code; M31–M100 checked for feasibility from where the code actually is

@@ -3,7 +3,10 @@
 // Milestone 58.3: Pure-Pilot HTTP/1.1 Wire Client over Raw TCP Sockets
 // Implements URL parsing, HTTP/1.1 request framing, response header parsing,
 // case-insensitive header lookup, and chunked transfer-encoding decoding
-// directly over `tcp_connect`, `tcp_send`, `tcp_recv`, and `tcp_close`.
+// over `TcpSocket.connect`, `TcpSocket.send`, `TcpSocket.recv` and
+// `TcpSocket.close`. Each request reads the response with one `recv` of at
+// most 65536 bytes and then closes the socket, so a longer response is cut
+// off at 65536 bytes. No TLS; plain `http://` only.
 // ============================================================================
 
 use Pilot.Core.Env;

@@ -1,7 +1,7 @@
 // ==============================================================================
 // FILE: selfhost/adapter/py_stub.pilot
-// Milestone 17.1: Python .pyi Stub & Inspect Signature Parser
-// Name-Blind Type Physics, Optional Unions (X | None), Vectorcall Wrappers
+// Python .pyi stub and signature parser, including `X | None` optional unions.
+// Reached only by the milestone17 Rust test; no `pilot` command runs it.
 // ==============================================================================
 pub lvl(0) pkg selfhost.adapter;
 

@@ -1,14 +1,18 @@
 // ==============================================================================
 // FILE: selfhost/pilotc.pilot
-// Milestone 61.2 / F8: Self-Hosted Bootstrap Compiler Entry Points
+// Entry points of `pilotc`, the compiler built from `selfhost/` sources.
 // ==============================================================================
-// `pilotc` is the compiler written in Pilot. Its pipeline (lex -> parse ->
-// expand -> analyze -> lower to PilIR -> Perceus -> C11) does not exist yet:
-// the analyzer arrives in F4, PilIR in F5, the C11 backend and process spawn
-// in F6, ownership in F7, and the driver that builds compiler stages in F8.
-// Until then both entry points stop at registered seams
-// (`selfhost/gate/ledger/seams.pilot`), and the bootstrap parity gate reports
-// that it stops at `bootstrap.stage_compile`.
+// The pieces of the pipeline exist in Pilot: the checker (selfhost/check/),
+// lowering to typed PilIR (selfhost/ir/lower.pilot), Perceus
+// (selfhost/ir/pass_perceus.pilot) and C11 output (`pilot build`,
+// selfhost/cli/native_build.pilot through selfhost/transpile/c_family.pilot).
+// What is missing is the driver that builds a compiler stage from the
+// `selfhost/` sources with the previous stage. Both entry points here stop at
+// registered seams (`selfhost/gate/ledger/seams.pilot`): `pilotc.compile_c11`
+// and `bootstrap.stage_compile`; the bootstrap parity gate reports that it
+// stops at `bootstrap.stage_compile`.
+// Reached by the milestone01, milestone60 and milestone61 Rust tests; no
+// `pilot` command calls these functions.
 // ==============================================================================
 pub pkg selfhost;
 
@@ -22,18 +26,18 @@ pub enum CompilerBootstrapStage : u8 {
 }
 
 pub pure fn pilotc_version_banner() -> str {
-    return "pilotc (self-hosted compiler; pipeline not yet connected, see F4-F8)";
+    return "pilotc (self-hosted compiler; stage driver not built, see seam bootstrap.stage_compile)";
 }
 
 /// Compiles a whole Pilot program to standalone C11 source.
 pub fn pilotc_compile_source_to_c11(pilot_src: str) -> str {
     return seam("pilotc.compile_c11",
-        "no self-hosted pipeline lowers a Pilot program to C11 yet (analyzer F4, PilIR F5, C11 backend F6, driver F8)");
+        "pilotc is not connected to the checker, PilIR lowering and C11 emitter (selfhost/cli/native_build.pilot); the stage driver is missing (bootstrap.stage_compile)");
 }
 
 /// Builds the compiler of `stage` from the compiler sources `compiler_unit_src`
 /// with the compiler of the previous stage, and returns the built artifact.
 pub fn pilotc_bootstrap_stage_c11(stage: CompilerBootstrapStage, compiler_unit_src: str) -> str {
     return seam("bootstrap.stage_compile",
-        "building a compiler stage from selfhost/ needs the real self-hosted driver and C11 backend (F8)");
+        "no driver builds a compiler stage from the selfhost/ sources with the previous stage");
 }

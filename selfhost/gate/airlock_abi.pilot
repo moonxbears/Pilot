@@ -156,18 +156,39 @@ pub fn airlock_owner_files() -> Map<str, str> {
     return m;
 }
 
-/// Owners of Stage-A data ops (PROP-002b): `(native, owner, file)`. Each is a
-/// `priv static fn <m>_internal` marked `[EngineOp]` whose whole body is
+/// Owners of Stage-A natives that are not `HostOp`s: `(native, owner, file)`.
+/// The `Map` data ops (PROP-002b) and the CLI's tool services (`ToolHost`,
+/// PROP-038; they go with PROP-005 5E). Each is a `priv static fn
+/// <m>_internal` marked `[EngineOp]` whose whole body is
 /// `__engine("<native>", ..)`, called only by the type's public method `<m>`.
-/// Unlike a `HostOp`, the op may still appear outside its owner: about 1,900
-/// raw `__engine("map_*")` sites in legacy files wait for PROP-002b bucket B.
+/// Append-only while the native lives; a row goes when its native is deleted.
+/// Unlike a `HostOp`, a data op may still appear outside its owner: raw
+/// `__engine("map_*")` sites in legacy files wait for PROP-002b bucket B.
 pub fn airlock_native_owners() -> List<NativeOwnerRow> => [
     ("map_get",    "Map.get",    "stdlib/core/primitives/map.pilot"),
     ("map_set",    "Map.set",    "stdlib/core/primitives/map.pilot"),
     ("map_has",    "Map.has",    "stdlib/core/primitives/map.pilot"),
     ("map_keys",   "Map.keys",   "stdlib/core/primitives/map.pilot"),
     ("map_remove", "Map.remove", "stdlib/core/primitives/map.pilot"),
+    ("cli_check",        "ToolHost.check",        "selfhost/cli/host.pilot"),
+    ("cli_typecheck",    "ToolHost.typecheck",    "selfhost/cli/host.pilot"),
+    ("cli_program_tool", "ToolHost.program_tool", "selfhost/cli/host.pilot"),
+    ("cli_program_eval", "ToolHost.program_eval", "selfhost/cli/host.pilot"),
+    ("cli_run",          "ToolHost.run",          "selfhost/cli/host.pilot"),
+    ("cli_functions",    "ToolHost.functions",    "selfhost/cli/host.pilot"),
+    ("cli_tool",         "ToolHost.tool",         "selfhost/cli/host.pilot"),
+    ("cli_tool_on",      "ToolHost.tool_on",      "selfhost/cli/host.pilot"),
 ];
+
+/// How many `airlock_native_owners()` sites file `rel` holds: those are
+/// checked by owner (check 6), not by the legacy ratchet.
+pub fn native_owner_sites(rel: str) -> i64 {
+    var n = 0;
+    for row in airlock_native_owners() {
+        if row.2 == rel { n = n + 1; }
+    }
+    return n;
+}
 
 /// Check 6: each Stage-A data op's owner (`airlock_native_owners()`) exists
 /// with the op as its whole body, and only its public method calls it.
@@ -191,7 +212,8 @@ fn ab_check_native_owners(root: str, violations: i64) {
         let calls = ab_count_calls(src, meth + "_internal");
         let public = gm_find(src, f"{nameof(pub)} {nameof(fn)} {meth}(", 0);
         let public_pure = gm_find(src, f"{nameof(pub)} {nameof(pure)} {nameof(fn)} {meth}(", 0);
-        let ppos = if public >= 0 { public } else { public_pure };
+        let public_static = gm_find(src, f"{nameof(pub)} {nameof(static)} {nameof(fn)} {meth}(", 0);
+        let ppos = if public >= 0 { public } else if public_pure >= 0 { public_pure } else { public_static };
         let only = gm_find(src, f"{ty}.{meth}_internal(", 0);
         if calls != 1 || ppos < 0 || only < ppos || gm_find(src, ";", ppos) < only {
             let _ = glist_push(violations, ab_viol(file, owner, f"{owner}_internal must have exactly one caller, the public method `{meth}`; found {calls}"));

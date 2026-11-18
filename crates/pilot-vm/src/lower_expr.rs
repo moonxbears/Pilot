@@ -140,10 +140,6 @@ impl BytecodeCompiler {
             NodeKind::ImportDecl | NodeKind::ExcludeDecl | NodeKind::InterfaceDecl => {
                 self.emit_null()
             }
-            NodeKind::PolyglotBlock => self.error(
-                crate::codes::SEED,
-                "inline foreign-language blocks cannot run on the seed VM".to_string(),
-            ),
             NodeKind::ErrorNode => self.error(crate::codes::SYNTAX, "syntax error".to_string()),
             other => self.error(
                 crate::codes::SEED,

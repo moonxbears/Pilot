@@ -742,7 +742,7 @@ pub fn drop_planner(var ref inf: Infer) -> DropPlanner {
     let s = inf.p.s;
     let f = flow_new(inf, sink_new(s));
     // The moves before each assignment (moved_at); OWN001 is reported by
-    // check_program, not here.
+    // check_all (check_with_steps, selfhost/cli/comptime_tool.pilot), not here.
     walk_bodies(f);
     let pl = DropPlanner {
         flow: f, rows: [], glue: [], needs: Map<str, i64>(), cyclic: Map<str, bool>(), glued: Map<str, bool>(),

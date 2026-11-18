@@ -1,7 +1,7 @@
 // ==============================================================================
 // selfhost/adapter/wasm_runtime.pilot
-// Ring 3 / Self-Host Compiler: Capability-Sandboxed In-Process WASM 2.0 Runtime
-// Package: selfhost.adapter (Milestone 19)
+// In-process WASM runtime model: linear memory with bounds-checked loads and stores.
+// Reached only by the milestone19 Rust test; no `pilot` command runs it.
 // ==============================================================================
 
 pub lvl(0) pkg selfhost.adapter;

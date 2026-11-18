@@ -1,0 +1,12 @@
+// An instruction word holds an 8-bit opcode and registers and a 32-bit
+// operand (crates/pilot-vm instruction.rs): an operand of 2^32 cannot be
+// written, and building it stops with PILC001 instead of wrapping to 0.
+// Hand check: 4294967295 = 2^32 - 1 fits (prints its text), 4294967296 does not.
+use pilot.vm.pilc;
+
+fn main() {
+    let ok = pilc_ins(VmOp::OpJump, 0, 0, 0, 4294967295);
+    print(pilc_ins_text(ok));
+    let bad = pilc_ins(VmOp::OpJump, 0, 0, 0, 4294967296);
+    print(pilc_ins_text(bad));
+}

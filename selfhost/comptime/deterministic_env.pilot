@@ -1,8 +1,9 @@
 // ==============================================================================
 // FILE: selfhost/comptime/deterministic_env.pilot
-// Milestone 29: Capability-Sandboxed & Deterministic comptime Execution
+// Deterministic environment for comptime code.
 // Provides insertion-ordered deterministic map backing, virtualized monotonic
 // 0-epoch clock, content-seeded deterministic PRNG, and path normalization.
+// Reached only by the milestone29 Rust test; no `pilot` command runs it.
 // ==============================================================================
 
 pub lvl(0) pkg selfhost.comptime;

@@ -1,7 +1,8 @@
 // =========================================================================
 // FILE: selfhost/lsp/handlers.pilot
-// Milestone 59.1: Pilot-Native LSP Reflection, Hover, Completion,
-// Definition, References & Rename Handlers.
+// LSP request handlers: hover, completion, definition, references, rename.
+// `pilot lsp` has no handler (seam cli.command_handler).
+// Reached only by the milestone59 Rust test; no `pilot` command runs it.
 // =========================================================================
 pub pkg selfhost.lsp;
 
@@ -10,7 +11,7 @@ use Pilot.Core.Interfaces.*;
 
 let Cfg = { ast = {
     ast_attr_arg: "ast_attr_arg", ast_attr_count: "ast_attr_count", ast_child_at: "ast_child_at", ast_child_count: "ast_child_count",
-    ast_emit_diag: "ast_emit_diag", ast_get_bound_layout: "ast_get_bound_layout", ast_get_bound_target: "ast_get_bound_target", ast_node_count: "ast_node_count",
+    ast_get_bound_layout: "ast_get_bound_layout", ast_get_bound_target: "ast_get_bound_target", ast_node_count: "ast_node_count",
     ast_node_kind: "ast_node_kind", ast_node_sym: "ast_node_sym", ast_span_end: "ast_span_end", ast_span_start: "ast_span_start",
     layout_metrics: "layout_metrics", lsp_query_method: "lsp_query_method", lsp_query_offset: "lsp_query_offset", lsp_set_result: "lsp_set_result",
     mount_unit: "mount_unit", source_slice: "source_slice", sym_str: "sym_str",
@@ -626,7 +627,6 @@ pub fn handle_lsp_completion(offset: i64) {
             if (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || (ch >= "0" && ch <= "9") || ch == "_" { r_start = r_start - 1; } else { break; }
         }
         let recv_name = __engine(Cfg.ast.source_slice, r_start, r_end);
-        __engine(Cfg.ast.ast_emit_diag, 0, 1, "recv=" + recv_name);
 
         var s_id = -1;
         if recv_name == nameof(self) {

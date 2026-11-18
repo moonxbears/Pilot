@@ -1,7 +1,8 @@
 // =========================================================================
 // FILE: selfhost/pkg/version.pilot
-// Milestone 60.7: Semantic Versioning (SemVer 2.0) & Range Constraint Matcher
-// Pure Pilot Implementation conforming to the Strict Name-Blind Contract.
+// SemVer 2.0 version parsing and range matching.
+// Used by selfhost/cli/pkg_cmd.pilot and resolver.pilot, which only the
+// milestone03 Rust test reaches; `pilot pkg` has no handler.
 // =========================================================================
 pub pkg selfhost.pkg;
 

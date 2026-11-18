@@ -1,0 +1,42 @@
+// `recv?..step` on a present optional applies the step to the value it
+// holds, and a member read on the optional reads that value's member.
+// Worked by hand: maybe(true) holds Node { title: "", count: 0 };
+// `?..set_title("yes")` sets its title, `?..bump(4)` adds 4 to count; every
+// other field keeps its default:
+//   m.title = "yes", m.count = 0, m.flag = false
+//   k.title = "",    k.count = 4
+//   maybe(false) is none: `?..bump(1)` is skipped and the value stays none -> true
+// (PilIR once wrote the step into the optional's own first slot and read a
+// member by the member's slot in the optional, giving `true` for m.count;
+// its absence test was "is null", which an optional's none record never is.)
+struct Node {
+    title: str = "";
+    count: i64 = 0;
+    flag: bool = false;
+
+    fn set_title(t: str) {
+        .title = t;
+    }
+
+    fn bump(by: i64) {
+        .count = .count + by;
+    }
+}
+
+fn maybe(flag: bool) -> Node? {
+    if flag {
+        return Node();
+    }
+    return none;
+}
+
+fn main() {
+    let m = maybe(true)?..set_title("yes");
+    print(m.title);
+    print(m.count);
+    print(m.flag);
+    let k = maybe(true)?..bump(4);
+    print(f"[{k.title}] {k.count}");
+    let z = maybe(false)?..bump(1);
+    print(z == none);
+}

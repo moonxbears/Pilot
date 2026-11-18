@@ -54,8 +54,8 @@ impl Parser<'_> {
     }
 
     /// `= value` after a parameter: its default, which a call that leaves
-    /// the argument out is given. Only a literal is accepted for now, since
-    /// the call site, not the function, fills it in.
+    /// the argument out is given. Only a literal is accepted, because the
+    /// call site, not the function, fills it in (no proposal lifts this yet).
     pub(crate) fn param_default(&mut self) -> NodeId {
         if !self.at(TokenKind::Equal) {
             return NodeId::NONE;

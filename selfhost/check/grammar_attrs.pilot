@@ -32,32 +32,52 @@
 //            write its holes (owner direction 2026-11-16);
 //   SEAM001  circumfix, matchfix and mixfix other than indexing (`_[_]`,
 //            `_[_]=_`) are declared but no use site parses them yet.
-// GRAM001-GRAM004 (user operators that redefine or conflict) need the
-// table-driven lexer of PROP-008 step 2.
+// and, on the user's own operators (PROP-008 step 2):
+//   GRAM001  an operator attribute declares a symbol or readable word that
+//            is built in: declared outside the user's files (the standard
+//            library), or a symbol the seed's lexer table already reads as
+//            one token (stdlib/core/lex/seed_kinds.pilot);
+//   GRAM003  two of the user's operator attributes declare one symbol in
+//            one position (infix, prefix or postfix) with another level,
+//            associativity or shape;
+//   SEAM001  `grammar.user_ops_seed`: any other operator the user declares
+//            (by an attribute, or an `op` whose symbol the seed's lexer table
+//            has no token for). The seed lexes with the table built from the
+//            standard library's declarations and lowers only the operators
+//            the standard library declares, so such an operator cannot run.
+//   GRAM002  a new symbol would end inside a token of its declaring file
+//            (selfhost/check/grammar_lex.pilot).
+// GRAM004 (conflicting relative placements) waits for `tighter_than` /
+// `looser_than` placement (PROP-008 §5).
 pub lvl(0) pkg selfhost.check;
 
 // The 13 structural tokens and the 14 seed words are declared once, by
-// stdlib/core/lex/words.pilot.
+// stdlib/core/lex/words.pilot; the families the seed's lexer table holds,
+// by stdlib/core/lex/seed_kinds.pilot.
 use Pilot.Core.Lex.Words;
+use Pilot.Core.Lex.SeedKinds;
+use Pilot.Core.Lex.SeedForms;
 
 
 /// The operator attributes and, for each, the positions (after the target)
-/// of its explicit symbol and readable word (-1: it has none) and whether
-/// its shape is fixed to one operand.
+/// of its explicit symbol, readable word, shape, level and associativity
+/// (-1: it has none) and whether its shape is fixed to one operand.
 struct GrammarAttr : IValue {
     pub name:      str;
     pub symbol_at: i64;
     pub word_at:   i64;
     pub shape_at:  i64;
+    pub level_at:  i64;
+    pub assoc_at:  i64;
     pub unary:     bool;
 }
 
 fn grammar_attrs() -> List<GrammarAttr> => [
-    GrammarAttr { name: nameof(Infix),     symbol_at: 2, word_at: -1, shape_at: -1, unary: false },
-    GrammarAttr { name: nameof(InfixWord), symbol_at: 3, word_at: 0,  shape_at: -1, unary: false },
-    GrammarAttr { name: nameof(Prefix),    symbol_at: 1, word_at: 2,  shape_at: -1, unary: true },
-    GrammarAttr { name: nameof(Postfix),   symbol_at: 0, word_at: -1, shape_at: -1, unary: true },
-    GrammarAttr { name: nameof(Shaped),    symbol_at: 3, word_at: 4,  shape_at: 0,  unary: false },
+    GrammarAttr { name: nameof(Infix),     symbol_at: 2, word_at: -1, shape_at: -1, level_at: 0,  assoc_at: 1,  unary: false },
+    GrammarAttr { name: nameof(InfixWord), symbol_at: 3, word_at: 0,  shape_at: -1, level_at: 1,  assoc_at: 2,  unary: false },
+    GrammarAttr { name: nameof(Prefix),    symbol_at: 1, word_at: 2,  shape_at: -1, level_at: 0,  assoc_at: -1, unary: true },
+    GrammarAttr { name: nameof(Postfix),   symbol_at: 0, word_at: -1, shape_at: -1, level_at: -1, assoc_at: -1, unary: true },
+    GrammarAttr { name: nameof(Shaped),    symbol_at: 3, word_at: 4,  shape_at: 0,  level_at: 1,  assoc_at: 2,  unary: false },
 ];
 
 /// The shapes of `[Shaped]` that take one operand.
@@ -89,14 +109,14 @@ fn arg_text(ref s: Snap, a: i64) -> str {
 }
 
 /// Whether `d` is a `syntax` rule: a function whose body is a quote template.
-fn is_syntax_rule(ref s: Snap, d: i64) -> bool {
+pub fn is_syntax_rule(ref s: Snap, d: i64) -> bool {
     if kind(s, d) != nk_fn() { return false; }
     let body = fn_body(s, d);
     return body >= 0 && kind(s, body) == nk_quote();
 }
 
 /// The fixity an `op` symbol's holes give it (PROP-018 §1).
-enum Fixity : u8 {
+pub enum Fixity : u8 {
     Infix,
     Prefix,
     Postfix,
@@ -184,6 +204,23 @@ fn is_list_hole(pat: str, h: i64) -> bool {
     return i + 2 <= pat.len() && pat.slice(i, i + 2) == "..";
 }
 
+/// The fixity holes `holes` (at least one) give the `op` symbol `pat`.
+fn fixity_of(pat: str, ref holes: List<i64>) -> Fixity {
+    let bare = strip_holes(pat);
+    let n = holes.len();
+    let first = holes[0] == 0;
+    let last = holes[n - 1] == pat.len() - 1;
+    var list = false;
+    for h in holes { if is_list_hole(pat, h) { list = true; } }
+    return if list { Fixity::Matchfix }
+        else if bare == "[]" || bare == "[]=" { Fixity::Index }
+        else if n == 2 && first && last { Fixity::Infix }
+        else if n == 1 && last { Fixity::Prefix }
+        else if n == 1 && first { Fixity::Postfix }
+        else if n == 1 { Fixity::Circumfix }
+        else { Fixity::Mixfix };
+}
+
 fn params_text(n: i64) -> str => if n == 1 { "1 parameter" } else { f"{n} parameters" };
 fn operands_text(n: i64) -> str => if n == 1 { "1 operand" } else { f"{n} operands" };
 
@@ -225,17 +262,7 @@ fn check_holes(ref p: Program, var ref sink: DiagSink, d: i64, shape_reported: b
         return;
     }
     let n = holes.len();
-    let first = holes[0] == 0;
-    let last = holes[n - 1] == pat.len() - 1;
-    var list = false;
-    for h in holes { if is_list_hole(pat, h) { list = true; } }
-    let fix = if list { Fixity::Matchfix }
-        else if bare == "[]" || bare == "[]=" { Fixity::Index }
-        else if n == 2 && first && last { Fixity::Infix }
-        else if n == 1 && last { Fixity::Prefix }
-        else if n == 1 && first { Fixity::Postfix }
-        else if n == 1 { Fixity::Circumfix }
-        else { Fixity::Mixfix };
+    let fix = fixity_of(pat, holes);
     // An `op` takes its first operand as `self`; a matchfix `op` takes its
     // list as its one parameter.
     let params = fn_params(s, d).len();
@@ -307,10 +334,17 @@ fn check_decl(ref p: Program, var ref sink: DiagSink, d: i64) -> bool {
     return shape_reported;
 }
 
-/// GRAM005-GRAM009 and the operator shape seams over the user's files.
+/// GRAM001, GRAM003, GRAM005-GRAM009 and the operator seams over the
+/// user's files.
 pub fn check_grammar_attrs(ref inf: Infer, var ref sink: DiagSink) {
     let p = inf.p;
     let s = p.s;
+    var claims: List<GrammarClaim> = [];
+    // The symbols the seed's table has no family for (GRAM002).
+    var news: List<NewSymbol> = [];
+    // The library's spellings, read once and only when a declaration needs them.
+    var library = Map<str, bool>();
+    var have_library = false;
     var d = s.user_lo;
     while d < s.user_hi {
         if in_user_file(s, d) {
@@ -318,9 +352,190 @@ pub fn check_grammar_attrs(ref inf: Infer, var ref sink: DiagSink) {
             if k == nk_operator() || k == nk_fn() || k == nk_struct() || k == nk_interface() || k == nk_adt() || k == nk_const() {
                 let shape_reported = check_decl(p, sink, d);
                 if k == nk_operator() { check_holes(p, sink, d, shape_reported); }
+                if k == nk_operator() || is_syntax_rule(s, d) {
+                    let mine = claims_of(p, d);
+                    if mine.len() == 0 && k == nk_operator() {
+                        let sym = unclaimed_symbol(s, d);
+                        if sym.len() > 0 && !seed_lexes(sym) {
+                            if !have_library { library = library_spellings(p); have_library = true; }
+                            if !library.has(sym) {
+                                report_user_op_seam(s, sink, d, sym, NOT_ONE_TOKEN);
+                                add_new_symbol(s, news, sym, d);
+                            }
+                        }
+                    }
+                    for c in mine { claims.push(c); }
+                }
             }
         }
         d = d + 1;
+    }
+    if claims.len() > 0 {
+        if !have_library { library = library_spellings(p); }
+        check_claims(p, sink, claims, library, news);
+    }
+    if news.len() > 0 { check_new_symbols(s, sink, news); }
+}
+
+/// One operator a grammar attribute declares: its symbol and readable word,
+/// where it stands, its level, associativity and shape as written, and the
+/// declaration and attribute that declare it.
+pub struct GrammarClaim : IValue {
+    pub symbol: str;
+    pub word:   str;
+    pub place:  Fixity;
+    pub level:  str;
+    pub assoc:  str;
+    pub shape:  str;
+    pub decl:   i64;
+    pub attr:   str;
+}
+
+/// The text of argument `at` of `args`, or "" when it is not given.
+fn arg_at(ref s: Snap, ref args: List<i64>, at: i64) -> str => if at >= 0 && at < args.len() { arg_text(s, args[at]) } else { "" };
+
+/// The operators the grammar attributes on `d` declare.
+pub fn claims_of(ref p: Program, d: i64) -> List<GrammarClaim> {
+    let s = p.s;
+    var out: List<GrammarClaim> = [];
+    if nl_get(p.attrs, f"{d}").len() == 0 { return out; }
+    let is_op = kind(s, d) == nk_operator();
+    let pat = if is_op { op_pattern(s, d) } else { "" };
+    let name = if is_op && pat.len() > 0 { strip_holes(pat) } else { node_name(s, d) };
+    for ga in grammar_attrs() {
+        guard some args = prog_attr_nodes(p, d, ga.name) else { continue; }
+        let symbol = arg_at(s, args, ga.symbol_at);
+        let shape = if ga.shape_at >= 0 { arg_at(s, args, ga.shape_at) } else { ga.name };
+        let place = if ga.name == nameof(Prefix) || shape == nameof(Prefix) { Fixity::Prefix }
+            else if ga.name == nameof(Postfix) || shape == nameof(Postfix) { Fixity::Postfix }
+            else { Fixity::Infix };
+        out.push(GrammarClaim {
+            symbol: if symbol.len() > 0 { symbol } else { name },
+            word: arg_at(s, args, ga.word_at),
+            place: place,
+            level: arg_at(s, args, ga.level_at),
+            assoc: arg_at(s, args, ga.assoc_at),
+            shape: shape,
+            decl: d,
+            attr: ga.name,
+        });
+    }
+    return out;
+}
+
+/// The operator symbols and readable words that declarations outside the
+/// user's files declare: the pieces of every `op` symbol and the symbol and
+/// word of every grammar attribute.
+fn library_spellings(ref p: Program) -> Map<str, bool> {
+    let s = p.s;
+    var out = Map<str, bool>();
+    var d = 0;
+    while d < s.count {
+        let is_op = kind(s, d) == nk_operator();
+        if !in_user_file(s, d) && (is_op || is_syntax_rule(s, d)) {
+            if is_op {
+                for piece in op_pieces(op_pattern(s, d)) { out.set(piece, true); }
+            }
+            for c in claims_of(p, d) {
+                out.set(c.symbol, true);
+                if c.word.len() > 0 { out.set(c.word, true); }
+            }
+        }
+        d = d + 1;
+    }
+    return out;
+}
+
+/// Whether the seed lexes `sym` as one token without the user's files: a
+/// family seed_kinds.pilot names, or one of the seed's own forms
+/// (seed_forms.pilot). A spelling only the generic `SEED_OPERATOR_KIND`
+/// would take is not one: the table lexes only the declared symbols.
+fn seed_lexes(sym: str) -> bool {
+    for f in SEED_FORM_SPELLINGS {
+        if f == sym { return true; }
+    }
+    guard some e = seed_kind_of(sym) else { return false; }
+    return e.emit == SeedEmit::Token && e.kind != SEED_OPERATOR_KIND;
+}
+
+/// Whether `sym` is built in: declared outside the user's files, or a
+/// symbol the seed's lexer table already reads as one token (a declared
+/// operator, or one of the seed's own forms, stdlib/core/lex/seed_forms.pilot).
+fn is_builtin_spelling(ref library: Map<str, bool>, sym: str) -> bool =>
+    library.has(sym) || (!is_word_text(sym) && seed_lexes(sym));
+
+/// Whether `sym` is a word (`and`): a word lexes as a name, not an operator.
+fn is_word_text(sym: str) -> bool {
+    var i = 0;
+    while i < sym.len() {
+        if !is_word_byte(sym.byte_at(i) as i64) { return false; }
+        i = i + 1;
+    }
+    return sym.len() > 0;
+}
+
+/// The seam an operator of the user stops at on the seed.
+fn report_user_op_seam(ref s: Snap, var ref sink: DiagSink, d: i64, sym: str, why: str) {
+    let what = if kind(s, d) == nk_operator() { nameof(op) + " " + op_pattern(s, d) } else { node_name(s, d) };
+    sink_error(sink, d, "SEAM001",
+        f"unconnected seam `grammar.user_ops_seed`: `{what}` declares the operator `{sym}`, which {why} (proposals.md PROP-008 step 2)");
+}
+
+/// Why the seed cannot read a symbol it has no token for.
+const NOT_ONE_TOKEN: str = "the seed cannot read as one token: it lexes with the table built from the standard library's declarations (stdlib/core/lex/toolchain.lex)";
+
+/// The symbol of an infix, prefix or postfix `op` with no grammar
+/// attribute that the seed's table must lex as one token, or "" when it
+/// needs none (a structural symbol, a word, another shape). The table lexes
+/// it when `seed_lexes` or the library declares it; otherwise the
+/// declaration stops at the seam.
+fn unclaimed_symbol(ref s: Snap, d: i64) -> str {
+    let pat = op_pattern(s, d);
+    let holes = hole_positions(pat);
+    if holes.len() > 0 {
+        let fix = fixity_of(pat, holes);
+        if fix != Fixity::Infix && fix != Fixity::Prefix && fix != Fixity::Postfix { return ""; }
+    }
+    let sym = strip_holes(pat);
+    if sym.len() == 0 || is_structural_symbol(sym) || is_word_text(sym) { return ""; }
+    return sym;
+}
+
+/// GRAM001, GRAM003 and the seam on the operators the user's attributes
+/// declare, in declaration order.
+fn check_claims(ref p: Program, var ref sink: DiagSink, ref claims: List<GrammarClaim>, ref library: Map<str, bool>, var ref news: List<NewSymbol>) {
+    let s = p.s;
+    var seamed = Map<str, bool>();
+    var i = 0;
+    while i < claims.len() {
+        let c = claims[i];
+        i = i + 1;
+        // GRAM005 already reported a structural symbol or word.
+        if is_structural_symbol(c.symbol) || (c.word.len() > 0 && is_structural_symbol(c.word)) { continue; }
+        let taken = if is_builtin_spelling(library, c.symbol) { c.symbol } else if c.word.len() > 0 && library.has(c.word) { c.word } else { "" };
+        if taken.len() > 0 {
+            sink_error(sink, c.decl, "GRAM001", f"`[{c.attr}]` declares `{taken}`, which is already a built-in operator symbol or readable word; a program declares new operators and cannot redefine one");
+            continue;
+        }
+        // The first declaration of the symbol in this position places it;
+        // each later one must agree with it.
+        var j = 0;
+        while j < i - 1 {
+            let e = claims[j];
+            j = j + 1;
+            if e.symbol != c.symbol || e.place != c.place { continue; }
+            if e.level != c.level || e.assoc != c.assoc || e.shape != c.shape {
+                sink_error(sink, c.decl, "GRAM003", f"`[{c.attr}]` declares the {fixity_text(c.place)} operator `{c.symbol}` at `{c.level}` `{c.assoc}`, but its first declaration gives it `{e.level}` `{e.assoc}` (`[{e.attr}]`); one symbol has one level, associativity and shape in each position");
+            }
+            break;
+        }
+        let key = f"{c.decl}";
+        if seamed.has(key) { continue; }
+        seamed.set(key, true);
+        let new_symbol = !is_word_text(c.symbol) && !seed_lexes(c.symbol);
+        if new_symbol { add_new_symbol(s, news, c.symbol, c.decl); }
+        let why = if new_symbol { NOT_ONE_TOKEN } else { "the seed cannot lower: it lowers only the operators the standard library declares" };
+        report_user_op_seam(s, sink, c.decl, c.symbol, why);
     }
 }
 
@@ -338,24 +553,7 @@ pub fn declared_operator_symbols(ref p: Program) -> List<str> {
     while d < s.count {
         let is_op = kind(s, d) == nk_operator();
         if is_op {
-            let pat = op_pattern(s, d);
-            var last = 0;
-            var cuts = hole_positions(pat);
-            cuts.push(pat.len());
-            for h in cuts {
-                // The text between two holes may hold several pieces
-                // (`_, ..|>`), separated by spaces.
-                var start = last;
-                var i = last;
-                while i <= h {
-                    if i == h || pat.byte_at(i) == 32 {
-                        add_operator_symbol(out, seen, pat.slice(start, i));
-                        start = i + 1;
-                    }
-                    i = i + 1;
-                }
-                last = h + 1;
-            }
+            for piece in op_pieces(op_pattern(s, d)) { add_operator_symbol(out, seen, piece); }
         }
         if is_op || is_syntax_rule(s, d) {
             for ga in grammar_attrs() {
@@ -366,6 +564,29 @@ pub fn declared_operator_symbols(ref p: Program) -> List<str> {
             }
         }
         d = d + 1;
+    }
+    return out;
+}
+
+/// The pieces of `op` symbol `pat`: the text between its holes, split at
+/// spaces (`_, ..|>` holds several), each trimmed and not empty.
+fn op_pieces(pat: str) -> List<str> {
+    var out: List<str> = [];
+    var last = 0;
+    var cuts = hole_positions(pat);
+    cuts.push(pat.len());
+    for h in cuts {
+        var start = last;
+        var i = last;
+        while i <= h {
+            if i == h || pat.byte_at(i) == 32 {
+                let piece = pat.slice(start, i).trim();
+                if piece.len() > 0 { out.push(piece); }
+                start = i + 1;
+            }
+            i = i + 1;
+        }
+        last = h + 1;
     }
     return out;
 }

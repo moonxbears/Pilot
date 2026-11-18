@@ -1,6 +1,7 @@
 // ==============================================================================
 // FILE: selfhost/chor/verifier.pilot
-// Milestone 24: .pchor Sublanguage Choreographer - Verifier
+// .pchor blueprint verifier. Reached only by the milestone24 Rust test; no
+// `pilot` command runs it.
 // Enforces:
 //   CHOR001: 2-Bit Cue Boundary Law (0b01/0b11 or non-iso 0b10 forbidden across cues)
 //   CHOR002: Role Unauthorized Storage Read/Write Access

@@ -43,9 +43,6 @@ fn source_map(ref s: Snap) -> IrSourceMap {
     return map;
 }
 
-/// The text of the file the host runs this tool on (`tool::run_on_text`).
-fn input_text() -> str => __engine("tool_input_text");
-
 /// `pilot ir <mode> <program>.pilot [-- args..]`; a run gives the program
 /// `args` as its script arguments.
 pub fn ir_main(mode: str, args: List<str>) -> i64 {
@@ -64,9 +61,9 @@ pub fn ir_main_checked(mode: str, args: List<str>) -> i64 {
     return 1;
 }
 
-/// `pilot ir <mode> <file>.pir`.
-pub fn ir_text_main(mode: str) -> i64 {
-    let text = input_text();
+/// `pilot ir <mode> <file>.pir`: reads the PilIR text at `path`.
+pub fn ir_text_main(mode: str, path: str) -> i64 {
+    let text = File.read_text(path);
     try {
         let m = parse_ir_module(text)?;
         return finish(m, mode, text, ir_source_map_empty(), []);

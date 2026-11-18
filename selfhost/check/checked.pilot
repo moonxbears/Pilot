@@ -1,0 +1,90 @@
+// ==============================================================================
+// FILE: selfhost/check/checked.pilot
+// The checker run inside a tool that goes on to use the program (`pilot ir`,
+// `pilot emit`, `pilot compile`), reporting its own diagnostics.
+// ==============================================================================
+// The tool's diagnostics are printed here, as `pilot check` prints them
+// (selfhost/cli/report.pilot): each row is placed in its file through the
+// snapshot's file table, rows outside the user's files are dropped, the rest
+// go in source order, and errors and warnings are rendered (info and hint
+// notes are not). Linked only by those tools (`cli_ir_files` in
+// selfhost/cli/commands.pilot), with the renderer.
+pub lvl(0) pkg selfhost.check;
+
+use selfhost.diagnostics.*;
+
+/// One diagnostic placed in its file: offsets are the file's own.
+struct PlacedDiag : IValue {
+    pub code: str;
+    pub message: str;
+    pub file: str;
+    pub text_at: i64;
+    pub start: i64;
+    pub end: i64;
+    pub severity: u8;
+}
+
+/// The index in `s.files` of the file holding linked offset `at`, or -1.
+fn file_at(ref s: Snap, at: i64) -> i64 {
+    var found = -1;
+    var i = 0;
+    while i < s.files.len() {
+        let f = s.files[i];
+        if f.2 <= at && at <= f.2 + f.3.len() { found = i; }
+        i = i + 1;
+    }
+    return found;
+}
+
+fn placed_before(a: PlacedDiag, b: PlacedDiag) -> bool =>
+    a.file < b.file || (a.file == b.file && a.start < b.start);
+
+/// The rows of `rows` in the user's files, placed in them and in source
+/// order (by file, then start; stable for equal places).
+fn placed_rows(ref s: Snap, ref rows: List<DiagRow>) -> List<PlacedDiag> {
+    var out: List<PlacedDiag> = [];
+    for r in rows {
+        let fi = file_at(s, r.2);
+        if fi < 0 { continue; }
+        let f = s.files[fi];
+        if !f.1 { continue; }
+        let sev = if r.4 < 1 { 1 } else if r.4 > 4 { 4 } else { r.4 };
+        let d = PlacedDiag { code: r.0, message: r.1, file: f.0, text_at: fi, start: r.2 - f.2, end: r.3 - f.2, severity: sev as u8 };
+        out.push(d);
+        var at = out.len() - 1;
+        while at > 0 && placed_before(d, out[at - 1]) {
+            out[at] = out[at - 1];
+            at = at - 1;
+        }
+        out[at] = d;
+    }
+    return out;
+}
+
+/// Prints the errors and warnings of `rows` to stderr, as `pilot check`
+/// does, and returns how many are errors.
+pub fn report_rows(ref s: Snap, ref rows: List<DiagRow>) -> i64 {
+    var errors = 0;
+    for d in placed_rows(s, rows) {
+        if d.severity > diag_severity_warning() { continue; }
+        // A span that covers nothing is shown as one column.
+        let end = if d.end > d.start { d.end } else { d.start + 1 };
+        let diag = diagnostic_new(d.code, d.severity, d.message, source_span_new(0, d.start as u32, end as u32));
+        eprint(render_diagnostic_human(diag, s.files[d.text_at].3, d.file, false));
+        if d.severity == diag_severity_error() { errors = errors + 1; }
+    }
+    return errors;
+}
+
+/// The program of snapshot `s`, resolved, inferred and checked, for a tool
+/// that goes on to use it: the checker's work is done once, not once to
+/// check and again to lower. Its diagnostics are printed here; a program
+/// with an error gives none.
+pub fn checked_program(ref s: Snap) -> Infer? {
+    let sink = sink_new(s);
+    let p = prog_new(s);
+    let inf = infer_new(p, resolve_program(p, sink));
+    check_all(inf, sink);
+    if report_rows(s, sink.rows) > 0 { return none; }
+    return inf;
+}

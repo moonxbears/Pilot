@@ -1,0 +1,14 @@
+// The owner's score ledger (tools/score/sc/owner.pilot explains it).
+// Add entries with: pilot run tools/score/main.pilot -- --adjust <points> "<reason>" [--for <what>]
+// Only the owner adds entries; entries are never edited or removed.
+pkg sc.adjustments;
+
+pub struct Adjustment {
+    pub points: i64;
+    pub date: str;
+    pub reason: str;
+    pub applies_to: str;
+}
+
+pub const OWNER_ADJUSTMENTS: List<Adjustment> = [
+];

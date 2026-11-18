@@ -1,9 +1,8 @@
 // ==============================================================================
 // FILE: selfhost/syntax/hygiene_marks.pilot
-// Milestone 27: Scoped User Sublanguage Builder - Scopes-As-Sets Hygiene Renamer
-// Full Flatt Scopes-As-Sets hygienic macro resolution engine.
-// Guarantees macro-introduced bindings never shadow caller locals, with
-// explicit unhygienic($ident) opt-in for anaphoric bindings.
+// Hygienic renaming for macro expansion (scopes as sets): bindings a macro
+// introduces do not shadow caller locals; `unhygienic($ident)` opts out.
+// Reached only by the milestone27 Rust test; no `pilot` command runs it.
 // Enforces:
 //   SYN006: Hygiene Violation Audit Hint When Inspecting Captures
 // ==============================================================================

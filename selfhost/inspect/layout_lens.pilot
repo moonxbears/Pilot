@@ -1,8 +1,8 @@
 // ==============================================================================
 // FILE: selfhost/inspect/layout_lens.pilot
-// Milestone 7.1: Zero-Black-Box Inspection Layout Lens
-// Visual ASCII/Box Byte-Offset Diagrams, 64B Cache Line Crossings, Padding Holes,
-// Niche Bit Patterns, 2-Bit Lattice Derivation Tree
+// `pilot inspect` layout lens text: byte offsets, cache-line crossings, padding,
+// niches, lattice bits. `pilot inspect` has no handler (seam cli.command_handler).
+// Reached only by the milestone07 Rust test; no `pilot` command runs it.
 // ==============================================================================
 pub lvl(0) pkg selfhost.inspect;
 

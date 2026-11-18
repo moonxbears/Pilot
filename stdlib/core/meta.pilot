@@ -1,10 +1,12 @@
 // =========================================================================
 // FILE: stdlib/core/meta.pilot
-// STAGE 4 SELF-GENESIS (100% PILOT-HOSTED):
+// STAGE 4 SELF-GENESIS (Pilot source, no `__engine` calls):
 //   • 7-Pillar `[...]` Attribute Interfaces & `quote` Weavers
-//   • `.pchor` Choreography Macros & 2-Bit Lattice Cue Verifier
-//   • `state` Typestate & `where` Refinement Macros
+//   • `.pchor` cue payload check (verify_cue_payload, a comptime lattice
+//     test; nothing outside this file calls it yet)
 //   • Deferred `partial struct` Math & Bitwise Facets
+//   • Function cloning & patching; IDE semantic classifier
+// This file holds no `state` typestate or `where` refinement macros.
 // =========================================================================
 [EnforceCoreNaming]
 pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Meta;
@@ -224,9 +226,9 @@ pub struct {
 }
 
 // =========================================================================
-// 3. PILOT-HOSTED `.pchor` CUE VERIFIER & `state` TYPESTATE MACROS
+// 3. PILOT-HOSTED `.pchor` CUE PAYLOAD CHECK
 // =========================================================================
-// Enforces the 2-Bit Lattice Cue Boundary Law 100% in Pilot:
+// The 2-Bit Lattice Cue Boundary Law as a comptime check (no caller yet):
 // Only `0b00` (`IValue`) or `iso`-qualified `0b10` (`IObject`) may cross a cue!
 pub comptime fn verify_cue_payload<TPayload: IAnyValue>(is_iso_qualified: bool) {
     let bits = lattice_bits_of(TPayload);

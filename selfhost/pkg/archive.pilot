@@ -1,6 +1,7 @@
 // =========================================================================
 // FILE: selfhost/pkg/archive.pilot
-// Milestone 60.1: .pilpkg Deterministic Package Archive Header & Entry Codec
+// .pilpkg archive header and entry encoding.
+// Reached only by the milestone60 Rust test; no `pilot` command runs it.
 // =========================================================================
 pub pkg selfhost.pkg;
 

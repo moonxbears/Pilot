@@ -1,8 +1,10 @@
 // ==============================================================================
 // FILE: selfhost/chor/storage_plan.pilot
-// Milestone 25: .pchor Storage & Memory Layout Choreography - Storage Planner
+// .pchor storage planner.
 // Computes physical column splits, 64-byte SIMD cache-line alignment padding,
 // nested struct flattening, bit-packed bool/enum planes, and Perceus drop masks.
+// Reached only by the milestone25 Rust test (directly and through
+// selfhost/ir/pass_soa_rewrite.pilot); no `pilot` command runs it.
 // ==============================================================================
 
 pub lvl(0) pkg selfhost.chor;

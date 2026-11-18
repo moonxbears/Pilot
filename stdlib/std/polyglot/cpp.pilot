@@ -2,7 +2,8 @@
 // FILE: stdlib/std/polyglot/cpp.pilot
 // Milestone 15.4: Native C++ Class, RAII, Vtable & Exception Boundary Adapter
 // CppException (0b00 : IValue), CppStringView (0b01), CppSpan<T> (0b01)
-// Zero-Crash C++ Exception Landing-Pad Boundary
+// Records only. The 2 runtime steps are seams: cpp.catch_boundary (calling
+// a C++ function and catching its exception) and cpp.string_view_from_str.
 // ==============================================================================
 pub pkg std.polyglot.cpp;
 

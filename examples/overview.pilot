@@ -7,6 +7,8 @@
 //  - Asynchronous & Multi-Threaded Concurrency
 //  - Soft Real-Time vs. Hard Real-Time (`[HardRealtime]`, `noalloc`)
 //  - Homoiconic `syntax` Rules & 6 Call-Quoting Projections
+// Status (2026-11-18): `pilot check` stops at seam `keyword.unbuilt` (`unit`
+// and other declarations here are not built yet); see docs/keyword_matrix.md.
 // =============================================================================
 
 // --- 1. Dimensional Units of Measure ---

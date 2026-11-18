@@ -1,7 +1,7 @@
 // ==============================================================================
 // selfhost/adapter/absorb_sql.pilot
-// Ring 3 / Self-Host Compiler: Live Schema & Wire Protocol DDL Absorber (`use sql`)
-// Package: selfhost.adapter (Milestone 20)
+// SQL DDL schema absorber for `use sql` (also used by absorb_proto.pilot).
+// Reached only by the milestone20 Rust test; no `pilot` command runs it.
 // ==============================================================================
 
 pub lvl(0) pkg selfhost.adapter;

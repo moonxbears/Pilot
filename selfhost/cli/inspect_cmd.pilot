@@ -35,12 +35,13 @@ pub fn inspect_parse_lenses(lens_flags: str) -> u32 {
     return bits;
 }
 
-// Parses the selector and the lens flags, then hands the query to the
-// type-checked program, which does not exist yet: the lenses render facts
-// (woven statements, field offsets, MethodTable winners, Perceus events)
-// that only a checked unit can supply.
+// Parses the selector and the lens flags, then stops at the seam
+// `inspect.resolve_target`: the checker (selfhost/check/) exists, but nothing
+// resolves a selector against a checked program to supply the facts the
+// lenses render (woven statements, field offsets, MethodTable winners,
+// Perceus events).
 pub fn inspect_run(selector_str: str, lens_flags: str) -> str {
     let q = parse_inspect_selector(selector_str);
     let lenses = inspect_parse_lenses(lens_flags);
-    return seam("inspect.resolve_target", "resolving a selector against a type-checked PilotDb unit arrives in F4");
+    return seam("inspect.resolve_target", "nothing resolves an inspect selector against a checked program");
 }

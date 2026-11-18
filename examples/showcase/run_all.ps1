@@ -1,28 +1,14 @@
-# Runner script for all Pilot Concept Showcases (Windows / PowerShell)
-$ErrorActionPreference = "Stop"
-
-Write-Host "==========================================================" -ForegroundColor Cyan
-Write-Host "         PILOT INTERACTIVE CONCEPT SHOWCASE RUNNER        " -ForegroundColor Cyan
-Write-Host "==========================================================" -ForegroundColor Cyan
-
-$PilotBin = Join-Path $PSScriptRoot "..\..\target\release\pilot.exe"
-if (-not (Test-Path $PilotBin)) {
-    $PilotBin = Join-Path $PSScriptRoot "..\..\target\debug\pilot.exe"
+# Checks every showcase with `pilot check` (see run_all.sh for the rules).
+$dir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$pilot = if ($env:PILOT_BIN) { $env:PILOT_BIN } else { Join-Path $dir "..\..\target\debug\pilot" }
+if (-not (Test-Path $pilot)) { $pilot = "pilot" }
+$passed = 0; $seams = 0; $failed = 0
+foreach ($script in Get-ChildItem -Path $dir -Filter *.pilot | Sort-Object Name) {
+    $out = & $pilot check $script.FullName 2>&1 | Out-String
+    $errors = ($out -split "`n") | Where-Object { $_ -match 'error\[' }
+    if ($LASTEXITCODE -eq 0) { Write-Host "ok      $($script.Name)"; $passed++ }
+    elseif ($errors -and -not ($errors | Where-Object { $_ -notmatch 'SEAM001' })) { Write-Host "seam    $($script.Name)"; $seams++ }
+    else { Write-Host "FAIL    $($script.Name)"; $failed++ }
 }
-if (-not (Test-Path $PilotBin)) {
-    $PilotBin = "pilot"
-}
-
-$scripts = Get-ChildItem -Path $PSScriptRoot -Filter "*.pilot" | Sort-Object Name
-
-foreach ($script in $scripts) {
-    Write-Host "`n>>> CHECKING: $($script.Name) <<<" -ForegroundColor Yellow
-    $out = & $PilotBin check $script.FullName
-    Write-Host $out
-    if ($out -notmatch ": 0 diagnostics") {
-        throw "ERROR: $($script.Name) reported non-zero diagnostics!"
-    }
-    Write-Host "----------------------------------------------------------" -ForegroundColor DarkGray
-}
-
-Write-Host "`nAll $($scripts.Count) Concept Showcases verified with 0 diagnostics!`n" -ForegroundColor Green
+Write-Host "$passed passed, $seams stopped at a seam, $failed failed"
+if ($failed -gt 0) { exit 1 }

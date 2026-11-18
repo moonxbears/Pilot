@@ -29,9 +29,23 @@ pub fn cli_gate_files() -> List<str> => [
     "stdlib/crypto/hash.pilot",
     "stdlib/std/proc.pilot",
     "stdlib/std/text.pilot",
-    "selfhost/lexer.pilot",
-    "selfhost/ast.pilot",
-    "selfhost/parser.pilot",
+    "stdlib/core/lex/words.pilot",
+    "stdlib/core/lex/patterns.pilot",
+    "stdlib/core/float_bits.pilot",
+    "stdlib/core/convert/limbs.pilot",
+    "stdlib/core/convert/decimal_round.pilot",
+    "stdlib/core/lex/numbers.pilot",
+    "stdlib/core/lex/strings.pilot",
+    "stdlib/core/lex/seed_kinds.pilot",
+    "stdlib/core/lex/seed_forms.pilot",
+    "stdlib/core/lex/literal_value.pilot",
+    "stdlib/core/lex/utf8.pilot",
+    "stdlib/pilot/lex/build.pilot",
+    "stdlib/core/generator.pilot",
+    "stdlib/pilot/lex/modes.pilot",
+    "stdlib/pilot/lex/cache.pilot",
+    "stdlib/pilot/lex/seed.pilot",
+    "stdlib/pilot/parse/tape.pilot",
     "selfhost/pilotc.pilot",
     "selfhost/gate/manifest.pilot",
     "selfhost/gate/airlock_abi.pilot",
@@ -75,13 +89,6 @@ fn semantic_diags(path: str, for_run: bool, phase: str) -> CheckedProgram {
     return CheckedProgram { diags: in_source_order(checked.diags), rest: checked.rest };
 }
 
-/// Reports the diagnostics a checking tool is waiting on (`host_checked_tool`)
-/// as `pilot run` reports them, errors and warnings; gives the number of
-/// errors. The host calls this as the entry of its own run of the CLI.
-pub fn report_pending_diags() -> i64 {
-    return report_diagnostics(report_at_least(in_source_order(host_pending_diags()), diag_severity_warning()));
-}
-
 /// The positional arguments as a list.
 pub fn cli_positionals(ref p: ParsedArgs) -> List<str> {
     var out: List<str> = [];
@@ -120,8 +127,8 @@ pub fn cmd_completions(ref p: ParsedArgs, ref reg: CommandRegistry) -> i64 {
     return 0;
 }
 
-/// `pilot run <file> [-- args...]`: compiles the program and runs the
-/// analyzer over it, reports their errors and warnings, and refuses to run
+/// `pilot run <file> [-- args...]`: compiles the program and runs the type
+/// checker over it (`host_typecheck`), reports their errors and warnings, and refuses to run
 /// it if any is an error; else runs its `[Live]` calls marked `::Run`, then
 /// the program, and exits with its exit code.
 pub fn cmd_run(ref p: ParsedArgs, ref reg: CommandRegistry) -> i64 {
@@ -130,6 +137,7 @@ pub fn cmd_run(ref p: ParsedArgs, ref reg: CommandRegistry) -> i64 {
     var script_args: List<str> = [];
     for a in p.passthrough_args { script_args.push(a); }
     let program = args[0];
+    if parsed_has_flag(p, "via-ir") { return run_via_ir(program, script_args); }
     if !program.ends_with(".pilc") {
         let compiled = host_check(program);
         if report_diagnostics(compiled) > 0 { return 1; }
@@ -143,6 +151,70 @@ pub fn cmd_run(ref p: ParsedArgs, ref reg: CommandRegistry) -> i64 {
     let outcome = host_run_with(program, script_args, "", [coverage_file_link()]);
     let _ = report_diagnostics(outcome.diags);
     return outcome.exit_code;
+}
+
+/// `pilot compile <file> [-o out.pilc] [--disasm]`: the program, checked,
+/// lowered to PilIR and optimised as `pilot ir run` does, written as `.pilc`
+/// bytecode (selfhost/vm/ir_to_pilc.pilot) that `pilot run out.pilc` runs on
+/// the seed VM; `-o` defaults to the file with `.pilc` for `.pilot`.
+/// `--disasm` prints the bytecode instead of writing it.
+pub fn cmd_compile(ref p: ParsedArgs, ref reg: CommandRegistry) -> i64 {
+    let args = cli_positionals(p);
+    if args.len == 0 { return usage_error("`pilot compile` needs a program file"); }
+    let out = parsed_get_str(p, "output", "");
+    let src = args[0];
+    let dest = if out != "" { out } else if src.ends_with(".pilot") { src.slice(0, src.len() - 6) + ".pilc" } else { src + ".pilc" };
+    return compile_to_pilc(src, dest, parsed_has_flag(p, "disasm"));
+}
+
+/// Writes the bytecode of `program` to `dest` (or prints it, `disasm`);
+/// reports the program's errors as `pilot ir` does.
+fn compile_to_pilc(program: str, dest: str, disasm: bool) -> i64 {
+    if !File.exists(program) { return usage_error(f"no such file `{program}`"); }
+    let compiled = without_seed_limits(host_check(program));
+    if report_diagnostics(compiled) > 0 { return 1; }
+    let entry = f"pilc_main_checked({pilot_string_literal(dest)}, {disasm});";
+    return host_program_tool(program, cli_pilc_files(), cli_ir_decls(), entry);
+}
+
+/// `pilot run --via-ir <file>`: the program compiled as `pilot compile`
+/// compiles it, into a directory of its own under the temporary directory,
+/// and run from there on the seed VM; both are removed afterwards. (The
+/// directory is new and empty because the host looks through the directory
+/// of the file it runs.)
+fn run_via_ir(program: str, ref script_args: List<str>) -> i64 {
+    let tmp = Env.get("TMPDIR");
+    let dir = f"{if tmp != "" { tmp } else { "/tmp" }}/pilot-via-ir-{Process.send_signal(2, 0, 0)}-{Clock.now_ns(1)}";
+    let dest = dir + "/program.pilc";
+    let built = compile_to_pilc(program, dest, false);
+    var code = built;
+    if built == 0 {
+        let no_links: List<str> = [];
+        let outcome = host_run_with(dest, script_args, "", no_links);
+        let _ = report_diagnostics(outcome.diags);
+        code = outcome.exit_code;
+    }
+    let _ = File.delete(dest);
+    let _ = File.delete(dir);
+    return code;
+}
+
+/// The sources of `pilot compile`: PilIR, then the bytecode emitter.
+pub fn cli_pilc_files() -> List<str> {
+    var files = cli_ir_files();
+    for f in [
+        "stdlib/core/os_abi.pilot",
+        "stdlib/core/host_raw.pilot",
+        "stdlib/core/file.pilot",
+        "stdlib/core/packed.pilot",
+        "stdlib/pilot/vm/pilc.pilot",
+        "selfhost/vm/pilc_regs.pilot",
+        "selfhost/vm/pilc_lower.pilot",
+        "selfhost/vm/pilc_aggregates.pilot",
+        "selfhost/vm/pilc_closures.pilot",
+        "selfhost/vm/ir_to_pilc.pilot",
+    ] { files.push(f); }
+    return files;
 }
 
 /// What `pilot run` links for `[Coverage(to: ::File)]`: only the seed
@@ -161,7 +233,7 @@ pub fn cmd_check(ref p: ParsedArgs, ref reg: CommandRegistry) -> i64 {
     for f in files {
         let compiled = host_check(f);
         var found = report_diagnostics(compiled);
-        // The analyzer reads a program the seed accepted.
+        // The checker reads a program the seed accepted.
         var steps: List<HostStepRow>? = none;
         if compiled.len == 0 {
             let semantic = semantic_diags(f, false, live_phase_compile());
@@ -185,9 +257,10 @@ pub fn cmd_check(ref p: ParsedArgs, ref reg: CommandRegistry) -> i64 {
 /// only borrow their value become `ref` or `var ref`
 /// (selfhost/check/fix_borrows.pilot). Other diagnostics are not fixed yet.
 fn check_fix(ref files: List<str>) -> i64 {
-    // The checker, then the file owners the fix writes through.
+    // The checker (which links the file owners the fix writes through),
+    // then the fix.
     var tool = cli_checker_files();
-    for f in ["stdlib/core/os_abi.pilot", "stdlib/core/host_raw.pilot", "stdlib/core/file.pilot", "selfhost/check/fix_borrows.pilot"] { tool.push(f); }
+    tool.push("selfhost/check/fix_borrows.pilot");
     var failed = 0;
     for f in files {
         if host_program_tool(f, tool, cli_checker_decls(), "fix_borrows_main();") != 0 { failed = failed + 1; }
@@ -248,11 +321,12 @@ pub fn cmd_test(ref p: ParsedArgs, ref reg: CommandRegistry) -> i64 {
         return test_emit_command(lang, paths, sel, parsed_has_flag(p, "live-allocations"));
     }
     if parsed_has_flag(p, "ir") { return test_ir_command(paths, sel); }
+    if parsed_has_flag(p, "via-ir") { return test_via_ir_command(paths, sel); }
     return test_command(paths, sel);
 }
 
 /// The self-hosted sources `pilot run` uses on every program: the type
-/// checker's (the analyzer is the seed's own, under `crates/`).
+/// checker's.
 fn cli_seed_tool_files() -> List<str> => cli_checker_files();
 
 /// `pilot bench [dir] [--filter text]`: the milestone tests' run times.
@@ -318,13 +392,13 @@ pub fn cmd_emit(ref p: ParsedArgs, ref reg: CommandRegistry) -> i64 {
         files.push("stdlib/core/os_abi.pilot");
         files.push("stdlib/core/host_raw.pilot");
         files.push("stdlib/core/file.pilot");
-        return host_checked_tool(args[1], files, cli_ir_decls(), f"emit_program_checked_to([{dialects}], [{paths}]);");
+        return host_program_tool(args[1], files, cli_ir_decls(), f"emit_program_checked_to([{dialects}], [{paths}]);");
     }
     // The emitter is a toolchain source, found from the toolchain's own
     // search roots (a language without one stops as an internal error). It
-    // checks the program first; the checker's and analyzer's errors and
+    // checks the program first; the seed's and the checker's errors and
     // warnings are reported as `pilot run` reports them.
-    return host_checked_tool(args[1], cli_emit_files(lang), cli_ir_decls(), f"emit_program_checked({lang}_dialect());");
+    return host_program_tool(args[1], cli_emit_files(lang), cli_ir_decls(), f"emit_program_checked({lang}_dialect());");
 }
 
 /// The sources of `pilot emit <lang>`: PilIR, then the source emitters and
@@ -371,6 +445,9 @@ pub fn cli_ir_files() -> List<str> {
     for f in [
         "stdlib/std/text.pilot",
         "stdlib/std/io.pilot",
+        "selfhost/diagnostics/model.pilot",
+        "selfhost/diagnostics/renderer.pilot",
+        "selfhost/check/checked.pilot",
         "stdlib/std/env.pilot",
         "stdlib/core/result.pilot",
         "selfhost/ir/model.pilot",
@@ -384,6 +461,7 @@ pub fn cli_ir_files() -> List<str> {
         "selfhost/ir/lower_tail.pilot",
         "selfhost/ir/lower_view.pilot",
         "selfhost/ir/lower_asm.pilot",
+        "selfhost/ir/lower_operator.pilot",
         "selfhost/ir/lower_quote.pilot",
         "selfhost/ir/lower_variant.pilot",
         "selfhost/ir/lower_union.pilot",
@@ -436,7 +514,10 @@ pub fn cmd_ir(ref p: ParsedArgs, ref reg: CommandRegistry) -> i64 {
     if args.len < 2 { return usage_error("`pilot ir` needs a mode (verify, print, opt, run, run-unopt, roundtrip, run-roundtrip) and a file"); }
     if !File.exists(args[1]) { return usage_error(f"no such file `{args[1]}`"); }
     if args[1].ends_with(ir_text_ext()) {
-        return host_text_tool(args[1], cli_ir_files(), f"ir_text_main(\"{args[0]}\");");
+        // The tool reads the file itself; its result is its exit code.
+        let quoted = args[1].replace("\\", "\\\\").replace("\"", "\\\"");
+        let code = host_tool(cli_ir_files(), f"ir_text_main(\"{args[0]}\", \"{quoted}\");");
+        return text.parse_i64(code.trim()) ?? 1;
     }
     // The lowered program runs on the PilIR interpreter, not the seed, so a
     // construct only the seed cannot run does not stop it.
@@ -451,9 +532,9 @@ pub fn cmd_ir(ref p: ParsedArgs, ref reg: CommandRegistry) -> i64 {
         i = i + 1;
     }
     script_args = script_args + "]";
-    // The tool checks the program first; the checker's and analyzer's errors
+    // The tool checks the program first; the seed's and the checker's errors
     // and warnings are reported as `pilot run` reports them.
-    return host_checked_tool(args[1], cli_ir_files(), cli_ir_decls(), f"ir_main_checked(\"{args[0]}\", {script_args});");
+    return host_program_tool(args[1], cli_ir_files(), cli_ir_decls(), f"ir_main_checked(\"{args[0]}\", {script_args});");
 }
 
 /// `text` as a Pilot string literal: quoted, with `\\` and `"` escaped.
@@ -463,12 +544,11 @@ fn pilot_string_literal(text: str) -> str => "\"" + text.replace("\\", "\\\\").r
 fn cli_lex_files() -> List<str> {
     var files = cli_checker_files();
     for f in [
-        "stdlib/core/os_abi.pilot", "stdlib/core/host_raw.pilot", "stdlib/core/file.pilot", "stdlib/core/generator.pilot",
         "stdlib/core/lex/unicode_xid.pilot", "stdlib/core/lex/names.pilot",
-        "stdlib/core/lex/trivia.pilot", "stdlib/core/lex/strings.pilot", "stdlib/core/lex/delimiters.pilot",
-        "stdlib/core/lex/operators.pilot", "stdlib/core/lex/seed_forms.pilot", "stdlib/core/lex/lexicon.pilot", "stdlib/pilot/lex/modes.pilot",
+        "stdlib/core/lex/trivia.pilot", "stdlib/core/lex/delimiters.pilot",
+        "stdlib/core/lex/operators.pilot", "stdlib/core/lex/lexicon.pilot",
         "stdlib/core/packed.pilot", "stdlib/pilot/lex.pilot",
-        "stdlib/core/env.pilot", "stdlib/core/derive.pilot", "stdlib/std/text.pilot", "stdlib/pilot/lex/cache.pilot",
+        "stdlib/core/derive.pilot", "stdlib/std/text.pilot",
         "selfhost/lex/lex_tool.pilot",
     ] { files.push(f); }
     return files;
@@ -535,6 +615,7 @@ pub fn cli_handlers() -> Map<str, (ParsedArgs, CommandRegistry) => i64> {
     h.set("emit", cmd_emit);
     h.set("build", cmd_build);
     h.set("ir", cmd_ir);
+    h.set("compile", cmd_compile);
     h.set("lex", cmd_lex);
     h.set("fmt", cmd_fmt);
     return h;

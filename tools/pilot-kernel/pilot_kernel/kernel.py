@@ -49,7 +49,7 @@ def find_pilot_executable():
 
     # 2. Workspace root relative to this file
     this_dir = os.path.dirname(os.path.abspath(__file__))
-    repo_root = os.path.abspath(os.path.join(this_dir, "..", ".."))
+    repo_root = os.path.abspath(os.path.join(this_dir, "..", "..", ".."))  # tools/pilot-kernel/pilot_kernel -> repo root
 
     candidates = [
         os.path.join(repo_root, "vscode-pilot", "server", "pilot"),

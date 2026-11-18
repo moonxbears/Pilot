@@ -17,7 +17,7 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
     milestone_id: 14,
     test_file_rel:
         "crates/pilot-analysis/tests/milestone14_perceus_foreign_resource_and_scope_guards.rs",
-    expected_test_count: 4,
+    expected_test_count: 3,
     files: &[
         anticheat::FileAuditRule {
             path: "stdlib/std/polyglot/lifetime.pilot",

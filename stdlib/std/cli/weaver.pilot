@@ -1,10 +1,18 @@
 // ==============================================================================
 // FILE: stdlib/std/cli/weaver.pilot
 // Milestone 30: Self-Generating CLI Blueprint ([Cli] & [Arg])
-// Synthesizes zero-alloc argv parsers, subcommands (from enum variants),
-// env-var fallbacks, help screens, and shell completions.
-// Enforces:
+// What exists: a hand-built `CliAppDef` (cli_app_def_new, cli_add_arg,
+// cli_add_subcommand), a help screen (cli_generate_help) and an argv parser
+// (cli_parse_argv) that builds a `CliParsedResult` with Lists. `env_var` is
+// stored on each argument but nothing reads it yet. No shell completions.
+// Building a `CliAppDef` from a `[Cli]` struct (cli_weave_struct) is seam
+// `cli.weave_struct`.
+// Codes used:
 //   GEN005: Duplicate CLI Short/Long Flag Collision in [Cli]
+// Code clash: GEN001-GEN003 are registered in selfhost/diagnostics/errors.pilot
+// as generator errors, and GEN004-GEN006 are not registered. The checker
+// emits none of the codes below; they appear only in the strings the
+// format_genNNN helpers here return.
 // ==============================================================================
 
 pub pkg std.cli;

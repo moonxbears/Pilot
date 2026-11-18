@@ -1,0 +1,21 @@
+// GRAM001 (PROP-008 §5): a program declares new operators; it cannot
+// redefine a built-in operator symbol or readable word. `%%` is declared by
+// the standard library (Euclidean remainder, at `Multiply`), and `or` is the
+// readable word of `||`. A struct may still implement `%%` (an `op %%` with
+// no attribute takes the built-in level); only a new grammar entry for it is
+// refused.
+struct Clock : IValue {
+    pub hour: i64;
+
+    [Infix(::Add, ::Left)]
+    pub pure op %% (rhs: Clock) -> Clock => Clock { hour: (.hour + rhs.hour) % 12 };
+}
+
+syntax {
+    [InfixWord(nameof(or), ::Or, ::Left, "|||")]
+    either(lhs, rhs) => quote { if $lhs { true } else { $rhs } };
+}
+
+fn main() {
+    print(Clock { hour: 3 }.hour);
+}

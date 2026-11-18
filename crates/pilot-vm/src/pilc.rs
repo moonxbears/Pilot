@@ -1,4 +1,5 @@
-//! `.pilc` v3 Zero-Copy Binary Container & Name-Blind `VmHook` Debug Table.
+//! The `.pilc` v3 container (format version 5): constants, instructions, and
+//! the span/register debug table `VmHook` reads.
 
 use crate::instruction::Instruction;
 use crate::value::{PilotVal, TAG_HEAP_STR};

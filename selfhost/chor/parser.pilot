@@ -1,7 +1,7 @@
 // ==============================================================================
 // FILE: selfhost/chor/parser.pilot
-// Milestone 24: .pchor Sublanguage Choreographer - Parser
-// Parses blueprint, storage, role, cue, route, and law declarations.
+// .pchor parser: blueprint, storage, role, cue, route and law declarations.
+// Reached only by the milestone24 Rust test; no `pilot` command runs it.
 // ==============================================================================
 
 pub lvl(0) pkg selfhost.chor;

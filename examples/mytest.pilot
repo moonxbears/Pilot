@@ -1,4 +1,0 @@
-[Live]
-fn test_func() {
-    print("test")
-}

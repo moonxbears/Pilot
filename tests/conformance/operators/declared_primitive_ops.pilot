@@ -1,0 +1,41 @@
+// An operator on a register value runs what its type declares
+// (stdlib/core/builtins/builtins.pilot, PROP-022 slice 22B): the instruction,
+// its signedness and the operand order come from `op <sym>`'s body.
+// Expected values, worked by hand:
+//   2.0 > 1.0 true; 1.0 >= 1.0 true; 1.0 > 1.0 false; 1.5 < 2.5 true.
+//   (NaN operands: tests/conformance/known_bugs/nan_ordered_compare.pilot.)
+//   u8 200 / 3 = 66 (66 * 3 = 198); 200 % 7 = 4 (28 * 7 = 196);
+//   250 >> 1 = 125 (logical shift of an unsigned value); 250 < 200 false;
+//   200 > 100 true.
+//   i64 -7 / 2 = -3 (division truncates toward zero); -7 % 3 = -1 (the
+//   remainder takes the dividend's sign: -7 = -2 * 3 - 1); -7 >> 1 = -4
+//   (arithmetic shift rounds toward minus infinity); -7 < 0 true.
+//   1 << 4 = 16; 12 & 10 = 8 (1100 & 1010 = 1000); 12 | 10 = 14 (1110);
+//   12 ^ 10 = 6 (0110); 7 - 10 = -3; 6 * 7 = 42.
+fn main() {
+    print(2.0 > 1.0);
+    print(1.0 >= 1.0);
+    print(1.0 > 1.0);
+    print(1.5 < 2.5);
+
+    let b: u8 = 200;
+    let c: u8 = 250;
+    print(b / 3);
+    print(b % 7);
+    print(c >> 1);
+    print(c < b);
+    print(b > 100);
+
+    let i: i64 = -7;
+    print(i / 2);
+    print(i % 3);
+    print(i >> 1);
+    print(i < 0);
+
+    print(1 << 4);
+    print(12 & 10);
+    print(12 | 10);
+    print(12 ^ 10);
+    print(7 - 10);
+    print(6 * 7);
+}

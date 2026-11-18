@@ -1,6 +1,11 @@
 // ==============================================================================
 // stdlib/std/polyglot/transport/yaml.pilot
-// Ring 2 Standard Library: Full Bidirectional YAML/YML AST & Serialization
+// Ring 2 Standard Library: a YAML node tree (scalar / sequence / mapping)
+// with get/set/has/push/get_at/len and emit. yaml_parse reads a small flat
+// subset only: one line at a time, one level, `- item` lines as a sequence
+// or `key: value` lines as a mapping, every value a scalar string. No
+// nesting by indentation, flow collections, quoting rules, anchors, block
+// scalars or multiple documents.
 // Package: std.polyglot.transport.yaml (Transport Languages Subsystem)
 // ==============================================================================
 

@@ -1,7 +1,7 @@
 // ==============================================================================
 // FILE: selfhost/adapter/cpp_mangle.pilot
-// Milestone 15.1: Native C++ Class, RAII, Vtable & Exception Boundary Adapter
-// Bidirectional Itanium C++ ABI & MSVC x64 Name Mangler and Demangler
+// Itanium and MSVC x64 C++ name mangling and demangling.
+// Reached only by the milestone15 Rust test; no `pilot` command runs it.
 // ==============================================================================
 pub lvl(0) pkg selfhost.adapter;
 

@@ -2,11 +2,10 @@
 //! crates/pilot-analysis/tests/common/anticheat.rs
 //! Universal 10-Pass Anti-Cheat, Tamper-Seal & Architectural Integrity Engine
 //!
-//! Shared across `pilot-analysis`, `pilot-parser`, and `pilot-lexer` integration
-//! suites via `#[path = ...]` with zero external crate dependencies (`std` only).
-//! Every `#[test]` across all 13 milestone suites arms an `AntiCheatGuard` on
-//! entry and must complete `guard.finish()` on exit (enforced both by RAII `Drop`
-//! and by static self-inspection of all 13 test files).
+//! Shared by the `pilot-analysis` and `pilot-parser` milestone suites via
+//! `#[path = ...]` (`std` only). Every test in `MILESTONE_TEST_MANIFEST` arms an
+//! `AntiCheatGuard` on entry and must complete `guard.finish()` on exit
+//! (enforced by RAII `Drop` and by static inspection of the listed test files).
 //! ==============================================================================
 
 use std::collections::{HashMap, HashSet};
@@ -228,7 +227,7 @@ const MILESTONE_TEST_MANIFEST: &[(&str, usize)] = &[
     ("crates/pilot-analysis/tests/milestone11_adapter_blueprint_engine.rs", 4),
     ("crates/pilot-analysis/tests/milestone12_headerless_c_semantic_absorber.rs", 4),
     ("crates/pilot-analysis/tests/milestone13_adaptive_hardware_calling_conventions.rs", 4),
-    ("crates/pilot-analysis/tests/milestone14_perceus_foreign_resource_and_scope_guards.rs", 4),
+    ("crates/pilot-analysis/tests/milestone14_perceus_foreign_resource_and_scope_guards.rs", 3),
     ("crates/pilot-analysis/tests/milestone15_cpp_class_raii_vtable_and_exceptions.rs", 4),
     ("crates/pilot-analysis/tests/milestone16_rust_crate_and_zero_copy_adapter.rs", 4),
     ("crates/pilot-analysis/tests/milestone17_python_capi_and_zero_copy_tensor.rs", 4),
@@ -245,18 +244,16 @@ const MILESTONE_TEST_MANIFEST: &[(&str, usize)] = &[
     ("crates/pilot-analysis/tests/milestone28_progressive_learning_profiles_and_coach.rs", 4),
     ("crates/pilot-analysis/tests/milestone29_capability_sandboxed_comptime_execution.rs", 4),
     ("crates/pilot-analysis/tests/milestone30_self_generating_blueprints.rs", 4),
-    ("crates/pilot-analysis/tests/milestone50_lossless_bridge_and_reflection.rs", 4),
+    ("crates/pilot-analysis/tests/milestone50_lossless_bridge_and_reflection.rs", 1),
     ("crates/pilot-parser/tests/milestone51_homoiconic_syntax_and_contraction.rs", 4),
     ("crates/pilot-analysis/tests/milestone52_pilot_preprocessor_and_receptors.rs", 3),
     ("crates/pilot-analysis/tests/milestone53_cst_recovery_and_formatter.rs", 3),
-    ("crates/pilot-analysis/tests/milestone54_perceus_ownership_and_escape.rs", 2),
     ("crates/pilot-analysis/tests/milestone55_selfhost_vm_compiler_and_debug_table.rs", 3),
-    ("crates/pilot-analysis/tests/milestone56_layout_driven_codegen_and_gpu_backends.rs", 3),
     ("crates/pilot-analysis/tests/milestone57_bidirectional_transpilers_and_ingest.rs", 2),
-    ("crates/pilot-analysis/tests/milestone58_runtime_crypto_wire_db_and_polyglot.rs", 7),
-    ("crates/pilot-analysis/tests/milestone59_persistent_pilvm_lsp_and_dap.rs", 3),
-    ("crates/pilot-analysis/tests/milestone60_selfhost_cli_pkg_perf_and_bench.rs", 3),
-    ("crates/pilot-analysis/tests/milestone61_stage3_fixed_point_and_universal_rename_gate.rs", 3),
+    ("crates/pilot-analysis/tests/milestone58_runtime_crypto_wire_db_and_polyglot.rs", 6),
+    ("crates/pilot-analysis/tests/milestone59_persistent_pilvm_lsp_and_dap.rs", 1),
+    ("crates/pilot-analysis/tests/milestone60_selfhost_cli_pkg_perf_and_bench.rs", 1),
+    ("crates/pilot-analysis/tests/milestone61_stage3_fixed_point_and_universal_rename_gate.rs", 1),
 ];
 
 const GLOBAL_BANNED_LEAK_SUBSTRINGS: &[&str] = &[

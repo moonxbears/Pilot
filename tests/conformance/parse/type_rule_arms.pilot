@@ -1,0 +1,25 @@
+// PROP-019 / PROP-025: the arms of `syntax type_construct` rules read from a
+// token tape (stdlib/pilot/parse/type_rules.pilot). The fixture
+// fixtures/type_rules_sample.pilot has seven arms, worked by hand:
+//   (T[])      bracket form, no symbol  -> ""
+//   (T?)       postfix                  -> ?
+//   (*T)       prefix                   -> *
+//   (T @ N)    postfix with an argument -> @
+//   ((A) => R) inner parentheses group  -> =>
+//   (A ~> B)   over two lines           -> ~>
+//   (opt<T>)   a named generic          -> ""
+// Each line prints the symbol between brackets.
+use Pilot.Core.File;
+use pilot.parse.tape;
+use pilot.parse.type_rules;
+
+fn main() {
+    let dir = "tests/conformance/parse/fixtures/";
+    guard some t = seed_tape(File.read_text(dir + "type_rules_sample.pilot")) else {
+        print("no table");
+        return;
+    };
+    let arms = type_rule_arms(t);
+    print(arms.len());
+    for a in arms { print(f"[{a.symbol}]"); }
+}

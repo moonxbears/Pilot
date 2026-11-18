@@ -1,0 +1,15 @@
+// toml_parse reads strings, booleans and decimal integers as written.
+// Expected, by hand from the input text: "Pilot", 42, -7, 0, true, false.
+// A parser that returned one fixed number for every integer would fail on
+// 42, -7 and 0 at once.
+use std.polyglot.transport.toml;
+
+fn main() {
+    let doc = toml_parse("title = \"Pilot\"\ncount = 42\nneg = -7\nzero = 0\nyes = true\nno = false\n");
+    print(doc.get("title").str_val);
+    print(doc.get("count").int_val);
+    print(doc.get("neg").int_val);
+    print(doc.get("zero").int_val);
+    print(doc.get("yes").bool_val);
+    print(doc.get("no").bool_val);
+}

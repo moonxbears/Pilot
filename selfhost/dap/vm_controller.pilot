@@ -1,7 +1,7 @@
 // =========================================================================
 // FILE: selfhost/dap/vm_controller.pilot
-// Milestone 59.3: VmHook Breakpoint & Step State Machine over pc_spans
-// Steps real PilVirtualMachine bytecode without a duplicate AST interpreter.
+// Debugger breakpoint and step state machine over pc_spans.
+// Reached only by the milestone59 Rust test; no `pilot` command runs it.
 // =========================================================================
 pub pkg selfhost.dap;
 

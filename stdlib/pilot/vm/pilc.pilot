@@ -1,0 +1,454 @@
+// ==============================================================================
+// FILE: stdlib/pilot/vm/pilc.pilot
+// Ring 3: the `.pilc` bytecode container (pub pkg pilot.vm.pilc;) — PROP-005 5D
+// ==============================================================================
+// What the seed VM (crates/pilot-vm) loads and runs, built and read in Pilot.
+// The layout is `PilcBinary::serialize` / `load_from_bytes` (pilc.rs), version
+// 5, all integers little-endian:
+//   "PIL3"  u32 version  u32 constant count
+//   per constant: u64 tag word, u64 payload (16 bytes). A text constant's tag
+//     word is `9 | len << 8` and its payload the offset of its bytes in the
+//     text area; every other constant is the value's own two words
+//     (value.rs `PilotVal`).
+//   u32 text area length, the text area: per text, u32 length then its bytes
+//   u32 instruction count, per instruction one u64 word: the low word is
+//     `op << 24 | dst << 16 | src1 << 8 | src2`, the high word `wide`
+//     (instruction.rs).
+// After the instructions, a `.pilc` written here may carry a debug trailer
+// the seed's loader does not read yet (it stops after the instructions):
+//   "PDBG"  u32 file count, per file: i64 base offset, u32 path length, path
+//   u32 span count (one per instruction), per instruction an i64 source
+//   offset, -1 for none.
+// The offsets are those of the linked program (`IrFunction.spans`), so a
+// reader finds the file and line the way `ir_locate` does
+// (selfhost/ir/fault.pilot). Reading it is the PROP-005 5D Rust item.
+pub pkg pilot.vm.pilc;
+
+use Pilot.Core.Packed;
+use Pilot.Core.File;
+
+// ------------------------------------------------------------------------------
+// VM opcodes (instruction.rs `Opcode`), a closed set the VM freezes.
+// ------------------------------------------------------------------------------
+pub enum VmOp : u8 {
+    ::OpNop = 0,
+    ::OpAdd = 1,
+    ::OpSub = 2,
+    ::OpMul = 3,
+    ::OpDiv = 4,
+    ::OpRem = 5,
+    ::OpPow = 6,
+    ::OpFloorDiv = 7,
+    ::OpBitAnd = 8,
+    ::OpLoadConst = 9,
+    ::OpMove = 10,
+    ::OpCmpEq = 11,
+    ::OpCmpLt = 12,
+    ::OpJump = 13,
+    ::OpJumpIfTrue = 14,
+    ::OpJumpIfFalse = 15,
+    ::OpCall = 16,
+    ::OpRet = 17,
+    ::OpHalt = 18,
+    ::OpCmpGt = 19,
+    ::OpCmpLe = 20,
+    ::OpCmpGe = 21,
+    ::OpCmpNe = 22,
+    ::OpBitOr = 23,
+    ::OpNeg = 24,
+    ::OpBitNot = 25,
+    ::OpNot = 26,
+    ::OpJumpIfNull = 27,
+    ::OpJumpIfNotNull = 28,
+    ::OpXor = 31,
+    ::OpShl = 32,
+    ::OpShr = 33,
+    ::OpEngineIntrinsic = 34,
+    ::OpTrap = 35,
+    ::OpCallClosure = 36,
+    ::OpTailCall = 37,
+    ::OpSetOut = 38,
+    ::OpGetOut = 39,
+    ::OpIntrinsicArgs = 40,
+    ::OpIntrinsicKey = 41,
+    ::OpClear = 42,
+    ::OpJumpUnless = 43,
+}
+
+/// Each opcode's name as the VM's `Debug` prints it, by opcode byte; "" for
+/// a byte that is no opcode.
+const VM_OP_NAMES: List<str> = [
+    "Nop", "Add", "Sub", "Mul", "Div", "Rem", "Pow", "FloorDiv", "BitAnd", "LoadConst",
+    "Move", "CmpEq", "CmpLt", "Jump", "JumpIfTrue", "JumpIfFalse", "Call", "Ret", "Halt", "CmpGt",
+    "CmpLe", "CmpGe", "CmpNe", "BitOr", "Neg", "BitNot", "Not", "JumpIfNull", "JumpIfNotNull", "",
+    "", "Xor", "Shl", "Shr", "EngineIntrinsic", "Trap", "CallClosure", "TailCall", "SetOut", "GetOut",
+    "IntrinsicArgs", "IntrinsicKey", "Clear", "JumpUnless",
+];
+
+/// The operand register that stands for the constant `wide` names
+/// (instruction.rs `CONST_REG`).
+pub const VM_CONST_REG: i64 = 255;
+/// The most arguments a call passes, in `r1..r16` (lib.rs `MAX_CALL_ARGS`).
+pub const VM_MAX_CALL_ARGS: i64 = 16;
+
+// ------------------------------------------------------------------------------
+// Value tags (value.rs).
+// ------------------------------------------------------------------------------
+pub enum VmTag : u8 {
+    ::TagNull = 0,
+    ::TagBool = 2,
+    ::TagInt = 3,
+    ::TagUInt = 4,
+    ::TagFloat = 5,
+    ::TagChar = 6,
+    ::TagHeapStr = 9,
+}
+
+pub const PILC_MAGIC: str = "PIL3";
+pub const PILC_VERSION: i64 = 5;
+pub const PILC_DEBUG_MAGIC: str = "PDBG";
+
+/// One instruction: opcode, three register bytes and the 32-bit operand.
+[Layout(c_abi)]
+pub struct PilcIns : IValue {
+    pub opcode: i64;
+    pub dst: i64;
+    pub src1: i64;
+    pub src2: i64;
+    pub wide: i64;
+}
+
+/// One constant: its tag and its payload bits; a text constant's bits are
+/// the index of its text in `PilcImage.texts`.
+[Layout(c_abi)]
+pub struct PilcConst : IValue {
+    pub tag: i64;
+    pub bits: i64;
+}
+
+/// A program being built, or read back: constants, instructions, and per
+/// instruction its source offset (-1 for none); the files the offsets fall
+/// in, by their first offset.
+pub struct PilcImage : IObject {
+    pub consts: List<PilcConst>;
+    /// The text of each text constant.
+    pub texts: List<str>;
+    /// Constant key (`const_key`) -> its index, so each constant is pooled once.
+    pub const_at: Map<str, i64>;
+    pub code: List<PilcIns>;
+    pub spans: List<i64>;
+    pub files: List<str>;
+    pub bases: List<i64>;
+}
+
+pub fn pilc_image_new() -> PilcImage =>
+    PilcImage { consts: [], texts: [], const_at: Map<str, i64>(), code: [], spans: [], files: [], bases: [] };
+
+/// Instruction `op` with registers `dst`, `src1`, `src2` and operand `wide`.
+pub fn pilc_ins(op: VmOp, dst: i64, src1: i64, src2: i64, wide: i64) -> PilcIns => pilc_ins_raw(op as i64, dst, src1, src2, wide);
+
+/// An instruction by its opcode byte. Each field must fit its byte, and
+/// `wide` 32 bits; anything else stops the compiler (PILC001), never wraps.
+pub fn pilc_ins_raw(op: i64, dst: i64, src1: i64, src2: i64, wide: i64) -> PilcIns {
+    if op < 0 || op > 255 || dst < 0 || dst > 255 || src1 < 0 || src1 > 255 || src2 < 0 || src2 > 255 {
+        fault(f"PILC001: an instruction byte is out of range (op {op}, r{dst}, r{src1}, r{src2})");
+    }
+    if wide < 0 || wide > 4294967295 { fault(f"PILC001: an instruction operand {wide} does not fit 32 bits"); }
+    return PilcIns { opcode: op, dst: dst, src1: src1, src2: src2, wide: wide };
+}
+
+// ------------------------------------------------------------------------------
+// Constants
+// ------------------------------------------------------------------------------
+
+fn add_const(var ref img: PilcImage, key: str, c: PilcConst) -> i64 {
+    if some at = img.const_at.get(key) { return at; }
+    let at = img.consts.len();
+    img.consts.push(c);
+    img.const_at.set(key, at);
+    return at;
+}
+
+/// The index of a constant with `tag` and payload `bits`.
+pub fn pilc_const_bits(var ref img: PilcImage, tag: i64, bits: i64) -> i64 =>
+    add_const(img, f"{tag}:{bits}", PilcConst { tag: tag, bits: bits });
+
+pub fn pilc_const_null(var ref img: PilcImage) -> i64 => pilc_const_bits(img, (VmTag::TagNull as i64), 0);
+pub fn pilc_const_int(var ref img: PilcImage, v: i64) -> i64 => pilc_const_bits(img, (VmTag::TagInt as i64), v);
+pub fn pilc_const_bool(var ref img: PilcImage, b: bool) -> i64 => pilc_const_bits(img, (VmTag::TagBool as i64), if b { 1 } else { 0 });
+
+/// The index of text constant `s`.
+pub fn pilc_const_text(var ref img: PilcImage, s: str) -> i64 {
+    let key = "s" + s;
+    if some at = img.const_at.get(key) { return at; }
+    img.texts.push(s);
+    return add_const(img, key, PilcConst { tag: (VmTag::TagHeapStr as i64), bits: img.texts.len() - 1 });
+}
+
+/// The text of text constant `c`.
+pub fn pilc_text_of(ref img: PilcImage, c: PilcConst) -> str => img.texts[c.bits];
+
+// ------------------------------------------------------------------------------
+// Instructions
+// ------------------------------------------------------------------------------
+
+/// Appends `ins` with source offset `span`; gives its address.
+pub fn pilc_emit(var ref img: PilcImage, ins: PilcIns, span: i64) -> i64 {
+    img.code.push(ins);
+    img.spans.push(span);
+    return img.code.len() - 1;
+}
+
+/// The address the next instruction gets.
+pub fn pilc_here(ref img: PilcImage) -> i64 => img.code.len();
+
+/// Sets the 32-bit operand of the instruction at `pc` (a jump target or a
+/// call entry known only later).
+pub fn pilc_patch_wide(var ref img: PilcImage, pc: i64, wide: i64) {
+    let i = img.code[pc];
+    img.code[pc] = pilc_ins_raw(i.opcode, i.dst, i.src1, i.src2, wide);
+}
+
+// ------------------------------------------------------------------------------
+// Bytes
+// ------------------------------------------------------------------------------
+
+fn put_u8(var ref out: PackedBuffer<u8>, v: i64) { out.push((v & 255) as u8); }
+
+fn put_u32(var ref out: PackedBuffer<u8>, v: i64) {
+    var k = 0;
+    while k < 4 {
+        put_u8(out, v >> (k * 8));
+        k = k + 1;
+    }
+}
+
+fn put_u64(var ref out: PackedBuffer<u8>, v: i64) {
+    var k = 0;
+    while k < 8 {
+        put_u8(out, v >> (k * 8));
+        k = k + 1;
+    }
+}
+
+fn put_text(var ref out: PackedBuffer<u8>, s: str) {
+    var i = 0;
+    while i < s.len() {
+        put_u8(out, s.byte_at(i) as i64);
+        i = i + 1;
+    }
+}
+
+/// The `.pilc` bytes of `img`, with the debug trailer when `img` names files.
+pub fn pilc_bytes(ref img: PilcImage) -> PackedBuffer<u8> {
+    var out = packed_buffer<u8>(sizeof(u8), false);
+    put_text(out, PILC_MAGIC);
+    put_u32(out, PILC_VERSION);
+    put_u32(out, img.consts.len());
+    var area = 0;
+    for c in img.consts {
+        if c.tag == (VmTag::TagHeapStr as i64) {
+            let t = img.texts[c.bits];
+            put_u64(out, (VmTag::TagHeapStr as i64) | (t.len() << 8));
+            put_u64(out, area);
+            area = area + 4 + t.len();
+        } else {
+            put_u64(out, c.tag);
+            put_u64(out, c.bits);
+        }
+    }
+    put_u32(out, area);
+    for c in img.consts {
+        if c.tag == (VmTag::TagHeapStr as i64) {
+            let t = img.texts[c.bits];
+            put_u32(out, t.len());
+            put_text(out, t);
+        }
+    }
+    put_u32(out, img.code.len());
+    for i in img.code {
+        put_u32(out, (i.opcode << 24) | (i.dst << 16) | (i.src1 << 8) | i.src2);
+        put_u32(out, i.wide);
+    }
+    if img.files.len() > 0 {
+        put_text(out, PILC_DEBUG_MAGIC);
+        put_u32(out, img.files.len());
+        var f = 0;
+        while f < img.files.len() {
+            put_u64(out, img.bases[f]);
+            put_u32(out, img.files[f].len());
+            put_text(out, img.files[f]);
+            f = f + 1;
+        }
+        put_u32(out, img.spans.len());
+        for s in img.spans { put_u64(out, s); }
+    }
+    return out;
+}
+
+/// Writes `bytes` to `path`; whether every byte was written.
+pub fn pilc_write(path: str, ref bytes: PackedBuffer<u8>) -> bool => File.write_raw(path, bytes.raw_base(), bytes.byte_len());
+
+/// `bytes` as lowercase hex, two digits a byte.
+pub fn pilc_hex(ref bytes: PackedBuffer<u8>) -> str {
+    let digits = "0123456789abcdef";
+    var out = "";
+    var i = 0;
+    while i < bytes.len() {
+        let b = bytes[i] as i64;
+        out = out + digits.slice(b >> 4, (b >> 4) + 1) + digits.slice(b & 15, (b & 15) + 1);
+        i = i + 1;
+    }
+    return out;
+}
+
+// ------------------------------------------------------------------------------
+// Reading back
+// ------------------------------------------------------------------------------
+
+/// A reader over `.pilc` bytes; `ok` turns false at the first short read.
+struct PilcReader : IObject {
+    at: i64;
+    ok: bool;
+}
+
+fn get_u(ref bytes: PackedBuffer<u8>, var ref r: PilcReader, n: i64) -> i64 {
+    if r.at + n > bytes.len() {
+        r.ok = false;
+        return 0;
+    }
+    var v = 0;
+    var k = 0;
+    while k < n {
+        v = v | ((bytes[r.at + k] as i64) << (k * 8));
+        k = k + 1;
+    }
+    r.at = r.at + n;
+    return v;
+}
+
+fn get_text(ref bytes: PackedBuffer<u8>, var ref r: PilcReader, n: i64) -> str {
+    if r.at + n > bytes.len() {
+        r.ok = false;
+        return "";
+    }
+    var b: List<i64> = [];
+    var k = 0;
+    while k < n {
+        b.push(bytes[r.at + k] as i64);
+        k = k + 1;
+    }
+    r.at = r.at + n;
+    guard some s = from_utf8(b) else {
+        r.ok = false;
+        return "";
+    };
+    return s;
+}
+
+/// What reading `.pilc` bytes gave: the image when `ok`, else why not.
+pub struct PilcRead : IObject {
+    pub ok: bool;
+    pub image: PilcImage;
+    pub message: str;
+}
+
+fn bad(message: str) -> PilcRead => PilcRead { ok: false, image: pilc_image_new(), message: message };
+
+/// The image `bytes` hold, read as `load_from_bytes` reads them (the debug
+/// trailer included when present), or the reason it cannot be read.
+pub fn pilc_read(ref bytes: PackedBuffer<u8>) -> PilcRead {
+    var r = PilcReader { at: 0, ok: true };
+    if get_text(bytes, r, 4) != PILC_MAGIC { return bad("not a .pilc file (no PIL3 header)"); }
+    if get_u(bytes, r, 4) != PILC_VERSION { return bad("unsupported .pilc version"); }
+    var img = pilc_image_new();
+    let count = get_u(bytes, r, 4);
+    var tags: List<i64> = [];
+    var words: List<i64> = [];
+    var i = 0;
+    while i < count && r.ok {
+        tags.push(get_u(bytes, r, 8));
+        words.push(get_u(bytes, r, 8));
+        i = i + 1;
+    }
+    let area_len = get_u(bytes, r, 4);
+    let area = r.at;
+    r.at = r.at + area_len;
+    if !r.ok || r.at > bytes.len() { return bad("truncated constants"); }
+    i = 0;
+    while i < count {
+        if (tags[i] & 255) == (VmTag::TagHeapStr as i64) {
+            var t = PilcReader { at: area + words[i], ok: true };
+            let n = get_u(bytes, t, 4);
+            let s = get_text(bytes, t, n);
+            if !t.ok || t.at > area + area_len { return bad("truncated text constant"); }
+            let _ = pilc_const_text(img, s);
+        } else {
+            let _ = pilc_const_bits(img, tags[i], words[i]);
+        }
+        i = i + 1;
+    }
+    let n = get_u(bytes, r, 4);
+    i = 0;
+    while i < n && r.ok {
+        let low = get_u(bytes, r, 4);
+        let wide = get_u(bytes, r, 4);
+        let _ = pilc_emit(img, pilc_ins_raw((low >> 24) & 255, (low >> 16) & 255, (low >> 8) & 255, low & 255, wide), -1);
+        i = i + 1;
+    }
+    if !r.ok { return bad("truncated code"); }
+    if r.at + 4 <= bytes.len() && get_text(bytes, r, 4) == PILC_DEBUG_MAGIC {
+        let files = get_u(bytes, r, 4);
+        i = 0;
+        while i < files && r.ok {
+            img.bases.push(get_u(bytes, r, 8));
+            img.files.push(get_text(bytes, r, get_u(bytes, r, 4)));
+            i = i + 1;
+        }
+        let spans = get_u(bytes, r, 4);
+        if spans != img.code.len() { return bad("the debug trailer's span count is not the instruction count"); }
+        i = 0;
+        while i < spans && r.ok {
+            img.spans[i] = get_u(bytes, r, 8);
+            i = i + 1;
+        }
+        if !r.ok { return bad("truncated debug trailer"); }
+    }
+    return PilcRead { ok: true, image: img, message: "" };
+}
+
+// ------------------------------------------------------------------------------
+// Text
+// ------------------------------------------------------------------------------
+
+/// Constant `c` as text: `null`, `true`, an integer, `"text"`, or its tag
+/// and bits.
+pub fn pilc_const_text_of(ref img: PilcImage, c: PilcConst) -> str {
+    if c.tag == (VmTag::TagHeapStr as i64) { return "\"" + img.texts[c.bits] + "\""; }
+    if c.tag == (VmTag::TagNull as i64) { return "null"; }
+    if c.tag == (VmTag::TagBool as i64) { return if c.bits != 0 { "true" } else { "false" }; }
+    if c.tag == (VmTag::TagInt as i64) { return f"{c.bits}"; }
+    return f"tag{c.tag}:{c.bits}";
+}
+
+/// Instruction `i` as text: its opcode's name, its registers and its operand.
+pub fn pilc_ins_text(i: PilcIns) -> str {
+    let name = if i.opcode < VM_OP_NAMES.len() && VM_OP_NAMES[i.opcode] != "" { VM_OP_NAMES[i.opcode] } else { f"op{i.opcode}" };
+    return f"{name} r{i.dst}, r{i.src1}, r{i.src2}, {i.wide}";
+}
+
+/// The image as text, one line a constant then one an instruction.
+pub fn pilc_disasm(ref img: PilcImage) -> List<str> {
+    var out: List<str> = [];
+    var k = 0;
+    for c in img.consts {
+        out.push(f"#{k} = {pilc_const_text_of(img, c)}");
+        k = k + 1;
+    }
+    k = 0;
+    for i in img.code {
+        out.push(f"{k}: {pilc_ins_text(i)}");
+        k = k + 1;
+    }
+    return out;
+}

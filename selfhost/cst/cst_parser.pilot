@@ -1,8 +1,9 @@
 // ============================================================================
 // FILE: selfhost/cst/cst_parser.pilot
-// Milestone 53.1 & 53.2: Lossless Trivia-Preserving CST Parser & Recovery
-// Preserves 100% of whitespace/comments/shebangs and synthesizes zero-width
+// CST parser that keeps whitespace and comments.
+// Keeps whitespace, comments and shebangs, and inserts zero-width
 // MissingIdent, MissingRParen, and MissingRBrace recovery markers.
+// Reached only by the milestone53 Rust test; no `pilot` command runs it.
 // ============================================================================
 
 pub pkg selfhost.cst;

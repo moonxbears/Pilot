@@ -237,7 +237,7 @@ comptime {
 // STEP 2: THE `syntax` KEYWORD
 // =========================================================================
 // `syntax` rules are read by the seed parser (parse_syntax_decl in
-// crates/pilot-parser/src/lib.rs). Defining `syntax` here through
+// crates/pilot-parser/src/decl_syntax.rs). Defining `syntax` here through
 // `[SyntaxMacro]` is not built: the declaration that tried it spliced
 // `$params` into a parameter list, which does not parse, so it never took
 // effect; it was deleted on 2026-11-13 (the bootstrap sources must parse

@@ -87,7 +87,6 @@ pub enum NodeKind {
     MapExpr = 219,
     RangeExpr = 220,
     ComptimeExpr = 221,
-    PolyglotBlock = 222,
     /// `quote { .. }` / `quote expr`: `lhs` is the quoted code; `flags` is 1
     /// for a `syntax` rule's template, 0 for a quote value.
     QuoteExpr = 223,
@@ -169,7 +168,6 @@ impl NodeKind {
             219 => Self::MapExpr,
             220 => Self::RangeExpr,
             221 => Self::ComptimeExpr,
-            222 => Self::PolyglotBlock,
             223 => Self::QuoteExpr,
             300 => Self::IdentExpr,
             301 => Self::IntLit,
@@ -248,7 +246,6 @@ impl NodeKind {
             Self::MapExpr => "MapExpr",
             Self::RangeExpr => "RangeExpr",
             Self::ComptimeExpr => "ComptimeExpr",
-            Self::PolyglotBlock => "PolyglotBlock",
             Self::QuoteExpr => "QuoteExpr",
             Self::IdentExpr => "IdentExpr",
             Self::IntLit => "IntLit",
@@ -294,44 +291,6 @@ pub enum CallQuoteKind {
     ReactiveSignal = 4,
     SymbolicAdjoint = 5,
     EffectDryRun = 6,
-}
-
-#[repr(u8)]
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum ExprPrecedence {
-    Lowest = 0,
-    Cascade = 1,
-    Assign = 2,
-    LambdaTernary = 4,
-    CatchRecovery = 6,
-    Pipe = 8,
-    Coalesce = 10,
-    LogicalOr = 12,
-    LogicalAnd = 14,
-    LogicalNot = 16,
-    Comparison = 18,
-    ArrowDto = 20,
-    Range = 22,
-    BitOr = 24,
-    BitXor = 26,
-    BitAnd = 28,
-    Shift = 30,
-    AddSub = 32,
-    MulDivRem = 34,
-    UnaryPrefix = 36,
-    Power = 38,
-    PostfixLed = 40,
-}
-
-#[repr(u8)]
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum TypePrecedence {
-    Lowest = 0,
-    Fallible = 5,
-    FnArrow = 10,
-    Union = 15,
-    Intersection = 20,
-    PostfixOptional = 30,
 }
 
 #[repr(u16)]
@@ -805,17 +764,6 @@ impl AstArena {
             .intern(raw_kw.strip_prefix(':').unwrap_or(raw_kw));
         self.alloc_node(NodeKind::KeywordLit, 0, span, sym.0, 0)
     }
-    #[inline]
-    pub fn alloc_polyglot_block(
-        &mut self,
-        lang: &str,
-        code: &str,
-        flags: u16,
-        span: ByteSpan,
-    ) -> NodeId {
-        let (l, c) = (self.interner.intern(lang), self.interner.intern(code));
-        self.alloc_node(NodeKind::PolyglotBlock, flags, span, l.0, c.0)
-    }
 
     #[inline]
     pub fn node(&self, id: NodeId) -> &AstNode {
@@ -905,13 +853,5 @@ mod tests {
     #[test]
     fn ast_node_is_strictly_16_bytes() {
         assert_eq!(core::mem::size_of::<AstNode>(), 16);
-        assert!(
-            TypePrecedence::PostfixOptional > TypePrecedence::Intersection
-                && TypePrecedence::Union > TypePrecedence::Fallible
-        );
-        assert!(
-            ExprPrecedence::Cascade < ExprPrecedence::Assign
-                && ExprPrecedence::Pipe < ExprPrecedence::PostfixLed
-        );
     }
 }

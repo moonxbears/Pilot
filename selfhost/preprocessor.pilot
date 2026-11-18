@@ -1,7 +1,8 @@
 // ============================================================================
-// Pilot Self-Hosted Stage 0 Preprocessor (selfhost/preprocessor.pilot)
-// 100% Pilot Conditional Compilation (define, undef, if/elif/else/endif,
-// region/endregion, error, warning, pragma warning) & PREPROC001-PREPROC008
+// FILE: selfhost/preprocessor.pilot
+// Line-directive preprocessor: #define, #undef, #if/#elif/#else/#endif,
+// #region/#endregion, #error, #warning, #pragma warning (PREPROC001-PREPROC008).
+// Reached only by the milestone52 Rust test; no `pilot` command runs it.
 // ============================================================================
 
 pub pkg selfhost;

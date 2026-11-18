@@ -1,7 +1,7 @@
 // ==============================================================================
 // FILE: selfhost/adapter/rust_sig.pilot
-// Milestone 16.1: Native Rust Crate Adapter - Rust Public Item & Signature Parser
-// Pure-Pilot parser for Rust items: struct, enum, fn, trait, impl, &[T], &str, Vec, Result
+// Rust public item and signature parser: struct, enum, fn, trait, impl.
+// Reached only by the milestone16 Rust test; no `pilot` command runs it.
 // ==============================================================================
 pub lvl(0) pkg selfhost.adapter;
 

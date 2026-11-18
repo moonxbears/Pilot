@@ -12,6 +12,8 @@
 
 ## Work Queue (owner, 2026-11-17: "approve them and queue them up for working on")
 
+**Execution order of every proposal, by phase and track, with dependencies: [`docs/roadmap.md`](file:///home/moony/Documents/dev/projects/Pilot/docs/roadmap.md).** This queue is the near-term part of it.
+
 The path to `PROP-022`, in order. Each item is built and verified on its own (three engines, `pilot gate --full`) before the next starts.
 
 | # | Item | Approved 2026-11-17 | Still needs, before its Rust is touched |
@@ -20,13 +22,21 @@ The path to `PROP-022`, in order. Each item is built and verified on its own (th
 | 2 | `PROP-005` 5B.4 | yes | decision **D4**, per file: rewrite each legacy `__engine` file onto owner types or delete it; Rust link-list edits (`run.rs`) itemized |
 | 3 | `PROP-005` 5B.5, 5B.6 | yes | their Rust file lists, if any, itemized |
 | 4 | `PROP-005` 5C | yes | its Rust file list, if any, itemized |
-| 5 | `PROP-005` 5D (bytecode from PilIR, `pilot run --via-ir`) | yes | the 5D Rust list itemized (`.pilc` spans: v6 debug section or in-memory spans) |
-| 6 | `PROP-008` step 2, remaining work: operator tokens from the declared tables | yes | its Rust file list itemized (status row: "steps 2–3 need itemized lists") |
+| 5 | `PROP-005` 5D (bytecode from PilIR, `pilot run --via-ir`) — **Pilot side built 2026-11-18** (build order 1–5; 6–7 pass without lowering of their own; see 5D "As built") | yes | owner's last look at the 5D Rust list, cut to the minimum (4 files: `pilc.rs` debug trailer +35, `run.rs` locations +20, delete the `milestone55` test −454, its `anticheat.rs` row −1; net about −400); the direction was approved 2026-11-18 on "Pilot first" terms |
+| 6 | `PROP-008` step 2, remaining work: operator tokens from the declared tables — **PILOT PART BUILT 2026-11-18; RUST LIST APPROVED 2026-11-18 WITHOUT `expr.rs` AND BUILT IN PART (−80); RESULT APPROVED "Pilot first"; GRAM002 BUILT IN PILOT** (see "Step 2 Rust as built"; final Rust file list there for the last look before merging) | yes | approval of Amendment 008-C (`crates/pilot-parser/src/modules.rs`, so the program's own symbols can be lexed), or the owner's choice to move that lex to `PROP-022` with the member call |
 | 7 | `PROP-022`, the rest (§3): delete `map_binop_sym`, `binop_code`, `prefix_flag`, the `TryPropagateExpr` special case, the native index parse, `BinaryOp` | yes | its Rust file list fixed when sequenced (§4) |
 
 - **What the approval covers:** the direction and order of every item above, and all of its Pilot work, which may start as each item comes up.
 - **What it does not cover (rules 1 and 2 above):** a Rust file not yet named. When an item reaches its Rust, its exact file list is written into its entry here and shown to the owner for a one-word approval before any Rust edit.
-- **Not in this queue:** `PROP-005` 5E (needs the bootstrap T1/T2 decision) and 5F. `PROP-022` needs only 5D.
+- **Owner decisions 2026-11-18** (answers to the open-decisions list, in its numbering):
+  1. `PROP-035` Amendment A1: **approved** (built; see `PROP-035` §5).
+  2. `PROP-005` 5B.4 group 3, the CLI host services: **"Pilot first"**. Each of the 20 calls gets a Pilot `[EngineOp]` owner (one `ToolHost` owner type for the tool natives, the five `Map` natives on `Map`), and every caller goes through the owner method. Before any Rust or the owner registry (`airlock_host_ops()`) is touched, each call is first checked for whether it can be rebuilt in Pilot over existing owners and deleted instead; only the calls that cannot are given owners, and that list comes back for approval.
+  3. Delete `crates/pilot-analysis/src/diagnostics.rs`: **approved** (deleted).
+  4. `PROP-033`: **withdrawn**.
+  5. `PROP-019`: **approved** (roadmap B2).
+  6. `PROP-025`: **approved** (roadmap B5, B7).
+  7. and 8. The 5D Rust list and the `PROP-008` step 2 result, including the GRAM002 strictness question: **approved on "Pilot first" terms**. Whatever can be done in Pilot is done in Pilot; the Rust part is cut to the irreducible minimum, and the GRAM002 option that keeps the check in Pilot is taken. The itemized Rust lists still come back for a final look before they are merged.
+- **Not in this queue:** `PROP-005` 5E (bootstrap **T1** decided by the owner 2026-11-18; its Rust list is not itemized yet) and 5F. `PROP-022` needs only 5D.
 
 ---
 
@@ -38,7 +48,7 @@ The path to `PROP-022`, in order. Each item is built and verified on its own (th
 | **`PROP-002a`** | Define the 3-File Airlock Under the B+ Freeze (51 scalar/pointer `HostOp`s), Retire `pilot-rt`, Consolidate Stage-A Natives & Arm `GATE021` | `<= 0` net (`9` $\rightarrow$ `8` crates; `-683` `pilot-rt`) | **`APPROVED; A1 MERGED (d055851); C2 RESOLVED 2026-11-15 (BASELINE MEASURED; OWNER THRESHOLD 5% SLOWER MAX; CHECKED BY record.pilot --check)`** |
 | **`PROP-002b`** | Bucket B/D `.pilot` Migration to Owner Methods (`~1,875` `map_*` + `~800` `ast_*` sites), Retire Transitional Native Bindings & `MapBuffer` Duplicate, Retire `heap.rs`/`host.rs` | To be itemized | `DRAFT — MAP SLICE ITEMIZED 2026-11-15 (PILOT ONLY, 0 RUST; RUN BEFORE PROP-007 STEP 4 UNDER OPTION M) — APPROVED 2026-11-15, BUILT; C2 PASSES AFTER `PROP-013` (2026-11-15); PilIR STILL USES NATIVE BINDINGS FOR `Map`; OTHER TYPES AND BUCKETS B/D STILL TO ITEMIZE` |
 | **`PROP-007`** | Implement `[Inline]`: PilIR Pass (Pilot), Forced Mode for `[EngineOp]` Owners, Seed Lowering (Rust) | Seed part to be itemized; offset by native-binding dispatch removal | `DRAFT — PILIR PART (STEPS 1–3) BUILT; SEED PART (STEP 4): OWNER CHOSE OPTION M 2026-11-15 (MEASURE ON PROP-002b's MAP SLICE FIRST; BUILD OPTION F ONLY IF C2 FAILS)` |
-| **`PROP-008`** | Every Operator Declared by an Attribute on Its Interface or `syntax` Rule (Named Levels, Closed Parse Shapes), and Comptime User-Defined Operators | Lexer/parser operator code removed; to be itemized | `STEP 1 + AMENDMENT 008-A APPROVED 2026-11-15 — IN PROGRESS; STEP 2 (OPERATOR TOKENS FROM TABLES) APPROVED 2026-11-17 AND QUEUED (WORK QUEUE ITEM 6); STEPS 2–3 NEED ITEMIZED LISTS` |
+| **`PROP-008`** | Every Operator Declared by an Attribute on Its Interface or `syntax` Rule (Named Levels, Closed Parse Shapes), and Comptime User-Defined Operators | Lexer/parser operator code removed; to be itemized | `STEP 1 + AMENDMENT 008-A APPROVED 2026-11-15 — IN PROGRESS; STEP 2 (OPERATOR TOKENS FROM TABLES) APPROVED 2026-11-17 AND QUEUED (WORK QUEUE ITEM 6); STEP 2 PILOT PART BUILT 2026-11-18; ITS RUST LIST APPROVED 2026-11-18 ("Approve, drop expr.rs") AND BUILT IN PART (−80); RESULT APPROVED 2026-11-18 ON "PILOT FIRST" TERMS, GRAM002 BUILT IN PILOT; AMENDMENT 008-C (`modules.rs`) AWAITING APPROVAL; STEP 3 NEEDS AN ITEMIZED LIST` |
 | **`PROP-009`** | Every Receptor Word and `__ssa` Defined by a `syntax` Rule with a `quote` Template (Sequence Rule Heads, `asm` Machine Ops, Core Forms) | Step 1a must be a net deletion (`query.rs`, `with_scope.rs`); step 1b about +60 | `STEPS 1A + 1B BUILT 2026-11-15; OPTION (C) BUILT — STOPPED: STEP 1A IS ABOUT +56 RUST, NOT YET A NET DELETION (§9); STEP 1C (SYNTAX CLASSES + RULEARM DELETION, §10) BUILT 2026-11-15 (−60 RUST; PROP-009 TOTAL STILL +66; `milestone51` RUST TEST EDIT AWAITS APPROVAL); STEP 2 `CoreForm` PHASES 2A + 2B APPROVED TOGETHER 2026-11-15 AND BUILT (§11; +186 RUST, OVER THE −15..−40 ESTIMATE, ACCEPTED BY THE OWNER 2026-11-15; `true`/`false`/`none` NOT MOVED); STEP 2C GROUP 1 (`errdefer`/`become`, §12, about −30 RUST) APPROVED 2026-11-15 AND BUILT; STEP 2C GROUP 2 (UNBUILT KEYWORDS, §13, about −90 RUST) APPROVED 2026-11-15 AND BUILT (−63 RUST); STEP 2C GROUP 3 (STRAY `else`, DEAD `select` ARM, §14, about −9 RUST) APPROVED 2026-11-15 AND BUILT WITH AMENDMENT `RejectWord` (−5 RUST); §15 (A FUNCTION'S `where` CLAUSE IS DROPPED SILENTLY) OPTION B APPROVED 2026-11-15 AND BUILT (±0 RUST); STEP 3: OPTION (b) CHOSEN BY OWNER 2026-11-15 (FILE LIST TO ITEMIZE); `milestone51` TEST EDIT APPROVED 2026-11-15 AND MADE; `emit_ssa_*` HOOKS REMOVED (§16); §17 (INLINE FOREIGN BLOCKS) OPTION R APPROVED 2026-11-15 AND BUILT (−8 RUST, NOT −18; `Rest` FIX, TEST DELETION AND `milestone51` LINE APPROVED AS EXTRAS)` |
 | **`PROP-010`** | Purge Dead Rust Found 2026-11-15: the Unused Rust `comptime` Evaluator and Unreferenced Items | `-191` | `APPROVED BY OWNER 2026-11-15 AND BUILT` |
 | **`PROP-011`** | Delete the Unrun Bootstrap Stage List `stdlib/core/bootstrap.pilot` (Rust Test Edit Only) | `0` (`src` unchanged) | `APPROVED BY OWNER 2026-11-15 AND BUILT` |
@@ -49,26 +59,27 @@ The path to `PROP-022`, in order. Each item is built and verified on its own (th
 | **`PROP-016`** | Format All Rust With `rustfmt` and Count the Seed's True Size (147 files; split `pilot-parser/src/decl.rs`) | `+7,177` `src` lines of formatting and file headers, `0` code | `APPROVED BY OWNER 2026-11-15 (D1 (a): CEILING 27,800) AND BUILT` |
 | **`PROP-017`** | Update Three Rust Tests for the Package Loader: New Never-Linking Case and the Moved Inspect Selector (Rust Test Edits Only) | `0` (`src` unchanged) | `APPROVED BY OWNER 2026-11-15 ("Approve PROP-017") AND BUILT` |
 | **`PROP-018`** | Operator Fixity From Holes in the Symbol (`op _+_`, `op -_`, `op _?`, `op \|_\|`, `op _[_]`), Optional Where the Parameter Count Decides; the Unpack Operators Become `op *`, `op **`, `op *..` | `+54` net in `crates/pilot-parser` (`decl.rs`, `tables.rs`; estimated `+20`); deletions follow in `PROP-008` step 2 and `PROP-005` | `APPROVED BY OWNER 2026-11-16 ("Approve as recommended": §6 decisions 1–4 as recommended) — BUILT 2026-11-16 (§7)` |
-| **`PROP-019`** | Type-Position Operators Declared in Pilot: Their Levels, Associativity and Prefix Symbols Leave Rust; `op` Symbols Take Values Only | about `-25` to `0` in `crates/pilot-parser` (`tables.rs`, `stmt.rs`, `expr.rs`) and `crates/pilot-ast/src/lib.rs` | `DRAFT 2026-11-16 — AWAITING OWNER APPROVAL` |
+| **`PROP-019`** | Type-Position Operators Declared in Pilot: Their Levels, Associativity and Prefix Symbols Leave Rust; `op` Symbols Take Values Only | about `-25` to `0` in `crates/pilot-parser` (`tables.rs`, `stmt.rs`, `expr.rs`) and `crates/pilot-ast/src/lib.rs` | `APPROVED 2026-11-18 (owner: "approve"); QUEUED (roadmap B2)` |
 | **`PROP-020`** | Read `const` Generic Parameters Written After the Colon (`N: const usize`), Closing Known Bug `parser.const_generic_struct` | `+5` in `crates/pilot-parser/src/generic_params.rs` (estimated `+3`; `rustfmt` wraps the condition) | `APPROVED BY OWNER 2026-11-16 ("Approve PROP-020") AND BUILT` |
 | **`PROP-021`** | The Lexer Declared in Pilot: Token Patterns Compiled by Pilot Into a State Table the Seed Only Runs (numbers, strings, comments, names, operators; `LIT001`/`LIT002`, `LEX001`–`LEX003`; correctly rounded float literals in Pilot) | about `-900` to `-1,000` (`crates/pilot-lexer` from 1,120 to about 200; parser literal handling); one appended `bridge_lang.pilot` hook | `21A–21H BUILT (21H 2026-11-17); AMENDMENT A1 APPROVED 2026-11-17` |
 | **`PROP-022`** | Operator Meaning Declared in Pilot: Every Operator Use Lowers to Its Member Call or Its Rule's Template | about `-150` or more in `crates/pilot-parser` and `crates/pilot-ast`; sequenced after `PROP-008` step 2 and `PROP-005` | `DRAFT 2026-11-16 — DESIGN; SLICE 22A (STRUCT PREFIX OPERATORS) APPROVED 2026-11-16 ("Approve 22A") AND BUILT (`lower_expr.rs` +20); THE REST APPROVED 2026-11-17 AND QUEUED AFTER PROP-008 STEP 2 AND PROP-005 5D (WORK QUEUE ITEM 7)` |
 | **`PROP-023`** | The Language Section of `toolchain.pilc`: Pilot's Lexical, Grammar and Meaning Tables Precompiled, Read by Number; a Genesis File | design only; deletes the Rust lexer and parser when built | `DRAFT 2026-11-16 — DESIGN, NOT FOR BUILDING YET` |
 | **`PROP-024`** | `//` Always Starts a Comment: Delete the `//=` and `//` Operator Tokens | about `-6` in `crates/pilot-lexer` (`lexer.rs`, `token.rs`); built `-4` | `APPROVED BY OWNER 2026-11-16 ("Approve PROP-024") AND BUILT` |
-| **`PROP-025`** | The Parser in Pilot: One Grammar-Table-Driven Pilot Parser Builds the AST the Checker and PilIR Read; the Rust Parser Is Deleted | Pilot work first (no Rust change); at the cutover deletes `crates/pilot-parser` (9,165 lines) and `crates/pilot-ast` (917) under `PROP-006` | `DRAFT 2026-11-16 — DESIGN; AWAITING OWNER APPROVAL` |
+| **`PROP-025`** | The Parser in Pilot: One Grammar-Table-Driven Pilot Parser Builds the AST the Checker and PilIR Read; the Rust Parser Is Deleted | Pilot work first (no Rust change); at the cutover deletes `crates/pilot-parser` (9,165 lines) and `crates/pilot-ast` (917) under `PROP-006` | `APPROVED 2026-11-18 (owner: "approve"); QUEUED (roadmap B5, B7); EACH RUST LIST STILL COMES BACK` |
 | **`PROP-026`** | Seed: a Struct's Operator Applies to the Result of Another Operator or a Method Call (`a + b + c`), Closing Known Bug `seed.chained_struct_operator` | about `+20` in `crates/pilot-vm/src/lower_expr.rs`; deleted with the rest of the seed bytecode compiler by `PROP-005`; built `+28` | `APPROVED BY OWNER 2026-11-16 ("Approve PROP-026") AND BUILT` |
 | **`PROP-027`** | Operators a Type Gains Through `ext` Apply to Literals (`"0" ..= "9"` as a Byte-Range Pattern); a Struct's `op _[_]` Takes a Range Index (`hex[1 ..= 6]`) | small, in `crates/pilot-vm/src/lower_expr.rs`; plus Pilot lowering in `selfhost/ir/` | `APPROVED BY OWNER 2026-11-16 ("Approve PROP-027")` |
 | **`PROP-028`** | Fill the `bridge.proc_signal` Seam's `signal_handle` Sub-Op, So `pilot test --timeout` Can Stop a Hung Case | `+4` in `crates/pilot-vm/src/bridge.rs` | `APPROVED BY OWNER 2026-11-16 ("Approve PROP-028") AND BUILT` |
 | **`PROP-029`** | Seed Lexer: `!` Ends No Operand, So `!.on` Reads as `!self.on`, Closing Known Bug `seed.not_prefix_dot` | `0` (one argument in `crates/pilot-lexer/src/lexer.rs`) | `SUPERSEDED 2026-11-17 by PROP-021 21H` |
 | **`PROP-030`** | Seed: A `const` List or Map of Any Length Compiles (`materialize_cmap` Releases Each Element's Register), Closing Known Bug `seed.const_list_registers` | `+6` in `crates/pilot-vm/src/lib.rs` | `APPROVED BY OWNER 2026-11-16 ("Approve PROP-030") AND BUILT` |
 | **`PROP-032`** | Enums With Text Values (`enum CacheField { Key = "key", .. }`): `as str`, printing, `ENUM001`–`ENUM003` | about `+12` in `crates/pilot-vm/src/lib.rs` (`register_enum`) | `APPROVED BY OWNER 2026-11-16 ("Approve PROP-032")` |
-| **`PROP-033`** | The Analyzer Skips Units Whose Diagnostics Are Thrown Away (`ast_unit_is_user`) | about `+10` in `crates/pilot-cli/src/run.rs`, `crates/pilot-analysis/src/{pipeline,infer}.rs` | `PROPOSED 2026-11-17 — AWAITING OWNER APPROVAL` |
+| **`PROP-033`** | The Analyzer Skips Units Whose Diagnostics Are Thrown Away (`ast_unit_is_user`) | about `+10` in `crates/pilot-cli/src/run.rs`, `crates/pilot-analysis/src/{pipeline,infer}.rs` | `WITHDRAWN 2026-11-18 (owner: "withdraw"; the analyzer was deleted by PROP-035)` |
 | **`PROP-034`** | A String Built From Many Parts Is Allocated Once: f-Strings and `+` Chains Lower to One `str_build`, and a Unique String Appends in Place (Perceus) | about `+15` for the seed VM's n-part build (opcode or appended `HostOp`), itemized when sequenced; the rest is Pilot and C | `DRAFT 2026-11-17 — DESIGN; SEQUENCED AFTER PROP-025 STEPS 1–3` |
-| **`PROP-035`** | Stop Running the Retired `selfhost/analyzer.pilot`: Delete `run::analyze`, `cli_analyze` and the Analyzer Loader | about `-140` (`crates/pilot-cli`, `crates/pilot-analysis`) | `APPROVED 2026-11-17; BUILT 2026-11-17; A1 (test counts) AWAITING APPROVAL` |
+| **`PROP-035`** | Stop Running the Retired `selfhost/analyzer.pilot`: Delete `run::analyze`, `cli_analyze` and the Analyzer Loader | about `-140` (`crates/pilot-cli`, `crates/pilot-analysis`) | `APPROVED 2026-11-17; BUILT 2026-11-17; A1 APPROVED AND BUILT 2026-11-18; diagnostics.rs DELETED 2026-11-18` |
 | **`PROP-036`** | Seed: Indexing a Literal `const` List or Map Reads One Value Built Once, Not a Copy Rebuilt on Every Read | about `+30` in `crates/pilot-vm/src/{lower_expr,lower_global,lib}.rs`; built `+41`; deleted with the seed bytecode compiler by `PROP-005` | `APPROVED BY OWNER 2026-11-18 ("Approve PROP-036") AND BUILT` |
+| **`PROP-039`** | The VM Frees Memory Where Pilot Says: `.pilc` Carries Perceus `dup`/`drop`, the Seed VM Counts References, and the Tracing Collector Is Deleted | about `+40` in `crates/pilot-vm` (a count per heap slot, two actions), then about `-274` (`collect.rs`) once the Rust compiler is gone (`PROP-005`) | `DRAFT 2026-11-18 — DESIGN; NEEDS OWNER APPROVAL` |
 | **`PROP-003`** | Wave 3, itemized 2026-11-15: slices 3A–3F (struct `invariant` rule, dead f-string desugarer, `op_checked` to Pilot, contract rules, f-string scanner dedupe, small trims) | about `-270` now (most of the planned `-2,850` waits for `PROP-005`/`006`) | `3A + 3B BUILT 2026-11-15 (−29 RUST); 3C DEFERRED TO PROP-005; 3D–3F DRAFT` |
 | **`PROP-004`** | Retire Legacy `crates/pilot-analysis` Crate (`1,591` formatted `src` LOC; `647` packed) & Migrate Milestone Harnesses to `.pilot` | `-1,591` LOC (formatted) | `PLANNED (WAVE 4)` |
-| **`PROP-005`** | Replace Rust `BytecodeCompiler` (`24` `lower_*.rs` + `vm_gen.rs` + `codes.rs`) with `selfhost/vm/ir_to_pilc.pilot` | about `-7,950` LOC packed, about `-8,770` formatted (PROP-016) | `ITEMIZED 2026-11-15: 5A APPROVED AND BUILT (PILOT ONLY); 5B ITEMIZED (SLICES 5B.1–5B.6); D1/D2/D3/D5 DECIDED 2026-11-15, D4 OPEN; 5B.1 AND 5B.2 APPROVED AND BUILT (PILOT ONLY); 5B.3 APPROVED AND DONE 2026-11-17 (RUST AMENDMENTS 5B.3a AND 5B.3b BUILT); 5B.4–5B.6, 5C AND 5D APPROVED 2026-11-17 AND QUEUED (WORK QUEUE ITEMS 2–5; D4 AND EACH RUST LIST STILL NEEDED); 5E–5F NOT APPROVED; BOOTSTRAP T1/T2 NEEDS AN OWNER DECISION BEFORE 5E` |
+| **`PROP-005`** | Replace Rust `BytecodeCompiler` (`24` `lower_*.rs` + `vm_gen.rs` + `codes.rs`) with `selfhost/vm/ir_to_pilc.pilot` | about `-7,950` LOC packed, about `-8,770` formatted (PROP-016) | `ITEMIZED 2026-11-15: 5A APPROVED AND BUILT (PILOT ONLY); 5B ITEMIZED (SLICES 5B.1–5B.6); D1/D2/D3/D5 DECIDED 2026-11-15, D4 DECIDED 2026-11-17; 5B.1 AND 5B.2 APPROVED AND BUILT (PILOT ONLY); 5B.3 APPROVED AND DONE 2026-11-17 (RUST AMENDMENTS 5B.3a AND 5B.3b BUILT); 5B.4–5B.6, 5C AND 5D APPROVED 2026-11-17 AND QUEUED (WORK QUEUE ITEMS 2–5; EACH RUST LIST STILL NEEDED); 5E–5F NOT APPROVED; BOOTSTRAP T1 DECIDED 2026-11-18 ("T1: toolchain.pilc")` |
 | **`PROP-006`** | Precompiled `toolchain.pilc` Stage-3 Cutover — Delete `pilot-{lexer,parser,ast,span,intern}` | `~ -5,950` LOC packed (the five crates are `11,386` formatted, PROP-016) | `PLANNED (WAVE 6 -> ~1,800 LOC FLOOR)` |
 
 ---
@@ -129,7 +140,7 @@ The path to `PROP-022`, in order. Each item is built and verified on its own (th
 ## `PROP-002a` — Define the 3-File Airlock Under the B+ Freeze, Retire `pilot-rt`, Consolidate Stage-A Natives & Arm `GATE021`
 
 - **Status:** **`APPROVED 2026-11-14; AMENDMENT A1 APPROVED 2026-11-14 AND APPLIED ON BRANCH claude/prop002a-a1`**. Most of the original `PROP-002a` landed on `f4` in `236afaa` and `7920302` (including `bridge_os.pilot`) before A1 existed. A1 is applied on top of that, together with the 18 uncommitted files taken over from the main checkout. See "A1 as built" below.
-- **Origin:** replaces the original `PROP-002` draft, following the Claude ↔ Gemini review in [`conversations.md`](file:///home/moony/Documents/dev/projects/Pilot/conversations.md) (points P1–P9 closed; the owner chose freeze model **B+** on 2026-11-14). The "Final Consensus" section of that file is the reasoning behind every item below. Amendment A1 (P10 in the same file) changes the Pilot side of the airlock.
+- **Origin:** replaces the original `PROP-002` draft, following the Claude ↔ Gemini review in `conversations.md` (deleted 2026-11-18; read it with `git show 5c11497:conversations.md`) (points P1–P9 closed; the owner chose freeze model **B+** on 2026-11-14). The "Final Consensus" section of that file is the reasoning behind every item below. Amendment A1 (P10 in the same file) changes the Pilot side of the airlock.
 - **Behaviour change:** none. Conformance counts measured on `f4` at `f8dca46` (488 seed, 480 `--ir`, 480 `--emit c`) must not drop.
 
 ### Amendment A1 — "One Op, One Owner" (Owner Direction 2026-11-14, Approved)
@@ -966,6 +977,80 @@ Found while mapping the seed before writing code:
   - `quote { u || not t }.source()` prints `u || t`, dropping `not`.
   - A quote whose statement starts with `not` gets `SYN001` (`stmt.rs` statement-start check).
 - **`stmt.rs:229`** (`pattern_literal_bp`) still uses its own floor of 36.
+
+**Step 2 re-surveyed after `PROP-021` 21H (2026-11-18, read and run on `948eec2`).** Step 2 was written before the lexer moved into Pilot. What it still has to do, from the code:
+- **Built-in operator spellings are already table-driven.** The seed lexer (`crates/pilot-lexer/src/lexer.rs`, 421 lines) has no operator byte arms left: it runs `stdlib/core/lex/toolchain.lex`, whose operator families are every `op` symbol piece and grammar-attribute symbol the standard library declares (`declared_operator_symbols`, `selfhost/check/grammar_attrs.pilot`, through `stdlib/core/lex/operators.pilot`) plus the 20 spellings and 6 call-quote openers of the shrink-only `stdlib/core/lex/seed_forms.pilot`. Longest match is the DFA's. So "a longest-match loop over the declared symbols" exists for the standard library's operators; none of the seed-form spellings is declared yet, so `seed_forms.pilot` cannot shrink without giving them a meaning (`PROP-022`).
+- **Every operator spelling still has its own `TokenKind`.** `crates/pilot-lexer/src/token.rs` has 73 operator kinds. Each family's number is copied by hand into `SEED_FAMILY_KINDS` (`stdlib/core/lex/seed_kinds.pilot`), so a new standard-library operator still needs a new Rust variant (or LEX008). The parser names 43 of the 73; **30 are never named in Rust**: `Slash`, `Percent`, `ShiftLeft`, `EqEqual`, `NotEqual`, `LessEqual`, `GreaterEqual`, `Walrus`, `DoubleStarEqual`, `PipeBackward`, `Coalesce`, `JsonGetText`, `JsonContains`, `JsonContained`, `DoubleAmper`, `DoublePipe`, `Spaceship`, `PlusPipe`, `MinusPipe`, `StarPipe`, `PlusPercent`, `MinusPercent`, `StarPercent`, `PlusQuestion`, `MinusQuestion`, `StarQuestion`, `DoublePercent`, `TildeGreater`, `GreaterDotDotLess`, `SwapEqual`. The parser reads those by text only.
+- **The parser reads infix operators by text from the grammar.** `expr.rs` looks every infix symbol and word up in `infix_ops` (filled from `grammar_entry` by `tables.rs` `apply_grammar_entry`, keyed by symbol text), postfix ones in `postfix_ops`, and a prefix operator's power in `prefix_ops`. The 43 kinds it names are parse-shape logic still in Rust: prefix flags (`prefix_flag`: `-`, `+`, `!`, `~`, `&`, `<-`, `*`, `**`, `*..`), ranges and cascades (`..`, `..=`, `..<`, `>..`, `?..`), safe navigation (`?.`), call quotes, compound assignments, type syntax (`<`, `>`, `>>`, `*`, `@`, `?`, `^`, `|`, `&`, `->`), `$` holes and `...`. Those are `PROP-022`'s and `PROP-025`'s, not step 2's.
+- **A program's own grammar attributes already reach the seed's Pratt table**, for the file that declares them: `parse_program` ingests each item of a file whose text holds `[`, so `[Infix(::Multiply, ::Left)]` on a user `op` adds an entry while the file parses. An imported user package's entries (and its `syntax` rules) are not visible in the importing file.
+- **Probes (run 2026-11-18):**
+  - `[Infix(::Multiply, ::Left)] op <.>` used as `a <.> b`: `error[SYN001]: Expected RParen, found Ident`. The table lexes `<.>` as `<`, `.`, `>`.
+  - The same with `@>` (one token already, a seed form with no meaning): parses through the user's entry, then the seed compiler stops with `error[SYN001]: unknown binary operator` on `pilot run`, `pilot ir run` and `pilot check` alike: `binop_code("@>")` is 0, and a `BinaryExpr` carries only a native code.
+  - `op %%` on a struct with no attribute: works (`%%` is the standard library's; PROP-026 dispatch).
+  - `op +-` declared, `a +-b` written: silently read as `a + (-b)` (it failed only because the struct had no prefix `-`).
+  - A library's `quote { 5 +-3 }` read in a file that declares `+-` keeps the library's grouping (binary, unary, int): templates are parsed in their defining file.
+  - A `syntax` rule of an imported user package: `error[DECL001]: no function named plus_neg`.
+
+**Step 2, Pilot part, as built (2026-11-18; no Rust).**
+- `selfhost/check/grammar_attrs.pilot`: **GRAM001** (an operator attribute in the program declares a built-in symbol or readable word: declared outside the user's files, or a family the seed's table already lexes as one token), **GRAM003** (a later declaration of one symbol in one position disagrees in level, associativity or shape with the first), and seam **`grammar.user_ops_seed`** on every other operator a program declares (an attribute, or an infix/prefix/postfix `op` whose symbol the seed's table has no family for), so `a +-b` can no longer silently mean `a + (-b)`. The checker now links `stdlib/core/lex/seed_kinds.pilot` and the `stdlib/core/operators/` declarations (`selfhost/cli/host.pilot`). `GRAM001`/`GRAM003` are in `selfhost/diagnostics/errors.pilot`.
+- Tests: `operators/err_gram001`, `operators/err_gram003`, `operators/err_user_op_seed_seam` (three engines); known bugs `seed.user_operator` (`known_bugs/user_infix_operator`: `<.>` at `Multiply`, `Left`; grouping worked by hand, prints 24, 123, 45) and `seed.operator_hygiene` (`known_bugs/operator_hygiene` with `known_bugs/lib/hygiene_ops.pilot`: a library's quote and rule keep the library's grammar; prints binary, unary, int, 2, -2 5).
+- **Not built:** **GRAM002** (needs the seed to lex a program's own symbols first; its check re-lexes each file with and without the new symbol in Pilot, over the table `stdlib/pilot/lex/modes.pilot` already runs, and reports a match of the new symbol whose ends do not fall on the old token boundaries; whether a file that only imports the symbol may have any old split change at all is an owner decision) and **GRAM004** (needs `tighter_than` / `looser_than` placement, which the attributes do not take yet; the seed reads levels only as positions in `OpLevel`). Neither has a catalog entry until it is built.
+
+**Step 2 Rust file list (2026-11-18) — APPROVED BY OWNER 2026-11-18 WITH ONE CHANGE ("Approve, drop expr.rs"): every row below except `crates/pilot-parser/src/expr.rs`. The member call for an operator with no native code stays with `PROP-022`.** Strictly these files. Scope: one generic operator token, the program's own infix operator symbols lexed and parsed on the seed, and the dead Rust found while surveying (rule 3). Prefix and postfix user operators, `map_binop_sym`, `prefix_flag` and the remaining 43 operator kinds stay for `PROP-022` / `PROP-025`.
+
+| File | Change | Lines |
+| :--- | :--- | ---: |
+| `crates/pilot-lexer/src/token.rs` | Add `Operator = 269`, the one kind of an operator family the parser does not name. Delete the 30 operator variants above, which nothing in `crates/` names. Delete `RawDslBlock` (no table family has kind 29, so it is never produced) and the unused `TokenTape::slice_str`. | about −34 |
+| `crates/pilot-lexer/src/lexer.rs` | `run(t, src, extra)`: in the base mode, where one of `extra` (the program's own operator symbols) matches at `pos` longer than the table's token, emit `Operator` for it (role plain). No symbol, character or word is written in Rust. | about +14 |
+| `crates/pilot-lexer/src/lib.rs` | `tokenize(table, source, extra)` passes the symbols through. | 0 |
+| `crates/pilot-parser/src/lib.rs` | `tokenize(src)` passes no symbols. `parse_with_tables` / `parse_and_ingest`: when parsing a file added grammar entries whose symbol does not lex as one token, parse the file again with those symbols lexed (`extra`) and with the collected entries already in its tables, so a use may come before the declaration. | about +22 |
+| ~~`crates/pilot-parser/src/expr.rs`~~ **(dropped by the owner, 2026-11-18; `PROP-022`)** | An infix use whose entry has no native code (`bin_op == 0`, a program's own operator) becomes the call of the declaring `op`'s member, `lhs.(S)(rhs)` (`MemberExpr` + `CallExpr`; the member name is `op_member_name`'s), as `PROP-022` §2 rule 1 does for every operator later. Nothing changes for an operator with a native code. | about +12 |
+| `crates/pilot-parser/src/stmt.rs` | Delete the `TokenKind::RawDslBlock` arm (dead with the variant) and the no-op `if let Some((rk, _)) = self.receptor() { match rk { _ => {} } }` (5 lines that do nothing). | about −13 |
+| `crates/pilot-parser/src/inline_block.rs` | `report_stray_characters`: delete the `PolyglotBlock` span filter; no such node is ever built. | about −8 |
+| `crates/pilot-ast/src/lib.rs` | Delete `alloc_polyglot_block` (its one caller is the dead arm) and `NodeKind::PolyglotBlock` (its variant, `from_u16` arm and name). | about −14 |
+| `crates/pilot-vm/src/lower_expr.rs` | Delete the `NodeKind::PolyglotBlock` arm. | about −4 |
+| `crates/pilot-analysis/src/infer.rs` | Delete the `NodeKind::PolyglotBlock` arm. | about −1 |
+
+- **Net:** about **−26** `src` lines (+48, −74), a net deletion as step 2 requires. `rustfmt` may move it by a few lines either way; it is measured before and after, and `paused_max_total_rust_loc()` ratchets down by the measured amount.
+- **Pilot in the same change (no approval needed):**
+  - `stdlib/core/lex/seed_kinds.pilot`: the 30 families above leave `SEED_FAMILY_KINDS`; an operator family (`operator_tokens`, `seed_form_tokens`) not listed gets `SEED_OPERATOR_KIND = 269`, so a new standard-library operator needs no Rust and no hand-copied number. LEX008 stays for every other family. `toolchain.lex` is regenerated (`pilot lex --write-table`, GATE024).
+  - `selfhost/check/grammar_attrs.pilot`: `seed_lexes` counts the generic kind; the seam `grammar.user_ops_seed` narrows to prefix and postfix user operators and to user words (infix new symbols run); **GRAM002** is built over the re-lex.
+  - `known_bugs/user_infix_operator` moves to `operators/` (it must pass on three engines); `seed.user_operator` is retired. `seed.operator_hygiene` stays until imported `syntax` rules are visible (its quote half must pass).
+  - `known_bugs/compound_pow_assign`: `**=` becomes `Operator`, so `x **= 3;` turns from a silent no-op into a parse error; its actual output in `bug_registry()` is updated (the expected output does not change).
+- **Acceptance:** `operators/user_infix_operator` (from `known_bugs`) passes on `pilot test`, `--ir` and `--emit c`; every other conformance program unchanged on the three engines; `cargo test -p pilot-lexer`, `cargo test -p pilot-parser --test damaged_source -- --include-ignored` (the runner and the re-parse must not panic on any input), `cargo fmt --check`; `pilot gate --full` (GATE024 with the regenerated table).
+- **Risks:** a quote of a user operator's use shows a member call, not a binary node, until `PROP-022` gives every operator that shape; the re-parse doubles parse time only for a file that declares a new symbol.
+
+**Step 2 Rust as built (2026-11-18).** Measured `crates/**/src/*.rs`: **27,290 → 27,210 (−80)**; `paused_max_total_rust_loc()` lowered to 27,210. `cargo fmt --check` is clean.
+- **Final Rust file list (for the owner's last look before merging; `git diff --numstat 948eec2`, lines added / removed / net):**
+
+| File | Change | + | − | Net |
+| :--- | :--- | ---: | ---: | ---: |
+| `crates/pilot-lexer/src/token.rs` | `Operator = 269`; 30 never-named operator kinds, `RawDslBlock`, `TokenTape::slice_str` deleted | 4 | 39 | −35 |
+| `crates/pilot-parser/src/stmt.rs` | `RawDslBlock` arm and the no-op receptor `match` deleted | 0 | 13 | −13 |
+| `crates/pilot-parser/src/inline_block.rs` | `PolyglotBlock` span filter and its two imports deleted | 1 | 14 | −13 |
+| `crates/pilot-ast/src/lib.rs` | `alloc_polyglot_block`, `NodeKind::PolyglotBlock` deleted | 0 | 14 | −14 |
+| `crates/pilot-vm/src/lower_expr.rs` | `NodeKind::PolyglotBlock` arm deleted | 0 | 4 | −4 |
+| `crates/pilot-analysis/src/infer.rs` | `NodeKind::PolyglotBlock` arm deleted | 0 | 1 | −1 |
+| **Total** | | **5** | **85** | **−80** |
+
+  No other Rust file is touched; `lexer.rs`, `pilot-lexer/src/lib.rs`, `pilot-parser/src/lib.rs` (approved) and `expr.rs` (dropped) are unchanged. In Pilot: `seed_kinds.pilot` drops the 30 families and gives every other operator spelling `SEED_OPERATOR_KIND` (`is_spelling`); `toolchain.lex` regenerated with the old binary (the bootstrap order of 21H), GATE024 current with the new one. `selfhost/vm/compiler.pilot` loses its dead `PolyglotBlock` branch (9 `__engine` calls on the legacy ratchet). `seed_lexes` (`grammar_attrs.pilot`) counts only the families `seed_kinds.pilot` names and the seed forms (`seed_forms.pilot`, now linked into the checker), not the generic kind, so `<.>` and `+-` still stop at the seam and `@>`/`%%` are still GRAM001.
+- **Not built: `lexer.rs`, `pilot-lexer/src/lib.rs` and `pilot-parser/src/lib.rs` (the program's own symbols).** A user program is not parsed through `parse_with_tables` / `parse_and_ingest`: `pilot-cli/src/link.rs` calls `parse_unit` in `crates/pilot-parser/src/modules.rs`, which builds its own `Parser` with `tokenize(src)`. The re-parse therefore has to go in `modules.rs`, which the list does not name; per Rule 2 those three rows were written, then reverted, and not committed. Without `expr.rs` the lex alone would turn `a <.> b` from `SYN001` into "unknown binary operator", so nothing a program can run changes either way.
+- **Consequences, kept loud:** seam `grammar.user_ops_seed` is unchanged (every user operator with a new symbol, or with no native code, stops there); `known_bugs/user_infix_operator` still reproduces with the same actual (`error[SYN001]: Expected RParen, found Ident`), and its registry entry now names 008-C and `PROP-022`. `known_bugs/compound_pow_assign` is unchanged (still prints 2): `**=` is a seed form, so it still lexes as one token, now `Operator`, and `assign_op_of` still has no entry for it. **GRAM004** stays unbuilt.
+- **GRAM002 built in Pilot (owner 2026-11-18: "Pilot first"; no Rust).** `selfhost/check/grammar_lex.pilot` reads the table the seed runs (`read_seed_table` in `stdlib/pilot/lex/seed.pilot`, over the new `written_key` in `cache.pilot`; `SEED_TABLE_FILE` moved there from `selfhost/lex/seed_table.pilot`), lexes the file that declares each new symbol with `lex_modal`, and reports GRAM002 where the symbol, matched from an operator token's start and longer than it, would end inside another token (`operators/err_gram002`: `=:` before `::Low`). A symbol that only joins whole tokens (`+` `-` into `+-`) is what the declaring file asks for and is not reported. Importing files are not lexed: on the seed an imported user package's operators are not visible, and a quote or rule keeps its defining file's grammar (`known_bugs/operator_hygiene`), so a non-importing file must not be reported. **Strictness still open for the owner:** once imports carry operators, should a file that imports a symbol be allowed to have whole tokens joined by it (lenient, the declaring file's rule) or not (strict)? The check takes either in Pilot. The checker now links `stdlib/core/{generator,os_abi,host_raw,file}.pilot` and `stdlib/pilot/lex/{modes,cache,seed}.pilot`; `pilot check` on a program declaring a new symbol takes about 0.65 s. Seam `grammar.seed_table_read` stops GRAM002 loudly when the table cannot be read. Found while linking: a private function of one linked file still collides with a public one of the same name in another (`cache.pilot`'s private `joined` replaced `selfhost/transpile/source.pilot`'s `joined` in the C emitter's link, so `--emit c` printed parameter lists as `[...]`); `cache.pilot`'s private `joined` and `word` are renamed `all_of` and `one_word`, and the duplicate entries in `cli_lex_files` and `check_fix` that the checker now links are removed.
+- **Trade-off of the generic kind:** a family named by an operator spelling that no list names gets `Operator` instead of LEX008. A new delimiter (bracket-like) spelling added to `seed_forms.pilot` would therefore lex as a plain operator rather than fail the table build; brackets are named in `SEED_FAMILY_KINDS`, so this only bites a new one.
+
+**Amendment 008-C (2026-11-18) — AWAITING OWNER APPROVAL.** Strictly these files, for the "program's own symbols" rows above:
+
+| File | Change | Lines |
+| :--- | :--- | ---: |
+| `crates/pilot-lexer/src/lexer.rs` | As in the step 2 list: `run(t, src, extra)` emits `Operator` where one of `extra` matches longer than the table's token, in the base mode. | about +14 |
+| `crates/pilot-lexer/src/lib.rs` | `tokenize(table, source, extra)`. | 0 |
+| `crates/pilot-parser/src/lib.rs` | `tokenize(src, extra)`; `parse_with_tables` / `parse_and_ingest` re-parse as in the step 2 list. | about +22 |
+| `crates/pilot-parser/src/modules.rs` | **New in this amendment.** `parse_unit`: when parsing the file added grammar entries whose symbol does not lex as one token, re-tokenize with those symbols and parse again with the entries already in its tables (the user-program path; `link.rs` calls only this). | about +12 |
+
+- **Net:** about +48. **Value without the `PROP-022` member call:** a user infix use parses and stops at the seed compiler ("unknown binary operator") instead of `SYN001`; the checker seam still stops it first. GRAM002 becomes reachable.
+- **Alternative (recommended):** do not approve 008-C now; fold the four rows into `PROP-022`, which adds the member call, so the Rust lands only when a user operator can actually run.
+- **Why this part cannot move to Pilot:** the seed lexes every `.pilot` file in Rust from a table fixed before any program is read; a program's symbols are known only after its attributes are parsed, so taking them needs the seed's lexer to accept them (or a table rebuilt per program, which is a 10 s+ DFA build per check). Everything else of step 2 (the families, the generic kind, GRAM001/002/003, the seam) is Pilot.
 
 
 ---
@@ -2170,7 +2255,7 @@ Estimate: about −560 lines (the milestone test is about 520).
 
 ## `PROP-019` — Type-Position Operators Declared in Pilot; `op` Symbols Take Values Only
 
-**Status: DRAFT 2026-11-16, awaiting owner approval.** Owner direction 2026-11-16 ("lets go with your recommendation"), after asking whether operators can take things other than expressions. The recommendation:
+**Status: APPROVED BY OWNER 2026-11-18 ("approve"); queued as roadmap step B2. DRAFT 2026-11-16.** Owner direction 2026-11-16 ("lets go with your recommendation"), after asking whether operators can take things other than expressions. The recommendation:
 
 1. An `op` is a member of a type, so every operand is a value and its holes (`_`, PROP-018) stay untyped. Anything taking a type, block, name or pattern is a `syntax` rule with typed holes (`$x:Type`, `$b:Block`, `stdlib/core/syntax/holes.pilot`). Pilot only; no approval needed (see §4).
 2. Type-position operators (`syntax type_construct`) declare their levels the way expression operators do since PROP-008, so no binding power, associativity or operator token is left in Rust. Needs this proposal.
@@ -2212,7 +2297,34 @@ No new hook: `register_grammar` and `grammar_entry` in `stdlib/core/bridge_lang.
 
 1. Reuse `register_grammar`/`grammar_entry` (recommended, no airlock change) or add a `register_type_levels` hook (append-only, one more frozen item).
 
----
+### 6. Amendment 019-A (2026-11-18) — APPROVED BY OWNER 2026-11-18 ("Approve 019-A") AND BUILT
+
+Found while building. Two Rust files outside §3 hold the arrow's power as a number:
+
+| File | Change | Why |
+| :--- | :--- | :--- |
+| `crates/pilot-parser/src/ret_type.rs` | Replace `const ABOVE_FN_ARROW: u8 = 11` with a `Parser` method that returns one above the declared power of the type-position `=>`. | `fn f() -> (i64, str) => (1, "b")` parses its return type at "one above the arrow". With the levels declared, the arrow's power is no longer 10, so the constant would let the type swallow the body's `=>`. |
+| `crates/pilot-parser/src/decl.rs` | `:816` calls that method instead of the constant (one line). | Its only user. |
+
+About `+4 / -2` lines. Without this amendment §3 cannot land: the declared levels give `->`/`=>` another power than 10.
+
+Also found (2026-11-18), not in this amendment: `crates/pilot-parser/tests/milestone51_homoiconic_syntax_and_contraction.rs` `test_51_1` parses a hand-written `type_construct` grammar with no levels, so with §3 its type `(*a)[n]? & a[] | a ! e` no longer parses. All four milestone-51 tests already fail at `HEAD` (`be4229f`) on the anti-cheat marker check of `stdlib/core/syntax/expr_sugar.pilot`, so nothing that passed before is broken. Updating that test means giving its grammar `grammar_entry` levels, a Rust test edit. It belongs with `PROP-031` (Rust milestone tests that name deleted Pilot code) or a list of its own.
+
+One more difference from §2, needing no Rust: the levels are declared by `comptime` grammar entries written beside the rules in `stdlib/core/syntax/type_construct.pilot` (`Infix(nameof(type_construct), ::Union, ::Left, "|")`), not by attributes on each arm. An attribute on an arm would need `crates/pilot-parser/src/decl_syntax.rs` to read attributes there, a third file. The seed already runs such a call (`ingest_node`, the attribute-function path).
+
+### 7. As built 2026-11-18 (§2, §3 and §6)
+
+- **Pilot.** `TypeLevel` is declared in `stdlib/core/operators/levels.pilot` and named by a second `register_grammar(nameof(TypeLevel), nameof(Assoc), nameof(type_construct))`. The type operators declare their levels with `comptime` grammar entries at the end of `stdlib/core/syntax/type_construct.pilot`: `!` Fallible, `->` and `=>` Arrow (right), `|` Union, `&` Intersect, prefix `*`/`@` and postfix `?`/`^`/`@` Postfix. Those entries are raw `grammar_entry` calls, because the hooks in `shapes.pilot` are not linked yet when `type_construct.pilot` is read. Programs use the typed `TypeInfix` / `TypePrefix` / `TypePostfix` (`stdlib/core/operators/shapes.pilot`).
+- **Rust (the §3 files only).**
+  - `tables.rs`: type entries are routed by the `type_construct` receptor kind into `type_prefix`, `type_infix` and `type_postfix`, each keyed by spelling, with the power from `level_bp`. `compile_type_rule` no longer matches token kinds. `type_tight_bp()` is the Postfix level's power.
+  - `stmt.rs`: a prefix type operator is any spelling in `type_prefix`; postfix and infix spellings come from the tables.
+  - `expr.rs:300`: `as T` reads at `type_tight_bp()`.
+  - `pilot-ast/src/lib.rs`: `TypePrecedence`, the dead `ExprPrecedence` and their assertion are deleted.
+  - Net about `+2` lines, not `-25`. `rustfmt` unpacked the old `stmt.rs` postfix code, which was written several statements to a line (AGENTS.md 1.1); the plain and argument postfix branches were then merged. Logic lines went down. The workspace total stays within `paused_max_total_rust_loc()` (27,054), so the ceiling is held, not lowered.
+- **New checks.** GRAM012 (`selfhost/check/type_levels.pilot`): a program's `type_construct` rule whose symbol no level declares. It is unreachable for now: the seed stops first with SEED001 on a program's own rule templates. Known bugs `seed.user_type_construct_rule` and `check.type_rule_level_unreached` record that.
+- **Tests.** `types/type_levels` (curried arrows, a tuple return before the body; 3, 15, 8, 1, b, worked by hand) and `types/err_type_levels`: eight TYPE001 lines, one per grouping, e.g. `T ! E | F` is `result<T, E | F>`. The known bugs are `known_bugs/user_type_construct_rule` and `known_bugs/type_rule_no_level`.
+- **Amendment 019-A (built after approval).** `ret_type.rs`: the constant `ABOVE_FN_ARROW` became `above_fn_arrow()`, the declared power of the type `=>` plus one. `decl.rs` calls it. One doc comment in `tables.rs` was shortened to keep the Rust total flat. Before this, `fn swap(p: Point) -> (i64, i64) => (p.y, p.x);` took the body into its return type and silently became a bodiless function (`vm/aggregates`). `types/type_levels`, `tuple_values`, `type_alias_generic` and `vm/aggregates` now pass on all three engines.
+- **Found while testing:** a value of type `res<(A) => R, E>` can be called. `let f: (i64) => i64 ! str = ..; f(4)` passes the check, runs on the seed, and traps on PilIR (`cannot call record`). The checker should reject the call; the gap is in `selfhost/check`. Not fixed here.
 
 ## `PROP-020` — Read `const` Generic Parameters Written After the Colon (`N: const usize`)
 
@@ -2826,7 +2938,7 @@ So the guide is followed where the Rust parser depends on it, and not copied whe
 
 ## `PROP-022` — Operator Meaning Declared in Pilot: Every Operator Use Lowers to Its Member Call or Its Rule's Template
 
-**Status: DRAFT 2026-11-16, design for owner approval; the exact file list is fixed when it is sequenced (after `PROP-008` step 2 and `PROP-005` phase 5D).** **2026-11-16, owner: "do prop-022": slice 22A (§5) itemized for approval; the rest stays sequenced as in §4.** Owner question 2026-11-16 about `op *`, `op :=:`, `op _?` and `op []=`: "I want pilot to understand itself completely without help outside".
+**Status: DRAFT 2026-11-16, design for owner approval; the exact file list is fixed when it is sequenced (after `PROP-008` step 2 and `PROP-005` phase 5D). Started 2026-11-18: slice 22B (Pilot) built; the Rust part waits for 5E (§6).** **2026-11-16, owner: "do prop-022": slice 22A (§5) itemized for approval; the rest stays sequenced as in §4.** Owner question 2026-11-16 about `op *`, `op :=:`, `op _?` and `op []=`: "I want pilot to understand itself completely without help outside".
 
 ### 1. What Rust decides today (read 2026-11-16)
 
@@ -2908,7 +3020,30 @@ The checker resolves which (`selfhost/check/`), `pilot inspect` shows it, and th
 - **Misuse case `operators/err_prefix_op_missing`:** `-p` on a struct without `op -_` reports `METH001` and exits 1.
 - `operators/*`, `collections/*` (unpacking) and the whole suite pass on all three engines. `cargo test -p pilot-vm` and `cargo fmt --check` pass.
 
+### 6. Started 2026-11-18 (owner: "start prop-022 along with its prerequisites")
+
+**What blocks the Rust deletions (§3), read 2026-11-18.** `BinaryOp` is read by `crates/pilot-vm/src/lower_expr.rs` (44 places) and `lower_for.rs`, the seed `BytecodeCompiler` that still compiles the toolchain itself. Deleting it from the AST therefore waits until the toolchain no longer compiles through that compiler: `PROP-005` 5E (`toolchain.pilc`, roadmap A7), which needs A1–A4 and A6. Until then the Rust list stays unitemized, and the Pilot passes move off operator codes one slice at a time. The one place in Pilot that knows the codes stays `binary_op_symbols()` in `selfhost/check/snapshot.pilot` (the parser's AST layout); everything else should name operators by symbol and find their meaning in declarations.
+
+**Slice 22B — a register value's operator runs its declaration (Pilot only; BUILT 2026-11-18).**
+- `selfhost/ir/lower_operator.pilot` (new): `a <op> b`, where `a` and `b` are register values, lowers the body of the `op` the type declares, as a template of machine operations over `self` and the parameter (`__ssa(MachineOp::SLt, self, rhs)`, `!t`, a block holding one). The instruction, its signedness and the operand order come from `stdlib/core`, with nothing called at run time. A body that is not such a template keeps the earlier lowering. The overload is chosen by arity, because primitives declare `op -` twice.
+- `selfhost/ir/lower_asm.pilot`: `machine_op_lowers` and `emit_machine_op` split out of `lower_asm` and shared.
+- `stdlib/core/builtins/builtins.pilot` and `primitives/f16`, `f32`, `f64`, `f128`: the float `op >` was `!(self <= rhs)` and `op >=` was `!(self < rhs)`, which are true for a NaN operand; they are now `rhs < self` and `rhs <= self` (IEEE 754-2019 §5.11).
+- `arith_opcode`/`cmp_pred_of` remain only for operands the engine holds (`str + str`, records compared with `==`).
+- **Found:** the seed and the IR interpreter stop with "comparison with NaN", while emitted C and the declarations answer false. This is known bug `seed.nan_compare_trap` (`known_bugs/nan_ordered_compare`); which behaviour is right is the owner's decision.
+- **Test:** `operators/declared_primitive_ops` (signed and unsigned division, remainder, shifts, compares, bitwise; worked by hand) on `pilot test`, `--ir` and `--emit c`.
+
+**Next slices (Pilot only unless marked):**
+- **22C:** `str`, records and lists declare `op +`/`op ==` (bound to their engine operations), so `arith_opcode` and `cmp_pred_of` are deleted.
+- **22D:** prefix operators on register values (`-x`, `~x`, `!x`) through their `op - ()` declarations, the same way; `lower_unary`'s flag switch is deleted.
+- **22E:** the checker's numeric rules (`selfhost/check/numeric.pilot` `is_arithmetic_op`) by declaration instead of code ranges.
+- **22F:** the forms (`and`/`or`, `??`, `|>`/`<|`, `as`, `is`, ranges, `:=:`) become rule templates or `CoreForm`s, as §2 says.
+- **22G (Rust, after 5E):** the §3 list, itemized then.
+
 ---
+
+### Found 2026-11-18 while building PROP-025: the seed reads prefix `>..` as negation
+
+`crates/pilot-parser/src/expr.rs` `prefix_flag` has no arm for `TokenKind::GreaterDotDot`, so `>.. x` gets flag `0`, the flag of `-x`. `let r = >.. 5; print(r);` prints `-5`. The true result is a check error: `>..` is declared (`IAfterRangeOperator`, `[Prefix(::Range)]` in `stdlib/core/operator.pilot`), but no type implements it. `+`, `&` and `ref` also share flag `1`. This is `PROP-022`'s to fix when a prefix use lowers to its declared member. It is not fixed here because the file is outside every approved list. The Pilot parser (`stdlib/pilot/parse/expr.pilot`) records the operator's spelling, not a flag, so it cannot make this mistake.
 
 ## `PROP-023` — The Language Section of `toolchain.pilc`: Pilot's Tables Precompiled, Read by Number
 
@@ -2954,7 +3089,7 @@ section LANG
 - `lexer.rs:425-426` then makes `//=` the token `DoubleSlashEqual` and `//` the token `DoubleSlash`. The `//` arm can never be reached: every `//` not followed by `=` is already a comment.
 - Neither token means anything. No `op //` is declared, the parser's assignment table has no `//=` entry, and nothing else in `crates/` or the `.pilot` tree names either kind.
 - **Result:** `x //= 2;` silently does nothing (run: `var x = 7; x //= 2; print(x);` prints `7`), and a comment that begins `//=`, such as `//=== heading ===`, is parsed as code and rejected with `SYN001`. That is known bug `lexer.comment_double_slash_equal` (`tests/conformance/known_bugs/comment_double_slash_equal.pilot`, expected `7` then `8`).
-- They come from a `//` floor-division operator described in `docs/lexical-reference.md`, which can never be written because `//` starts a comment.
+- They come from a `//` floor-division operator described in `docs/lexical-reference.md` (deleted 2026-11-18), which can never be written because `//` starts a comment.
 
 ### 2. Rust (needs approval). Strictly these files:
 
@@ -2979,7 +3114,7 @@ section LANG
 
 ## `PROP-025` — The Parser in Pilot: One Grammar-Table-Driven Pilot Parser Builds the AST the Checker and PilIR Read; the Rust Parser Is Deleted
 
-**Status: DRAFT 2026-11-16, design; awaiting owner approval.** Owner direction 2026-11-16: "is structural grammar parsing in pilot, or is that also rust? If not then it should be part of pilot and not rust. The only thing that should exist in rust is the absolute necessary rust engine needs for compilation and memory management".
+**Status: APPROVED BY OWNER 2026-11-18 ("approve"); queued as roadmap steps B5 (steps 1–3) and B7 (the rest). Pilot work needs no further approval; every Rust change it reaches still comes back as an itemized list. DRAFT 2026-11-16.** Owner direction 2026-11-16: "is structural grammar parsing in pilot, or is that also rust? If not then it should be part of pilot and not rust. The only thing that should exist in rust is the absolute necessary rust engine needs for compilation and memory management".
 
 ### 1. What exists today (read 2026-11-16)
 
@@ -3016,6 +3151,43 @@ Steps 1–3 are Pilot only and need no Rust change. Step 4's Rust deletions are 
 - `pilot test`, `--ir` and `--emit c` pass unchanged with the checker reading the Pilot AST.
 - The `damaged_source` inputs as Pilot conformance programs: diagnostics, never a trap.
 - **Litmus:** respell an operator, add an operator level, and add a `syntax` rule, each a Pilot-only edit, with the program parsing and running on all three engines.
+
+### 6. As built 2026-11-18: steps 1 and 2 (Pilot only); step 3 not started
+
+- **Building blocks** (`stdlib/pilot/parse/`):
+  - `tape.pilot`: the tokens the parser reads, straight from the declared lexer (`lex_modal`). Comments are left out by role, an f-string is one token, and newlines are flags. It was briefly built on `TokenTape` (PROP-021 21E), but linking `pilot.lex` and the lexicon into the checker's file list made the seed's constant initializer for every tool need more than 111 locals, so `pilot compile` and all of `--via-ir` failed (612 cases). The tree comparison ran on that version; when nothing fails to lex (0 files), both give the same tokens, and spot checks gave the same reports.
+  - `arena.pilot`: a flat `0b10` arena using the seed's `NodeKind` numbers, so the two trees compare node by node.
+  - `grammar.pilot`: the operator table, filled only from the declarations (`claims_of`).
+  - `expr.pilot`: a Pratt expression parser. It builds literals, names, `::Variant`, prefix/infix/postfix operators and words, calls with named arguments, members and `?.`, indexing, `?`, tuples, lists, and `splat(x)`/`pairs(x)`/`flat(x)`.
+  - `dump.pilot`: an S-expression dump with spans.
+  - `type_rules.pilot`: the arms of a `type_construct` rule, used by GRAM012.
+  - Any form it does not build stops it with a reason, never a guess.
+- **Tests:** `parse/tape_tokens`, `parse/pratt_levels` (a hand-declared table, expected trees worked by hand) and `parse/type_rule_arms` pass on `pilot test`.
+- **The comparison** (§4 step 2):
+  - `PILOT_PARSE_COMPARE=<report> pilot check <file>` (`selfhost/check/parse_compare.pilot`) parses again every expression the seed read (expression statements, `let`/`var` values, `return` values), from the same token, and compares trees and spans.
+  - `tools/parse_compare/run.sh` runs it over the tree: one check per package first, then every file left.
+  - **Result over 1,296 files:**
+    - 23,498 expressions the same;
+    - 2,787 stop at a form not built yet; the commonest are seed-word-led forms (717), struct literals (711), operands the seed reads as types (326), `nameof` (186), `as` (145), tuple field paths (119) and generics after a name (117);
+    - 1,410 are trees a seed desugaring made, with no source of their own (`assert`, rule templates, which repeat a span);
+    - **2 DIFF.**
+  - 188 files give no report: they stop before the checker runs, mostly `errors/` and `known_bugs/` programs.
+  - The summary is in the session notes (`prop025_parse_compare_summary.txt`).
+- **Every DIFF found was fixed or traced to the seed:**
+  - In the Pilot parser:
+    - a name followed by a word or literal (`for i in`, `switch 5 {`) now stops as a rule-led form;
+    - `not t` keeps its written spelling;
+    - `[**m]` stops as a map spread;
+    - the unpack words build the same node as `*x`.
+  - In the harness:
+    - contract clauses (`requires(..)`, whose value the seed keeps without the word);
+    - repeated-hole templates;
+    - values that are holes inside a user `syntax` rule.
+  - **Two remain, both bugs in the seed (Rust; not fixed here because no approved list covers them):**
+    1. `x **= 3` parses as the statement `x`: known bug `compound_pow_assign`, already registered.
+    2. `select { default => { .. } }`: the unbuilt `select` reads `default` as a statement and drops `=> { .. }` unreported. The program stops at seam `concurrency.select` before that body runs, but the parse is loose. It belongs on the Rust list of PROP-025 B7, or a parser-loudness fix (`loud.rs`).
+- **Speed.** A package check with the comparison takes 30–80 s alone and up to 300 s with 12 at once. A full run takes about an hour, so it is a tool, not a test.
+- **Not done:** step 3 (the checker and PilIR reading this AST). Before it can start, the Pilot parser needs statements, declarations, types, generic arguments, struct literals, lambdas, f-string holes and rule-form expansion (B6/B7).
 
 ---
 
@@ -3309,7 +3481,7 @@ Retiring the hand-written tokenizers (PROP-021 §8) deleted Pilot code that thre
 
 ## `PROP-033` — The Analyzer Skips Units Whose Diagnostics Are Thrown Away
 
-**Status: PROPOSED 2026-11-17 — awaiting owner approval. No Rust has been touched.**
+**Status: WITHDRAWN BY OWNER 2026-11-18 ("withdraw"). `PROP-035` deleted the analyzer this was meant to speed up. No Rust was touched.**
 
 On every `pilot run` / `pilot check`, `analyze` (`crates/pilot-cli/src/run.rs` ~443-470) runs `selfhost/analyzer.pilot` over the whole linked program, then keeps only the diagnostics whose file is a user file (`if !user.contains(&file) { return None; }`). `analyze_program` (`selfhost/analyzer.pilot` ~1306-1331) runs `analyze_unit` (every `verify_*` pass, Pass 7, Pass 8, `is_suppressed` parent walks) over every unit, stdlib included, and the stdlib is usually most of a linked program's nodes. Passes 1-3 (layouts and inference over all nodes) must stay whole-program, because user code needs stdlib layouts. Only the per-unit checking can be skipped.
 
@@ -3398,7 +3570,7 @@ The analyzer cannot tell a user unit from a stdlib unit today. The only unit que
 
 ## `PROP-035` — Stop Running the Retired `selfhost/analyzer.pilot`: Delete `run::analyze`, `cli_analyze` and the Analyzer Loader
 
-**Status: APPROVED BY OWNER 2026-11-17 ("Approve PROP-035"). BUILT 2026-11-17 (see §5); Amendment A1 (the anti-cheat test counts and `test_m27_4`) AWAITING OWNER APPROVAL.**
+**Status: APPROVED BY OWNER 2026-11-17 ("Approve PROP-035"). BUILT 2026-11-17 (see §5); Amendment A1 (the anti-cheat test counts and `test_m27_4`) APPROVED BY OWNER 2026-11-18 ("approve") AND BUILT; `diagnostics.rs` deletion APPROVED 2026-11-18 AND BUILT.**
 
 ### 1. Why
 `selfhost/analyzer.pilot` (1,336 lines, 394 raw `__engine` calls) reads the Rust AST to report about 35 diagnostics. 5B.4 group 2 moves each check into `selfhost/check` and deletes it from the analyzer in the same change, so no diagnostic is reported twice. When the last check has moved, the analyzer reports nothing, but the CLI still parses the program a second time and runs it on every `pilot check`, `pilot run`, `pilot ir` and `pilot emit`.
@@ -3429,11 +3601,12 @@ The analyzer cannot tell a user unit from a stdlib unit today. The only unit que
 - **Verified:** VM 703 passed (19 known bugs reproduced); IR and C 695 passed, 0 failed, 1 seam each (`map_declared_property`); `pilot gate --full` 6 passed, `bootstrap_parity` at its seam; `cargo fmt --check` clean; `cargo test -p pilot-analysis --no-run` 0 warnings. `milestone50`'s `FileAuditRule` for `selfhost/analyzer.pilot` and its contract comments were removed (an approved file).
 - **`cargo test -p pilot-cli --no-fail-fast`:** 89 passed, 5 failed; the same 5 fail on HEAD `b9ba25f` built in a separate worktree, so none comes from this change: `cli_emit` `a_wrong_emitted_output_is_reported` (the runner's `[n/m] PASS` progress lines), `cli_f3` `every_listed_command_works_or_says_it_is_not_implemented` (`pilot fmt`/`pilot lex` print usage) and `test_runner_runs_marked_functions_only`, `cli_f4` `a_role_gives_its_lattice` (GRAM011 on `op []`/`op []=` with `_index`), `cli_keyword_matrix` `the_matrix_is_regenerated_from_the_repository`.
 - **Not yet green: `cargo test -p pilot-analysis` fails everywhere until Amendment A1.** `crates/pilot-analysis/tests/common/anticheat.rs` `MILESTONE_TEST_MANIFEST` holds a minimum `#[test]` count per milestone file, and every guarded test checks it, so the deleted analyzer tests make all 130 guarded tests panic (`PASS 3: DELETED_TEST_FN`). `milestone27` `test_m27_4` also reads the deleted `selfhost/analyzer.pilot`. Neither file is on §3's list.
-- **Amendment A1 (DRAFT 2026-11-17, AWAITING OWNER APPROVAL). Strictly these files:**
+- **Amendment A1 (APPROVED BY OWNER 2026-11-18: "approve"; BUILT 2026-11-18). Strictly these files:**
   - `crates/pilot-analysis/tests/common/anticheat.rs`: in `MILESTONE_TEST_MANIFEST`, `milestone14` 4 → 3, `milestone50` 4 → 1, `milestone58` 7 → 6, `milestone59` 3 → 1, `milestone60` 3 → 1, `milestone61` 3 → 2; delete the `milestone54` and `milestone56` rows (files deleted). Nothing else in the file changes.
   - `crates/pilot-analysis/tests/milestone27_scoped_user_sublanguages_and_hygiene.rs`: in `test_m27_4_zero_hardcoded_keywords_in_analyzer_and_cst_recovery`, delete step 1 (the `selfhost/analyzer.pilot` audit); step 2 (`cst_recovery.pilot`) stays.
   - Then `cargo test -p pilot-analysis --no-fail-fast`, reporting every failure that was already failing before (`milestone01 test_m1_3`, `milestone02 test_m2_3`, `milestone57 test_57_1`, `milestone58`, `milestone60`) apart from any new one.
-- **Dead after this, needs its own approval (AGENTS.md rule 4):** `crates/pilot-analysis/src/diagnostics.rs` (55 lines: `Diagnostic`, `DiagnosticSeverity`, `AnalysisDiagnostic`) has no user left in `src` or tests; `lib.rs` still re-exports it. Proposed: delete the file and its `pub mod`/`pub use` lines in `crates/pilot-analysis/src/lib.rs`.
+- **A1 as built (2026-11-18):** the six counts and two row deletions above, and step 1 of `test_m27_4`. Each of the six test files also carries its own `expected_test_count`, which the guard asserts equals the manifest (`PASS 3: TEST_COUNT_DRIFT`); those six lines changed to match (14: 3, 50: 1, 58: 6, 59: 1, 60: 1, 61: 2). The six files were already on `PROP-035` §3's list.
+- **Dead after this, APPROVED FOR DELETION 2026-11-18 (owner: "approve") AND DELETED (AGENTS.md rule 4):** `crates/pilot-analysis/src/diagnostics.rs` (55 lines: `Diagnostic`, `DiagnosticSeverity`, `AnalysisDiagnostic`) has no user left in `src` or tests; `lib.rs` still re-exports it. Proposed: delete the file and its `pub mod`/`pub use` lines in `crates/pilot-analysis/src/lib.rs`.
 
 ---
 ## `PROP-036` — Seed: Indexing a Literal `const` List or Map Reads One Value Built Once, Not a Copy Rebuilt on Every Read
@@ -3483,6 +3656,184 @@ Found during `PROP-005` 5B.4 (stdlib/crypto/hash.pilot copies each round table i
 - Timing, before and after on all three engines: the 64-item, 2M-read repro, and the 4- and 1,024-item cases above. The 1,024-item seed time must match the 4-item one.
 - `pilot test`, `--ir`, `--emit c` and `pilot gate --full` stay green. `cargo test -p pilot-vm` and `cargo fmt --check` pass.
 - Afterwards, the local-copy workaround in stdlib/crypto/hash.pilot can be removed.
+
+## `PROP-038` — A1 (`PROP-005` 5B.4 Groups 3–4): Rust Left Dead by the Pilot-First Host Services, the Owner List, and the Old Front End's Test Edits
+
+**Status: APPROVED 2026-11-18 (owner: "Approve PROP-038"; all three parts) AND BUILT; AMENDMENTS A1 AND A2 APPROVED 2026-11-18 (owner: "Approve A1 and A2").** The owner said "Start A1 here" (roadmap A1). Group 3 was decided "Pilot first" on 2026-11-18: each host-service call is rebuilt in Pilot where it can be, and only the rest get owners, whose list comes back for approval. This entry has three parts: the Rust the Pilot work left dead (part 1), the owner list (part 2), and the group 4 test edits (part 3).
+
+### What was rebuilt in Pilot (built 2026-11-18, no Rust touched)
+
+- **`cli_text_tool` and `tool_input_text`.** `pilot ir <mode> <file>.pir` ran a tool through the host, which read the file in Rust and served its text back. `ir_text_main(mode, path)` (`selfhost/ir/main.pilot`) now reads the file itself through `File.read_text`, and `cmd_ir` runs it with the plain `cli_tool` (the exit code is the tool's result). `host_text_tool` and `input_text` are deleted. `cargo test -p pilot-cli --test cli_f5` passes 10 of 10, including the malformed-IR codes.
+- **`chk_report` and `cli_pending_diags`.** A checked tool (`pilot ir`, `pilot emit`, `pilot compile`) handed its diagnostic rows to the host. The host placed them in files (Rust `user_diags`) and started the CLI a second time to print them (`report_pending_diags`). The new `selfhost/check/checked.pilot` does this itself: it places each row through the snapshot's file table, keeps the user's files, sorts by place and renders errors and warnings with `selfhost/diagnostics/renderer.pilot` (linked by `cli_ir_files` only). `checked_program` moved there from `selfhost/check/main.pilot`, and `report_pending_diags` and `host_pending_diags` are deleted. The output is identical to `pilot check`'s. `errors/err_*` passes on `--ir` (289, 2 at their own seams) and `--emit c` (291), and `warnings/` passes on `--ir`.
+- **Ratchet:** `selfhost/cli/host.pilot` 11 → 9; the rows for `selfhost/ir/main.pilot` and `selfhost/check/main.pilot` are gone (0 calls).
+
+### Part 1 — Rust now dead (needs approval; deletion only)
+
+| File | Delete |
+| :--- | :--- |
+| `crates/pilot-cli/src/host.rs` | the `report_pending` function and the `cli_pending_diags` arm in it (lines 31–46); the `cli_text_tool` arm (128–130); the `report` closure passed at 118; the table rows for `cli_pending_diags` and `cli_text_tool` (16, 18) and the `chk_report` wording of row 15 |
+| `crates/pilot-cli/src/tool.rs` | `run_on_text` and its doc comment (177–194) |
+| `crates/pilot-cli/src/check.rs` | in `run_checked_on_program`, the `report` parameter and the `chk_report` arm (624, 631–636); the doc comment's `chk_report` sentence (616–618) |
+
+About −35 lines. `user_diags` stays: `check.rs:376` uses it.
+
+### Part 2 — the owners (needs approval before `airlock_host_ops()` or any Rust is touched)
+
+Each call below was checked and cannot be rebuilt in Pilot yet. Each needs the seed's parser or compiler (until 5E, `PROP-025` and `PROP-006`) or is the seed's own op check (until 5F).
+
+| Calls | Why it stays | Owner |
+| :--- | :--- | :--- |
+| `cli_check`, `cli_typecheck`, `cli_program_tool`, `cli_checked_tool`, `cli_program_eval`, `cli_run`, `cli_tool`, `cli_tool_on` (`selfhost/cli/host.pilot`) | compile and run a program or a tool with the seed, from source | one `[EngineOp]` owner type `ToolHost`; the `host_*` functions become calls of its methods |
+| `cli_functions` (`host.pilot`) | lists a file's functions through the Rust parser. It could be rebuilt over the checker's snapshot, but that would link the checker into every `pilot test`, which is slower to start | `ToolHost` |
+| `map_get`, `map_set`, `map_has`, `map_keys`, `map_remove` (`stdlib/core/primitives/map.pilot`) | the `Map` type's own natives, already `priv static fn *_internal` | `[EngineOp]` on `Map` |
+| `op_checked` (`selfhost/ir/fault.pilot`) | the seed's checked arithmetic | none; it goes with 5F and stays on the ratchet |
+
+These are Stage-A tool natives, not `HostOp`s. Giving them owners means adding a second section to `airlock_host_ops()` (`selfhost/gate/airlock_abi.pilot`) for tool natives, append-only like the first. The owner decides whether that is wanted, or whether they stay on the ratchet until 5E removes most of them.
+
+### Part 3 — group 4 test edits (needs approval)
+
+`selfhost/ast.pilot` and `selfhost/parser.pilot` have no users in Pilot outside themselves: `pilotc.pilot` and the gate never call them. `selfhost/gate/seed_audit.pilot` tokenized `stdlib/core` with the old lexer (`selfhost/lexer.pilot`). As of 2026-11-18 it uses the seed's own table instead (`pilot.parse.tape`, read once per run). It gives the same result (588 items, 0 violations) and still catches a misnamed struct and interface (tried in a temporary edit). Run time went from 0.3 s to 1.9 s, because the old lexer stored its tokens in the seed's Rust map. With that change, the old lexer's only users are `ast.pilot`/`parser.pilot` and `selfhost/db/engine.pilot` (group 5, `PROP-004`). It is deleted with `db/*`. Deleting `ast.pilot` and `parser.pilot` now needs these test edits:
+
+| File | Change |
+| :--- | :--- |
+| `crates/pilot-analysis/tests/milestone01_seed_unlock_and_pilot_gate.rs` | drop `selfhost/ast.pilot` and `selfhost/parser.pilot` from the gate's deps list (lines 132–133) |
+| `crates/pilot-analysis/tests/milestone61_stage3_fixed_point_and_universal_rename_gate.rs` | delete `test_61_1` (it reads the three files and already fails: "Unexpected selfhost frontend output: null"), its audit rules for them (lines 76–115) and its header lines (17–31) |
+
+In Pilot, in the same change: delete the two files, drop them from `cli_gate_files` (`selfhost/cli/commands.pilot`), delete their `legacy_engine_ratchet()` rows (`ast` 101, `parser` 178), and retire the seam `parser.operator_grammar` (raised only in `parser.pilot`) and the `PROP-008` wiring row that names it.
+
+---
+
+### As built (2026-11-18)
+
+- **Part 1:** deleted `report_pending`, the `cli_checked_tool` and `cli_text_tool` arms and their table rows (`host.rs`), `run_on_text` (`tool.rs`) and `run_checked_on_program` (`check.rs`). With `chk_report` gone, `run_checked_on_program` was the same as `run_on_program`. So `cli_checked_tool` was folded into `cli_program_tool`, and `host_checked_tool` was deleted in Pilot: one op fewer to own. That makes −78 Rust lines, and the ceiling is 27,054 (`paused_max_total_rust_loc()`).
+- **Part 2:** `ToolHost` (`selfhost/cli/host.pilot`) owns the 8 tool natives. They are rows of `airlock_native_owners()`, which already held the `Map` natives, so no new table was needed. Check 6 now also accepts a `pub static fn` as the public method. The legacy ratchet no longer counts sites that check 6 verifies (`native_owner_sites`), so the `cli/host` (9) and `primitives/map` (5) rows are gone. A deliberate second caller of `tool_internal` fails GATE021. `op_checked` stays on the ratchet until 5F, as approved.
+- **Part 3:** `selfhost/ast.pilot` and `selfhost/parser.pilot` are deleted. Also removed: their link lines in `cli_gate_files` (the old lexer's line too, since nothing the gate links uses it now), their ratchet rows (101, 178), the seam `parser.operator_grammar` and its wiring row, the milestone01 deps and milestone61's audit rules and header lines.
+- **Found:** in the shared checkout, the parser edits in progress for `PROP-019`/`PROP-025` read a tuple return type followed by an inline body (`-> (A, B?) => expr;`) as a function type. That drops the function, or reports SYN001. `ToolHost.typecheck` written that way vanished and the CLI hung at start, so the owner methods use type aliases (`HostCheckRows`, `HostRunRows`, `DeclaredFnRow`). The same regression fails `types/tuple_values`, `types/type_alias_generic` and `vm/aggregates` on all three engines. They pass at `HEAD`. It was reported to that session, which owns the fix.
+
+### Amendment A2 — milestone01's gate bundle (approved 2026-11-18)
+
+`milestone01` compiles the gate from its own copy of the link list (`load_gate_bundle`, lines 122–144), not from `cli_gate_files`. The list was already behind: `lex_table_gate.pilot` is missing. `seed_audit.pilot` now tokenizes with the seed's table, so the bundle also needs the lexer files `cli_gate_files` lists. Without them `test_m1_1` fails ("no function named `read_seed_table`"). That test passed before this change.
+
+| File | Change |
+| :--- | :--- |
+| `crates/pilot-analysis/tests/milestone01_seed_unlock_and_pilot_gate.rs` | in `load_gate_bundle`, after `stdlib/std/text.pilot`, add the 17 files `cli_gate_files` lists from `stdlib/core/lex/words.pilot` to `stdlib/pilot/parse/tape.pilot`, and `selfhost/gate/lex_table_gate.pilot` before `runner.pilot` (or read the list from `selfhost/cli/commands.pilot`, so the two lists cannot drift again) |
+
+**A1 and A2 as built (2026-11-18):** `test_61_1`, its `SplitMix64` helper and its contract text are deleted. milestone61 expects 1 test, and `anticheat.rs` line 256 says 1. For A2, the alternative was taken: `load_gate_bundle` reads `cli_gate_files()` from `selfhost/cli/commands.pilot`, so the two lists cannot drift. The other session's new `stdlib/pilot/lex.pilot` was already in it. `seed_audit` reads the seed's table from the workspace root it is given (`read_seed_table_in`, `stdlib/pilot/lex/seed.pilot`), not the working directory. milestone01 `test_m1_1`, `m1_2` and `m1_4` pass, and so does milestone61 `test_61_2`. `test_m1_3` still fails only because `bootstrap_parity` stops at its seam, as before. `anticheat.rs` is a frozen scorer file: the scorecard keeps vetoing it (V7) until the owner adds the approval to `tools/score/approvals.pilot`.
+
+### Amendment A1 — `test_61_1` (approved 2026-11-18)
+
+`test_61_1` could not be deleted as approved. `MILESTONE_TEST_MANIFEST` in the frozen `crates/pilot-analysis/tests/common/anticheat.rs` (line 256) says milestone61 has 2 tests, and every milestone test checks every manifest row (`DELETED_TEST_FN`). One test fewer would fail the whole Rust milestone suite. It stays for now and fails earlier than before: it reads the deleted `selfhost/ast.pilot`, where it used to fail on "Unexpected selfhost frontend output: null". The amendment asks for:
+
+| File | Change |
+| :--- | :--- |
+| `crates/pilot-analysis/tests/common/anticheat.rs` | line 256, milestone61's count 2 → 1 (a frozen scorer file: also needs the owner's entry in `tools/score/approvals.pilot`) |
+| `crates/pilot-analysis/tests/milestone61_stage3_fixed_point_and_universal_rename_gate.rs` | delete `test_61_1` and its helpers that nothing else uses; `expected_test_count` 2 → 1 |
+
+---
+
+## `PROP-037` — Correct Misleading Rust Comments and Delete Dead Rust Items Found in the 2026-11-18 Sweep
+
+**Status: APPROVED 2026-11-18 (owner: "I approve 037"). BUILT 2026-11-18 except item 17, which needs Amendment A1 below.**
+
+The owner asked (2026-11-18) for every misleading, stale or vague file and comment to be deleted or corrected. The Pilot and doc side is done in the working tree; this entry lists the Rust side, which needs approval (rule 1). Each item was checked against the code (`wc -l`, `git grep`). Comment changes do not change behaviour; items 15 to 18 delete or change code.
+
+| # | File | Now | Change |
+| :-- | :-- | :-- | :-- |
+| 1 | `crates/pilot-cli/src/check.rs` lines 5-6 | says `cli_checker_decls()` is in `selfhost/cli/commands.pilot` | it is in `selfhost/cli/host.pilot` (line 129) |
+| 2 | `crates/pilot-cli/src/check.rs` line 13 | "(see `node_row`)"; no `node_row` exists anywhere | "(see `NODE_COLUMNS`)" |
+| 3 | `crates/pilot-cli/src/host.rs` lines 9-19 | the host-op table omits `cli_checked_tool` and `cli_pending_diags`, which the file handles (lines 115, 40) | add a row for each |
+| 4 | `crates/pilot-vm/src/pilc.rs` line 1 | "`.pilc` v3 Zero-Copy Binary Container"; `load_from_bytes` copies into owned `Vec`s | "`.pilc` v3 container (format version 5): constants, instructions, and the span/register debug table `VmHook` reads" |
+| 5 | `crates/pilot-vm/src/lib.rs` line 1 | "Zero-Copy Format & Debug-Span Compiler" | "The seed VM crate: `BytecodeCompiler` (AST to PilVM bytecode), the VM, `.pilc` I/O and the host airlock" |
+| 6 | `crates/pilot-vm/src/stage_a_natives.rs` line 4 | names `STAGE_A_VM_NATIVES`, which does not exist | `stage_a_vm_natives()` in `selfhost/gate/manifest.pilot` |
+| 7 | `crates/pilot-parser/src/tables.rs` lines 53-54 and 643-644 | "until PROP-008 step 3"; there is no step 3 | "until `PROP-022` §3" |
+| 8 | `crates/pilot-parser/src/lib.rs` lines 1-2 | "Hardcodes strictly the 14 seed `TokenKind`s"; the parser reads 86 token kinds | "The seed parser: the 14 seed keywords and fixed punctuation are read here; every other word, operator and construct comes from the bootstrap tables built from the stdlib sources. No Pilot type name is written here." |
+| 9 | `crates/pilot-parser/src/loud.rs` lines 57, 69 | "for now" with no seam or proposal id | name the limit (a default must be a literal) and the proposal that lifts it, or drop "for now" |
+| 10 | `crates/pilot-lexer/src/token.rs` lines 1-3 | milestone tags, "14 Hardware Seed Keywords"; the enum also has `Operator` | "`TokenKind` (the 14 seed keywords, literals, punctuation and `Operator`), `TokenFlags`, and the struct-of-arrays `TokenTape`" |
+| 11 | `crates/pilot-intern/src/lib.rs` line 1 | "Milestone 28.2 & 52.3: Zero-Copy Arena String Interner"; new strings are copied into the pool | "Arena string interner: strings live in one byte pool; a repeat lookup allocates nothing" |
+| 12 | `crates/pilot-analysis/src/lib.rs` line 1 | "Native Static Analysis & Lossless `__engine` Bridge"; the crate does no analysis | "Legacy `RawAstArena` flattening and the `ast_*` / `layout_*` / `sym_*` `__engine` hooks that `pilot-cli` serves to Pilot tools (deleted by `PROP-004` / D0)" |
+| 13 | `crates/pilot-analysis/src/infer.rs` | no module header | add a one-line `//!` header saying what it holds |
+| 14 | `crates/pilot-analysis/tests/common/anticheat.rs` lines 4-8 | "Shared across `pilot-analysis`, `pilot-parser`, and `pilot-lexer` ... all 13 milestone suites"; the lexer has no tests and the manifest has about 40 entries | "Shared by the `pilot-analysis` and `pilot-parser` milestone suites. Every test in `MILESTONE_TEST_MANIFEST` arms an `AntiCheatGuard` ..." (this file is frozen for the scorecard: V7 unless approved) |
+| 15 | `crates/pilot-analysis/src/types.rs` lines 50-66 | `CapabilityBits::is_mutable`, `is_unique`, `is_linear`, `is_pinned`, `union` are never called | delete them |
+| 16 | `crates/pilot-analysis/src/infer.rs` lines 58, 71, 857 | `PhysicsRegistry::diagnostics` is filled by `ast_emit_diag` and never read, so diagnostics `selfhost/attr_weaver.pilot` sends (lines 302, 311) are dropped silently | delete the field and the hook, and make `attr_weaver.pilot` report through the checker's diagnostics or a seam (the whole crate goes in D0, so deleting is the smaller change) |
+| 17 | `crates/pilot-analysis/src/infer.rs` line 156 | `flatten_ast(arena, _root)` never uses `_root` | drop the parameter and update its 3 callers |
+| 18 | `crates/pilot-analysis/tests/milestone60_selfhost_cli_pkg_perf_and_bench.rs` lines 3, 58-70, 206 | header claims a `pilot-cli <= 100` LOC check and contracts 2-3 that no test makes; its audit rule names `selfhost/cli/diff_test.pilot`, deleted in f260d42, so `test_60_1` panics `MISSING_PILOT_DELIVERABLE` | remove that `FileAuditRule`; trim the header to the `pkg` contract `test_60_1` checks |
+| 19 | `crates/pilot-analysis/tests/milestone59_persistent_pilvm_lsp_and_dap.rs` lines 14-50 | header lists five contracts; only `test_59_2` remains | trim to what `test_59_2` checks |
+| 20 | `crates/pilot-analysis/tests/milestone61_stage3_fixed_point_and_universal_rename_gate.rs` lines 1-3, 9 | "Stage-3 Self-Hosted Fixed-Point"; names `selfhost/codegen/*.pilot` (deleted 2026-11-18) | "stage builds stop at their seams"; drop the `codegen` path |
+| 21 | `crates/pilot-analysis/tests/milestone11_*.rs` line 164, `milestone23_*.rs` header | "Zero-Allocation" claims no test measures | drop "Zero-Allocation" |
+| 22 | `crates/pilot-vm/src/lower_call.rs` lines 11-12 (with the same text in `selfhost/ir/lower.pilot` line 972, changed in the same step so every engine prints the same message) | the `vm.call_quote` seam says carrier values come "once the type checker exists (F4)"; the checker exists | "call-quote modes do not build their carrier values (CallExpr, Signal, Dual, frame, ast, EffectPlan) yet" |
+
+**Also queued, not part of this entry:** `milestone55` (reads the deleted `selfhost/vm/compiler.pilot`) is in `PROP-005` 5D. The Pilot files reached only by Rust milestone tests (`selfhost/diagnostics.pilot` by `milestone50`; `selfhost/cli/pkg_cmd.pilot` and `selfhost/pkg/{resolver,exclusions,version}.pilot` by `milestone03`; `stdlib/polyglot/shm.pilot` by `milestone58`; and the folders listed in `docs/roadmap.md` D0) are deleted together with those tests in D0.
+
+**Acceptance:** `cargo fmt --all --check`; `cargo build -p pilot-cli`; the three engines and `pilot gate --full` unchanged; `rust.md` updated for items 15-17.
+
+**As built (2026-11-18).** Items 1-16 and 18-22 are applied in the files listed. The seed went from 27,153 to 27,132 Rust `src` lines (-21), and `paused_max_total_rust_loc()` was lowered to match.
+
+- **Item 16 had more callers than listed.** `ast_emit_diag` was sent from 23 places, not 2: `selfhost/attr_weaver.pilot` (2), `selfhost/diagnostics.pilot` (8), `selfhost/perceus/escape.pilot` (11), a debug line in `selfhost/lsp/handlers.pilot`, and the unused wrapper `Ast.emit_diag` in `stdlib/core/primitives/ast.pilot`. Every message these passes sent was dropped. The 21 diagnostic sites now stop at the new seam `analysis.diag_sink`. The debug line and the wrapper are deleted. The name is gone from `build_allowed_infer_strings()`, and `legacy_engine_ratchet()` is lowered for the five files. These are all Pilot edits; the Rust files are the ones listed.
+- **Item 17 is not done.** `flatten_ast` has 37 callers, not 3: `infer.rs` itself, `crates/pilot-cli/src/run.rs` line 366, `crates/pilot-cli/src/tool.rs` lines 93 and 218, and 34 files in `crates/pilot-analysis/tests/` (`milestone02` to `milestone30`, `milestone50`, `milestone53`, `milestone55`, `polyglot_transport_and_generative_embedding.rs`). Only `infer.rs` is approved. **Amendment A1 (needs approval):** drop the `_root` parameter and update `run.rs`, `tool.rs` and those 34 test files, one line each (Rust `src` -0, tests -0). Alternative: leave it for D0, which deletes the crate and every caller.
+
+---
+
+## `PROP-039` — The VM Frees Memory Where Pilot Says: `.pilc` Carries Perceus `dup`/`drop`, the Seed VM Counts References, and the Tracing Collector Is Deleted
+
+**Status: DRAFT 2026-11-18, design only; needs owner approval before any Rust is touched.** Owner direction 2026-11-18: "pilot is the brain and rust is the body. all decisions and logic go through pilot and only the necessary actions go through rust" (AGENTS.md 12.4.5).
+
+### 1. What happens today (read 2026-11-18)
+
+- **Pilot already decides when every value dies.** `selfhost/ir/pass_perceus.pilot` (`insert_reference_counts`) makes every reference explicit in PilIR. It adds a `perceus_dup` where a value gains an owner and a `perceus_drop` right after its last use, including on branch edges, before `return`, and for globals at the end of the start function.
+- **Only the C path obeys those decisions.** `pilot emit c` / `pilot test --emit c` run the pass, and the emitted C calls `pilot_v_dup` / `pilot_v_drop` (`runtime/c/pilot_rt.h`). `--live-allocations` proves zero leaks there.
+- **The seed VM ignores them and decides for itself.** `crates/pilot-vm/src/collect.rs` (274 lines) is a tracing collector. VM values are tagged slot handles copied with no count. The VM decides when to collect (`collect_if_due`: allocation and string-byte thresholds) and what is dead (marking from registers, globals, constants and generator frames). It also needs roots pinned for the host (`pin_host_slots`) and a debug mode (`PILOT_HEAP_VERIFY`).
+- **The Pilot bytecode path doesn't run the pass.** `pilot compile` / `--via-ir` (`selfhost/vm/ir_to_pilc.pilot`) emit no `dup`/`drop`, so `.pilc` programs also rely on the Rust collector.
+
+That is a decision in the body: the VM, not Pilot, chooses when memory is freed.
+
+### 2. Design
+
+1. **Pilot decides (no Rust).** `pilot compile` runs `insert_reference_counts` with the same `counted` test as C: every value that is not a number or a boolean. `pilc_lower.pilot` writes each `perceus_dup` / `perceus_drop` as a VM action on a register. Later, `drop_reuse` (a unique value's slot reused in place) is decided by Pilot the same way and written as a third action.
+2. **Rust only acts (approval needed).**
+   - Every heap slot (list, record, closure environment, run-time string) carries a reference count, starting at 1 when allocated.
+   - `dup r` adds one.
+   - `drop r` subtracts one. At zero it empties the slot, marks it dead and drops what the slot held, element by element, the same mechanical rule as `pilot_v_drop`. Numbers, booleans and constants are not counted, so both actions do nothing on them.
+   - The VM chooses nothing: it never decides when to free or what is live.
+3. **How the actions reach the VM: two options for the owner.**
+   - **(a)** Two appended opcodes, `OpDup` and `OpDrop`, after `OpJumpUnless = 43`. One byte each: the fastest dispatch and the smallest bytecode. Recommended.
+   - **(b)** Two engine intrinsics through `OpEngineIntrinsic`. No opcode change, but each one is a name lookup at run time.
+4. **The collector goes in two steps.**
+   - While the Rust `BytecodeCompiler` (`lower_*.rs`) still compiles `pilot run`, its programs carry no drops and still need the collector. So the collector stays on for those programs and is off for `.pilc` that Pilot compiled (a flag in the `.pilc` header, set by Pilot).
+   - When `PROP-005` deletes the Rust compiler, every program comes from Pilot, so `collect.rs` and its roots, thresholds and verify mode are deleted.
+5. **Debugging.** A read of a dead slot is already an internal error (`list_slot`, `map_slot`), so a missing `dup` faults loudly instead of reading a reused slot. `pilot test --via-ir --live-allocations` counts live slots at exit, matching the C path.
+
+### 3. Rust (needs approval). Strictly these files, itemized when approved
+
+| File | Change | Estimate |
+| :--- | :--- | :--- |
+| `crates/pilot-vm/src/collect.rs` (and the slot storage it uses) | A count per slot; `dup_slot`, `drop_slot` (free at zero, then drop the slot's contents); collection skipped for a `.pilc` whose header says it counts references | about `+30` |
+| `crates/pilot-vm/src/vm.rs` | Dispatch for the two actions (option a) | about `+8` |
+| `crates/pilot-vm/src/pilc.rs` | Read the header flag; accept the two opcodes | about `+4` |
+| Later, with `PROP-005`'s deletion | Delete `collect.rs`'s tracing, roots, thresholds, `pin_host_slots`, `PILOT_HEAP_VERIFY` | about `-274` |
+
+Net: about `+40` now, about `-230` at the end. The `+40` needs a `SCORE_APPROVED_RUST_LINES` / ceiling allowance or an offsetting deletion. Rule 1.1 asks for flat-or-lower waves, so the owner may prefer to land this together with `PROP-005`'s deletions.
+
+### 4. Pilot (no approval needed; listed so the slice is whole)
+
+- `selfhost/cli/commands.pilot`: `cli_pilc_files` links `selfhost/ir/pass_perceus.pilot`.
+- `selfhost/vm/ir_to_pilc.pilot`: run `insert_reference_counts` before lowering; set the header flag.
+- `selfhost/vm/pilc_lower.pilot`: lower `perceus_dup` / `perceus_drop` to the actions.
+- `stdlib/pilot/vm/pilc.pilot`: the two opcodes in `VmOp`, and their names.
+- `pilot test --via-ir --live-allocations`: count live slots at exit.
+
+### 5. Acceptance (tests first, expected values worked by hand)
+
+- Every `tests/conformance/memory/drop_*` case passes on `--via-ir --live-allocations` with 0 live objects at exit, as on `--emit c`.
+- A new `memory/rc_vm_last_use`. A list built in a loop and dropped after its last use prints the live count before and after (by hand: 1, then 0). This proves memory is freed at the point Pilot chose, not at a later collection.
+- `err_*` case: a `.pilc` that reads a slot after its last `drop` stops with the dead-slot error, never a wrong value.
+- `pilot test --via-ir` keeps its 9 known failures and gains none. Seed, `--ir` and `--emit c` are unchanged.
+- **Speed report** (`pilot bench`, AGENTS 12.4.2): with no collector, there are no pauses and no root scans. Each counted `dup`/`drop` costs one add/subtract and one branch, and Perceus leaves most of them out. Report before/after on the bench set.
+
+### 6. Open points for the owner
+
+1. Option (a), opcodes (recommended), or (b), intrinsics.
+2. Land the `+40` now under an allowance, or wait and land it with `PROP-005`'s deletion so the wave is net negative.
+3. Cycles. Reference counting cannot free a cycle (a list that holds itself through a record). The C path has the same limit today. Pilot's ownership rules (`0b10` move-by-default, `OWN001`) should prevent building one in safe code. If a case is found, the answer is a Pilot rule that rejects it, not a collector in Rust.
 
 ## `PROP-003` — Wave 3, Itemized: Parser Desugarings and VM Helpers That Can Leave Rust Now
 
@@ -3604,7 +3955,7 @@ The pinned messages are few (about 12 `.stderr` files carry seed runtime message
 Today every `pilot` invocation compiles the toolchain itself, meaning the `CLI` list in `crates/pilot-cli/src/main.rs` and the `link_tool` lists, with the Rust `BytecodeCompiler`. Once that compiler is deleted, something else has to turn the toolchain into bytecode, and the only Pilot path (snapshot → `selfhost/check` → `selfhost/ir` → `ir_to_pilc`) is itself toolchain code. There are two ways out:
 - **(T1) Checked-in `toolchain.pilc`, produced by the Pilot path, pulled forward from `PROP-006`.** The last Rust-compiled toolchain runs the Pilot path once to write `toolchain.pilc`. That file then rebuilds itself until stage 2 equals stage 3 (Gate 2), and the VM boots it directly. The Rust parser stays (the checker still reads `chk_snapshot`) until `PROP-006`.
 - **(T2) Keep the Rust compiler for the toolchain only; route user programs through PilIR.** This deletes nothing until T1 lands anyway, so it is only a staging step.
-- **Recommendation: T1.** It is the only way to reach the deletion. `PROP-006` then shrinks to deleting the Rust lexer, parser and AST once the Pilot parser feeds the checker.
+- **Decided 2026-11-18: T1** (owner: "T1: toolchain.pilc"). It is the only way to reach the deletion. `PROP-006` then shrinks to deleting the Rust lexer, parser and AST once the Pilot parser feeds the checker.
 
 ### Findings 2026-11-15 (scratch copy, nothing kept)
 Can the Pilot pipeline read the toolchain at all? `pilot check selfhost/ir/main.pilot` was run on a scratch copy:
@@ -3768,7 +4119,7 @@ Can the Pilot pipeline read the toolchain at all? `pilot check selfhost/ir/main.
         |---|---:|---:|---|---|
         | **1. Linked, raw `Map`** | 11 | 375 | `map_new`/`map_get`/`map_set` only (`pkg/manifest.pilot` also reads the AST): `crypto/hash` 156, `preprocessor` 45, `pkg/resolver` 45, `pkg/manifest` 27, `gate/manifest` 21, `gate/runner` 18 (+1 `get_env`), `loader/pragma_filter` 18 (the `glist_*` helpers), `pkg/exclusions` 18, `gate/rename_litmus` 13, `pkg/archive` 9, `transpile/ingest` 5 | **Rewrite** onto `Map<K, V>`/`List<T>`, as the `PROP-002b` `Map` slice did. Pilot only, no Rust. Smallest first. |
         | **2. Linked, reads the Rust AST** | 9 | 601 | `ast_*`, `sym_str`, `mount_unit` and other Stage-A natives: `analyzer` 394, `ffi_bindgen` 56, `core/reflect` 52 (user programs reach it), `attr_weaver` 26, `core/primitives/ast` 21 (in the prelude: every program), `diagnostics` 20, `ast_bridge` 17, `core/keywords` 8, `cli/test_runner` 7 | `analyzer.pilot` is **not** duplicated: 27 of its 29 codes (KW001, OPT001/002, COND001/002, LOOP001–005, UNIMP001–004, DIV001, FLOW002–004, NULL002, MATCH002, UNREACH001, ENGINE001, ...) come from nowhere in `selfhost/check`, and `pilot run` (`run.rs` `analyze`) reports them. **Port** its checks into `selfhost/check` over `Program`, then drop it from the link list (a Rust edit). The rest move onto `selfhost/check`'s snapshot when their callers are ported, or wait for `PROP-025` (the Rust AST goes). |
-        | **3. Linked, CLI host services** | 5 | 20 | `cli/host` 12 (`cli_run`, `cli_check`, `cli_analyze`, ...), `check/main` 1 (`chk_report`), `ir/main` 1 (`tool_input_text`), `ir/fault` 1 (`op_checked`, kept until 5F), `core/primitives/map` 5 (the `Map` type's own natives) | **Give them owners**: one `[EngineOp]` owner type for the tool host (`ToolHost`) and the `Map` natives on `Map`. Needs an owner decision on whether Stage-A tool natives get owners in `airlock_host_ops()` (they are not `HostOp`s). |
+        | **3. Linked, CLI host services** | 5 | 20 | `cli/host` 12 (`cli_run`, `cli_check`, `cli_analyze`, ...), `check/main` 1 (`chk_report`), `ir/main` 1 (`tool_input_text`), `ir/fault` 1 (`op_checked`, kept until 5F), `core/primitives/map` 5 (the `Map` type's own natives) | **Give them owners**: one `[EngineOp]` owner type for the tool host (`ToolHost`) and the `Map` natives on `Map`. Needs an owner decision on whether Stage-A tool natives get owners in `airlock_host_ops()` (they are not `HostOp`s). **Decided 2026-11-18: "Pilot first"** (see the Work Queue, decision 2). |
         | **4. Old frontend, linked only for `bootstrap_parity`** | 3 | 343 | `lexer` 64, `ast` 101, `parser` 178 (all `map_*`); `selfhost/cli/commands.pilot` links them with `pilotc.pilot` for the gate, which stops at seam `bootstrap.stage_compile` before using them | **Delete**: `PROP-021` (lexer) and `PROP-025` (parser) replace them, and the gate already stops at its seam. 7 Rust milestone tests name them, so the deletion goes with `PROP-004` or a small Rust test-edit proposal. |
         | **5. Not linked by any command** | 35 | 1,967 | `codegen/*` (8 files, 746), `vm/compiler` 341, `lsp/*`, `perceus/*`, `perf/*`, `dap/*`, `db/*`, `ide/vscode_gen`, `cst/cst`, `bench/bench`, `vm/pilc_writer`, and the unpackaged `stdlib/{core/effects,core/reactive,crypto/ed25519,db/sql_engine,http/http,pkg/licensing,polyglot/marshal}` | Outside 5B (D5). Every one is named by a `crates/pilot-analysis` milestone test, so deleting them is `PROP-004`. |
         | **Stale ratchet rows** | 4 | 0 | `check/program` (ratchet 2), `check/snapshot` (2), `ir/lower` (2), `gate/seed_audit` (12) have no call left; others are well under their ceiling (`lsp/handlers` 72 of 228, `transpile/ingest` 5 of 30) | **Tighten** the ratchet to the measured counts now (Pilot only). |
@@ -3803,6 +4154,7 @@ Can the Pilot pipeline read the toolchain at all? `pilot check selfhost/ir/main.
           - VAR001 is now reported at uses as well as declarations.
           - `selfhost/diagnostics.pilot` repeats the naming messages; only Rust tests read it (`PROP-004`).
           - Not filed yet: on PilIR and C a `List<i64?>` literal holding `none` faults, and a closure inside a constructor fails.
+      - **Groups 3–4, Pilot part as built (2026-11-18, owner: "Start A1 here"; no Rust touched):** `cli_text_tool`/`tool_input_text` and `chk_report`/`cli_pending_diags` were rebuilt in Pilot (`ir_text_main` reads its file; the new `selfhost/check/checked.pilot` places and renders a checked tool's diagnostics). `selfhost/gate/seed_audit.pilot` moved off `selfhost/lexer.pilot` onto the seed's own table (`pilot.parse.tape`). Ratchet: `cli/host` 11 → 9; the `check/main` and `ir/main` rows were removed. Then `PROP-038` (approved 2026-11-18, with Amendments A1 and A2) deleted the Rust these left dead (−78), gave the other 8 calls a `ToolHost` owner, and deleted `selfhost/{ast,parser}.pilot` and `test_61_1`. **Groups 3–4 are done.**
     - **5B.5 Checker bugs found on the toolchain.**
       - The loop-variable shadowing bug (MOD003 on `op`), and any others: each gets a `known_bugs` repro first, then a fix in `selfhost/check`.
       - Then the visibility fixes (`pub` on items used across directory packages).
@@ -3840,7 +4192,33 @@ Can the Pilot pipeline read the toolchain at all? `pilot check selfhost/ir/main.
     7. try/defer/drop sweeps.
   - New CLI path: `pilot run --via-ir` runs a user program from PilIR bytecode on the existing VM.
   - Done when the conformance suite passes on `--via-ir` with the same results as the seed, and C2 (`pilot bench`) holds at seed speed or better.
-- **5E — Bootstrap (needs the T1/T2 decision, and Rust).**
+  - **As built (2026-11-18, Pilot only; no Rust touched):**
+    - **Done, build order 1–5:** `stdlib/pilot/vm/pilc.pilot` (the v5 container: build, write with `PackedBuffer<u8>` + `File.write_raw`, read back, disassemble; a `PDBG` trailer after the code holds the program's files and one source offset per instruction, which the loader skips today), `selfhost/vm/pilc_regs.pilot` (liveness, linear scan over r18..r254, cells in registers of their own), `pilc_lower.pilot` (scalars, narrow wrapping, compares, casts, cells and globals, direct calls, engine operations on an allow-list of the VM's natives, jumps with parallel moves, switch tables, returns), `pilc_aggregates.pilot` (records as VM maps marked with their layout id, other aggregates as lists; a field of a value whose layout is not known statically is found at run time through a start-up table of every record layout's field names), `pilc_closures.pilot` (`call_indirect` through `CallClosure`: one thunk per (function, captured count) unpacks the record's captured values and jumps to the function; a start-up table maps the pair to the thunk), `ir_to_pilc.pilot` (driver; address 0 calls the start-up code, then falls into function 0). The legacy `selfhost/vm/compiler.pilot` and `pilc_writer.pilot` are deleted (their ratchet rows removed from `selfhost/gate/manifest.pilot`).
+    - **CLI:** `pilot compile <file> [-o out.pilc] [--disasm]`; `pilot run --via-ir <file> -- args` (compiles into a fresh temporary directory, runs the `.pilc` on the VM through `host_run_with`, deletes it); `pilot test --via-ir [paths]` runs every conformance case that way and judges it as `--ir` does.
+    - **Result:** `pilot test --via-ir`: 689 passed, 9 failed, 3 stopped at a seam (the programs' own: vm.call_quote twice, ir.lower_construct once), 7 not eligible (2026-11-18, before the merge with main). Every failure is a case whose expected stderr names a source location (`file:line:col`): the VM prints `<program>` because it does not read the debug trailer (Rust item 1). The seams are the programs' own (`own.capture`, `own.collection_drop`, `vm.call_quote`, `ir.lower_construct`, ...), the same as `--ir`.
+    - **Steps 6–7 (generators, try/defer/drop):** need no lowering of their own. PilIR already lowers generators to records plus `call_indirect`, and `try`/`defer`/drops to ordinary blocks and calls, so with steps 4 and 5 their conformance cases pass on `--via-ir` (`generators/*`, `memory/drop_*`, `control/try_catch`, `control/try_records`). No separate sweep was written.
+    - **PilIR fix found by 5D:** `recv?..step` applied the step to the optional's own record, and its "absent" test was the engine's null, which an `opt` record never is. The IR interpreter printed the expected output only by accident. Now `selfhost/ir/lower_members.pilot` tests presence with the try protocol, unwraps before the step, and unwraps for a member read on an optional (`control/cascade_optional_member`, on all engines).
+    - **Not done:**
+      - runtime-error locations of a compiled program (Rust item 1);
+      - spilling when live values outgrow the registers (`vm.register_spill`);
+      - more than 16 arguments, or 15 through a function value (`vm.call_args`);
+      - a slot's address as a value (`vm.address_value`);
+      - engine operations the VM lacks (`vm.intrinsic`, e.g. `proc_args`);
+      - C2 (`pilot bench` at seed speed) is not measured;
+      - `--via-ir` is not yet the default `pilot run` path (5E/5F).
+    - **Rust needed, itemized (awaiting owner approval; nothing below has been edited):**
+
+      | # | File | Change | Why | Net Rust LOC |
+      | :-- | :-- | :-- | :-- | --: |
+      | 1 | `crates/pilot-vm/src/pilc.rs` | In `load_from_bytes`, after the code: when the bytes that remain start with `PDBG`, read the file count, each file's base (`i64`) and path (`u32` length + bytes), then the span count (equal to the instruction count) and one `i64` offset per instruction (`-1` for none). Keep the offsets in `pc_spans` (`ByteSpan { start, end: start }`) and the files in a new `debug_files: Vec<(u32, String)>` field. A file without the trailer loads as today. | So a fault in a compiled program has a span (`span_for_pc`). | +35 |
+      | 2 | `crates/pilot-cli/src/run.rs` | In `compile_entry`'s `.pilc` branch and `execute`: when the loaded binary has `debug_files`, read each file and locate spans with the same (path, text, base) lookup `link.rs` `locate` does, instead of `<program>`. | So stderr names `file:line:col` and the `called from` lines exactly as `pilot run` (`errors/err_deep_trace`, `err_seam`, `err_pending`, ...). | +20 |
+      | 3 | `crates/pilot-analysis/tests/milestone55_selfhost_vm_compiler_and_debug_table.rs` | Delete. | It reads the deleted `selfhost/vm/compiler.pilot` and `pilc_writer.pilot`. Its container checks are now `tests/conformance/vm/pilc_container` and `err_pilc_operand`, and its compile-and-run checks are `pilot test --via-ir`. | −454 |
+      | 4 | `crates/pilot-analysis/tests/common/anticheat.rs` | Remove the `milestone55_selfhost_vm_compiler_and_debug_table.rs` row (line 253) from `MILESTONE_TEST_MANIFEST`. | Item 3 deletes that file (as in `PROP-031` A1). | −1 |
+
+      Expected net: about **−400** Rust lines (+55 −455).
+      - **Owner decision 2026-11-18 (relayed by the coordinator): approved on "Pilot first" terms.** The list was cut to the minimum. The `crates/pilot-cli/src/host.rs` drop-plan skip is dropped: `run --via-ir` already avoids the directory scan in Pilot by running from a fresh, empty directory. A Pilot-side span table cannot replace items 1–2. The VM gives a fault a source span only through `pc_spans`, which only the loader fills for a `.pilc`, and `pilot run x.pilc` reports the fault in Rust (`run.rs` `execute`) before any Pilot code sees it. So the trailer must be read into the existing `pc_spans` (1), and `execute` must locate those spans against the trailer's files (2). No new field beyond the file list, no new opcode, no new `HostOp`.
+      - **Not yet edited:** this worktree changed no Rust. The edit waits for the owner's last look at this exact list. **No VM gap was found:** every PilIR opcode the interpreter runs maps onto existing opcodes and natives (`CallClosure`, `closure_new`, `record_set_type`/`record_type`, `global_get`/`global_set`, `IntrinsicArgs`/`IntrinsicKey`). So no new opcode or `HostOp` is proposed, and running emitted bytes goes through the existing `cli_run` on a `.pilc` path.
+- **5E — Bootstrap (T1, decided 2026-11-18; needs its Rust list approved).**
   - Proposal to be itemized with its exact file list: the VM boots a checked-in `toolchain.pilc`, and Gate 2 checks stage 2 equals stage 3.
 - **5F — Deletion (Rust).**
   - The scope list above, plus `paused_max_total_rust_loc()` ratcheted down by the measured amount, `must_be_absent` entries in `selfhost/gate/manifest.pilot`, and updates to `rust.md`, `pilot.md` and the matrices.

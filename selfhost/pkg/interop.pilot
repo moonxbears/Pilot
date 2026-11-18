@@ -1,6 +1,7 @@
 // =========================================================================
 // FILE: selfhost/pkg/interop.pilot
-// Milestone 60.1: Cross-Ecosystem Package Spec Resolver (cargo:, pip:, npm:)
+// Parses foreign package specs (cargo:, pip:, npm:).
+// Reached only by the milestone60 Rust test; no `pilot` command runs it.
 // =========================================================================
 pub pkg selfhost.pkg;
 

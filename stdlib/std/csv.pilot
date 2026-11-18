@@ -1,6 +1,7 @@
 // ==============================================================================
 // FILE: stdlib/std/csv.pilot
-// Ring 2: Standard CSV Parsing & Generation (pub pkg std.csv;)
+// Ring 2: CSV row record (pub pkg std.csv;)
+// Data types only: a row of string columns. No CSV parser or writer yet.
 // ==============================================================================
 pub pkg std.csv;
 

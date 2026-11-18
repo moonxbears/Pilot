@@ -47,7 +47,7 @@ To make accidental reliance on the Rust engine structurally impossible, the **en
 | **Borrows, Aliasing, Escape & `noalloc` Proofs** | **No (`0` Rust LOC)** | Static graph passes in `selfhost/check/{borrows,aliasing,own,stack,noalloc}.pilot` and `selfhost/perceus/escape.pilot`. |
 | **Closures, `yield` Generators, `async` Tasks & `MethodTable`s** | **No (`0` Rust LOC)** | Lowered in `selfhost/check/methods.pilot` and `selfhost/ir/{lower_generator,lower_expr}.pilot` into state-machine structs, environment records, and direct/table calls. |
 | **Collections, Strings, Formatting, Crypto, DB, HTTP & Polyglot** | **No (`0` Rust LOC)** | `stdlib/core/primitives/{list,map,str,slice,stride}.pilot`, `stdlib/core/{format,convert}.pilot`, and `stdlib/std/*`. |
-| **`comptime` Evaluation, `quote`/`ast<T>`, Codegen & `.pilc` Emission** | **No (`0` Rust LOC)** | `selfhost/ir/interp.pilot`, `stdlib/core/primitives/ast.pilot`, `selfhost/codegen/*`, and `selfhost/vm/{ir_to_pilc,pilc_writer}.pilot`. |
+| **`comptime` Evaluation, `quote`/`ast<T>`, Codegen & `.pilc` Emission** | **No (`0` Rust LOC)** | `selfhost/ir/interp.pilot`, `stdlib/core/primitives/ast.pilot`, `selfhost/transpile/*` (C11 and other languages), `selfhost/vm/ir_to_pilc.pilot` and `stdlib/pilot/vm/pilc.pilot`. |
 | **Bytecode Dispatch, Raw Byte Slabs & Thin OS Syscalls** | **Yes (`~1,800` LOC seed $\rightarrow$ C11 in `M46`)** | `.pilc` loader, VM ALU/jump/call dispatch loop, raw slab `alloc`/`free`/`load`/`store`/`memcpy`, and 51 frozen `HostOp`s (`0..=50`) in `crates/pilot-vm/src/bridge.rs`. |
 
 ### 1.4 The Strict 14-Token & Universal Name-Blind Contract
@@ -280,3 +280,35 @@ Pilot is in no model's pre-training corpus. Earlier drift happened when agents g
 10. **State Unchecked Claims Explicitly:** Opening reports must state any engine, gate, or platform not executed. Never present an unrun path as verified.
 11. **Never Reach for Rust or Raw `__engine`:** Before touching any `.rs` file or typing `__engine`, ask: *"Can this be expressed in `<= 1,500` LOC of Pilot over existing typed core wrappers?"* If yes, putting it in Rust or adding a raw `__engine` call is an architectural violation—even if every test passes.
 12. **Prefer Loud Pilot Seams Over Keeping Legacy Rust:** When deleting misplaced Rust breaks `.pilot` callers or unbuilt compiler stages, **do not keep the Rust code and do not paper over the break**. Replace the broken Pilot call site or pass with `seam("<area>.<what>", "<why broken & what Pilot pass replaces it>")`, register it in `seams.pilot` / `known_bugs`, downgrade its row in `keyword_matrix.md` / `concept_matrix.md` / `wiring.pilot`, and leave it loudly broken in Pilot until implemented in pure Pilot.
+
+---
+
+## 12. Owner Working Rules (Every Agent, Every Tool)
+
+These are standing directions from the project owner. They bind every AI coder (Claude Code, Antigravity, Codex, Cursor, Copilot or any other) the same way; none of them lives only in one tool's private memory. When the owner gives a new standing direction, add it here in the same change.
+
+### 12.1 Running Tests and Builds
+1. **Cap every heavy job:** run test suites, gates, cargo builds and anything that may run long through `tools/capped.sh SECONDS <cmd...>` (time, task and 12 GB memory cap). An uncapped run once took the machine down. Run long jobs in the background and wait for them; do not poll in a tight loop.
+2. **No test over 60 seconds,** cold `target/cache/lex` and full-suite load included. A slower test is a bug to report or fix by making the work faster. Never raise a `timeout=` tag or the default limit.
+3. **Short loop while iterating, full run once per slice:** while working, run `pilot test <changed dirs>` or `pilot test --changed --skip-tag slow` (add `--ir` / `--emit c` only when lowering or emitting is touched). At the end of a slice or hand-off, run seed, `--ir` and `--emit c` in full plus `pilot gate --full`, in the background under the cap. A case costing over about 60 s on any engine gets a `slow` line in its `<case>.tags`.
+4. **No runs for doc-only edits:** a change that only touches `.md` files or other files no build, test or gate reads needs no run, unless the doc records a claim whose evidence run has not happened since the code last changed. Files the gate reads (`selfhost/gate/ledger/*.pilot`, `selfhost/gate/manifest.pilot`, `docs/keyword_matrix.md`) get one targeted gate run, not the engine suites.
+5. **Use `target/debug/pilot`.** The owner's `pilot` on PATH is `~/.local/bin/pilot` -> `target/release/pilot`, which goes stale after any Rust change. After merging Rust changes, rebuild it with `cargo build --release -p pilot-cli`. When the owner reports an error the debug build does not reproduce, check the release build's date first.
+6. **Lexer cache:** editing `stdlib/pilot/lex/{build,modes,cache}.pilot` changes the lexer cache key (`target/cache/lex`). Never edit them while a lex run is going, and warm the cache with a seed run before an `--ir` run. Lex tests whose table holds names use `build_table_cached`.
+
+### 12.2 Shell and Git Safety
+1. `rm -rf` only on literal absolute paths, never on a variable or glob that could expand to something else.
+2. Never `pkill -f` / `pgrep -f` with a pattern that also matches your own command line; kill by PID.
+3. Commit only when the owner asks; never push without asking. Never use a bare `git stash` (name it, `git stash push -m <why>`, and pop it in the same task). Never commit on another agent's or session's behalf.
+4. Never put the owner's name, email or other personal details in requests to outside services.
+
+### 12.3 The Scorecard (`tools/score`)
+1. `pilot run tools/score/main.pilot -- --base <rev>` scores the working tree against `<rev>` (add `--verbose` for every finding, `--log <file>` for the audit log). A veto exits 1. Run it before reporting a change and include its summary line in the report; explain any veto. A score never makes work done; section 9.1 does.
+2. `tools/score/` and `crates/pilot-analysis/tests/common/anticheat.rs` are frozen: changing them without an approval in `tools/score/approvals.pilot` at the base commit is a veto (V7). Approvals are the owner's to add.
+3. **`--adjust` is the owner's alone.** No agent ever adds, edits or removes an entry in `tools/score/adjustments.pilot`; the ledger is append-only (V7o).
+
+### 12.4 Priorities and Reporting
+1. **Run-time speed over compile speed.** The owner's three goals are adaptability, self dynamic generation (`comptime` / `quote` / weavers / generators) and run-time performance. Slow compiles are acceptable; never trade run-time speed for compile speed.
+2. **Flag modern, more efficient approaches** unprompted: when a more modern technique would be faster than what Pilot does or what you are about to build, say so in the report with what it gains, what it costs (including when the gain is compile time only) and where it applies. Do not silently adopt or silently skip it; make it a proposal when it is real work.
+3. **Open every report with what is not done** (section 9.1 point 7), then what works, then the exact commands run.
+4. **Execution order:** [`docs/roadmap.md`](docs/roadmap.md) orders every proposal and lists what Rust each step deletes, plus the owner's to-fix-later list. Pick work from it.
+5. **Pilot is the brain, Rust is the body** (owner, 2026-11-18). Every decision and every piece of logic lives in Pilot. Rust only carries out actions Pilot has already decided: run the instruction it is given, read or write the bytes it is pointed at, make the system call it is asked for. A Rust path that chooses something (what to parse, how to lower, which operator a symbol means, when memory is freed, what order things run in) is a decision in the wrong place: move it to Pilot or list it in `proposals.md` for removal.

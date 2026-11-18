@@ -1,34 +1,23 @@
 #!/usr/bin/env bash
-# Runner script for all Pilot Concept Showcases on Unix/Linux/macOS
-set -euo pipefail
+# Checks every showcase with `pilot check`. A showcase that uses a feature
+# not built yet stops at a registered seam (SEAM001); that is reported, not
+# counted as a failure. Any other error fails the run.
+set -uo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
-echo "=========================================================="
-echo "         PILOT INTERACTIVE CONCEPT SHOWCASE RUNNER        "
-echo "=========================================================="
+PILOT_BIN="${PILOT_BIN:-${DIR}/../../target/debug/pilot}"
+if [ ! -x "$PILOT_BIN" ]; then PILOT_BIN="pilot"; fi
 
-PILOT_BIN="${DIR}/../../target/release/pilot"
-if [ ! -f "$PILOT_BIN" ]; then
-    PILOT_BIN="${DIR}/../../target/debug/pilot"
-fi
-if [ ! -f "$PILOT_BIN" ] && command -v pilot &> /dev/null; then
-    PILOT_BIN="pilot"
-fi
-
-count=0
-for script in $(ls "$DIR"/*.pilot | sort); do
-    filename=$(basename "$script")
-    echo ""
-    echo ">>> CHECKING: $filename <<<"
-    out=$("$PILOT_BIN" check "$script")
-    echo "$out"
-    if ! echo "$out" | grep -q ": 0 diagnostics"; then
-        echo "ERROR: $filename reported non-zero diagnostics!" >&2
-        exit 1
+passed=0; seams=0; failed=0
+for script in "$DIR"/*.pilot; do
+    name=$(basename "$script")
+    if out=$("$PILOT_BIN" check "$script" 2>&1); then
+        echo "ok      $name"; passed=$((passed + 1))
+    elif echo "$out" | grep -q "SEAM001" && ! echo "$out" | grep -E "error\[" | grep -vq "SEAM001"; then
+        echo "seam    $name ($(echo "$out" | grep -m1 -o 'seam `[^`]*`'))"; seams=$((seams + 1))
+    else
+        echo "FAIL    $name"; echo "$out" | grep -m3 "error" | sed 's/^/        /'; failed=$((failed + 1))
     fi
-    count=$((count + 1))
-    echo "----------------------------------------------------------"
 done
-
-echo ""
-echo "All $count Concept Showcases verified with 0 diagnostics!"
+echo "$passed passed, $seams stopped at a seam, $failed failed"
+[ "$failed" -eq 0 ]

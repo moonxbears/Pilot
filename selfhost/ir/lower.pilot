@@ -761,6 +761,10 @@ pub fn lower_assign(var ref lw: Lowerer, n: i64) -> u32 {
 }
 
 /// The IR opcode of an arithmetic or bitwise `BinaryOp` code, or 0.
+/// Only for operands the engine holds (`str + str`, records compared with
+/// `==`): a register value's operator is lowered from its declaration first
+/// (selfhost/ir/lower_operator.pilot). Goes when those types declare their
+/// operators too (PROP-022).
 pub fn arith_opcode(op: i64) -> u16 {
     // BinaryOp codes (crates/pilot-ast): Add 1, Sub 2, Mul 3, Div 4, Rem 6,
     // BitAnd 16, BitOr 17, BitXor 18, Shl 19, Shr 20.
@@ -844,6 +848,11 @@ pub fn lower_binary(var ref lw: Lowerer, n: i64) -> u32 {
     // A range value (`1 ..= 6`) of a record type holding its two ends.
     if op == op_range() || op == op_range_inclusive() {
         if some v = lower_bounds_record(lw, n) { return v; }
+    }
+    // A register value's operator runs its declaration's machine-operation
+    // body (PROP-022 slice 22B, selfhost/ir/lower_operator.pilot).
+    if op > 0 && op < symbols.len() {
+        if some v = lower_declared_operator(lw, n, symbols[op]) { return v; }
     }
     let ir_op = arith_opcode(op);
     let pred = cmp_pred_of(op);
@@ -969,7 +978,7 @@ fn lower_type_query(var ref lw: Lowerer, n: i64, query: str, arg: i64) -> u32 {
 /// The seam a call-quote mode stops at, with the seed's message
 /// (crates/pilot-vm/src/lower_call.rs QUOTED_CALL_SEAM).
 pub fn call_quote_seam() -> str =>
-    "SEAM001: unconnected seam `vm.call_quote`: call-quote modes build their carrier values once the type checker exists (F4)";
+    "SEAM001: unconnected seam `vm.call_quote`: call-quote modes do not build their carrier values (CallExpr, Signal, Dual, frame, ast, EffectPlan) yet";
 
 pub fn lower_call(var ref lw: Lowerer, n: i64) -> u32 {
     let s = lw.inf.p.s;
@@ -1012,7 +1021,8 @@ pub fn lower_call(var ref lw: Lowerer, n: i64) -> u32 {
         }
         // A function the program declares shadows a type of the same name
         // (`fn order(..)` over the core `order`), as in the checker's
-        // `infer_call` and the seed: `order(4)` calls it.
+        // `call_type` / `called_fn` (selfhost/check/infer.pilot) and the seed:
+        // `order(4)` calls it.
         let names_fn = nl_get(lw.inf.p.fns, node_name(s, callee)).len() > 0;
         // A type the engine holds (`List()`, `Map()`) is built by the engine
         // operation bound to its name, unless the program links a

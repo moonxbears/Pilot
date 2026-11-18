@@ -161,7 +161,7 @@ fn test_m11_1_adapter_rule_registry_and_prefix_case_transformations() {
 }
 
 // -----------------------------------------------------------------------------
-// Test 2: Zero-Allocation PilIR Thunk Lowering (`compiler.pilot`)
+// Test 2: PilIR Thunk Lowering (`compiler.pilot`)
 // -----------------------------------------------------------------------------
 #[test]
 fn test_m11_2_zero_allocation_pilir_thunk_lowering() {

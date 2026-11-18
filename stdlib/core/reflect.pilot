@@ -1,7 +1,9 @@
 // =========================================================================
 // FILE: stdlib/core/reflect.pilot
-// 100% PILOT-HOSTED COMPREHENSIVE COMPILATION & RUNTIME REFLECTION ENGINE
-// Provides O(1) structural reflection tables for:
+// COMPILE-TIME & RUNTIME REFLECTION QUERIES
+// Pilot wrappers that mostly ask the seed engine: the file holds about 52
+// `__engine(...)` calls on the legacy ratchet (legacy_engine_ratchet in
+// selfhost/gate/manifest.pilot), which may only go down. Queries for:
 //   1. Keyword & Primitive Category Taxonomy (Scope, Badge, LSP Kind)
 //   2. Symbol Documentation & Syntax Suffixes
 //   3. Type Layout Physics (Byte Size, Alignment, 2-Bit Lattice Bits)
@@ -15,7 +17,7 @@ use Pilot.Core.Option::*;
 use Pilot.Core.Pending::*;
 
 // =========================================================================
-// 1. REFLECTION DATA STRUCTURES (0b00 IValue, Zero Runtime Overhead)
+// 1. REFLECTION DATA STRUCTURES (0b00 IValue records)
 // =========================================================================
 
 [Layout(c_abi)]
@@ -411,7 +413,8 @@ let ReflectEngine = [
 ];
 
 // =========================================================================
-// 4. REFLECTION API (O(1) Queries with Dynamic Engine Delegation)
+// 4. REFLECTION API (each query asks the engine registry first, then falls
+//    back to a fixed default)
 // =========================================================================
 
 pub fn reflect_category_scope(cat_id: i64) -> str {
@@ -464,7 +467,8 @@ pub fn reflect_category(cat_id: i64) -> CategoryInfo {
     return CategoryInfo.create(cat_id, sc, bd, lk);
 }
 
-// Fast O(1) check if an identifier is registered under a category
+// Whether `word` is registered under a category: a linear scan of the
+// category's `|`-separated word list (time grows with the list's length)
 pub fn reflect_is_in_category(cat_id: i64, word: str) -> bool {
     let pipe_words = reflect_category_words(cat_id);
     if pipe_words == "" {

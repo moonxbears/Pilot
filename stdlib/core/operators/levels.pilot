@@ -60,6 +60,20 @@ pub enum ParseShape : u8 {
     AdjacentCall,  // `f!(..)` and the other call quotes (still read by token)
 }
 
+/// Binding levels of the type-position symbols, loosest first (PROP-019).
+/// Their entries are in stdlib/core/syntax/type_construct.pilot. The bracket
+/// forms (`T[]`, `T[N]`) bind at the tightest level.
+pub enum TypeLevel : u8 {
+    Fallible,   // `T ! E`
+    Arrow,      // `A -> R`, `(A) => R`, right-associative
+    Union,      // `T1 | T2`
+    Intersect,  // `T1 & T2`
+    Postfix,    // `T?` `T^` `T @ N` and prefix `*T` `@T`
+}
+
 comptime {
     register_grammar(nameof(OpLevel), nameof(Assoc), nameof(ParseShape));
+    // Naming `type_construct` where the shapes go places these levels on the
+    // type-position rules, whose shape is their pattern.
+    register_grammar(nameof(TypeLevel), nameof(Assoc), nameof(type_construct));
 }

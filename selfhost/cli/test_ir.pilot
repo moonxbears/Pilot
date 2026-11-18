@@ -59,7 +59,7 @@ pub fn ir_eligible(program: str) -> bool {
 fn job(program: str, mode: str) -> proc.ProcessJob {
     let input = read_optional(test_stem(program) + ".stdin") ?? "";
     let exe = proc.current_exe() ?? "pilot";
-    var argv: List<str> = ["ir", mode, program, "--"];
+    var argv: List<str> = if mode == via_ir_mode() { ["run", "--via-ir", program, "--"] } else { ["ir", mode, program, "--"] };
     let arg_text = read_optional(test_stem(program) + ".args");
     if arg_text != none {
         for a in test_lines(arg_text) { argv.push(a); }
@@ -164,7 +164,13 @@ pub fn inlined_problems(optimized: proc.ProcessOutput, ref wanted: List<str>) ->
 }
 
 fn stopped_at_seam(out: proc.ProcessOutput) -> bool =>
-    out.stderr.find(seam_code(), 0) >= 0 && out.stderr.find(ir_seam_prefix(), 0) >= 0;
+    out.stderr.find(seam_code(), 0) >= 0 && (out.stderr.find(ir_seam_prefix(), 0) >= 0 || out.stderr.find(vm_seam_prefix(), 0) >= 0);
+
+/// The seam prefix of the bytecode emitter (selfhost/vm/).
+pub pure fn vm_seam_prefix() -> str => "`vm.";
+
+/// The `job` mode that runs a case as `pilot run --via-ir`.
+pub pure fn via_ir_mode() -> str => "via-ir";
 
 /// The seam a run stopped at, as its message line.
 fn seam_line(out: proc.ProcessOutput) -> str {
@@ -219,7 +225,16 @@ fn ir_problems(program: str, out: proc.ProcessOutput, ref opt_cases: List<str>, 
 
 /// `pilot test --ir [paths...]` with the choices of `sel` (`TestSelect`):
 /// exit 0 when no eligible case fails, 1 otherwise, 2 for a bad request.
-pub fn test_ir_command(ref paths: List<str>, ref sel: TestSelect) -> i64 {
+pub fn test_ir_command(ref paths: List<str>, ref sel: TestSelect) -> i64 => test_pilir_command(paths, sel, false);
+
+/// `pilot test --via-ir [paths...]`: the same cases, each run as `pilot run
+/// --via-ir` (PilIR compiled to bytecode for the VM, PROP-005 5D), judged
+/// as `--ir` judges them; a case stopping at a `vm.*` or `ir.*` seam is
+/// counted as stopped at a seam. The text round trip and the inlining
+/// checks are `--ir`'s alone.
+pub fn test_via_ir_command(ref paths: List<str>, ref sel: TestSelect) -> i64 => test_pilir_command(paths, sel, true);
+
+fn test_pilir_command(ref paths: List<str>, ref sel: TestSelect, via: bool) -> i64 {
     let problem = test_select_problem(sel);
     if problem != "" {
         eprint(f"error: {problem}");
@@ -238,7 +253,7 @@ pub fn test_ir_command(ref paths: List<str>, ref sel: TestSelect) -> i64 {
     // The cases that name functions whose calls must be inlined.
     var opt_cases: List<str> = [];
     for c in cases {
-        if File.exists(test_stem(c) + ir_inlined_ext()) || File.exists(test_stem(c) + ir_promoted_ext()) { opt_cases.push(c); }
+        if !via && (File.exists(test_stem(c) + ir_inlined_ext()) || File.exists(test_stem(c) + ir_promoted_ext())) { opt_cases.push(c); }
     }
     let opts = run_all(opt_cases, "opt");
     // Judged as they finish; reported in case order.
@@ -254,7 +269,7 @@ pub fn test_ir_command(ref paths: List<str>, ref sel: TestSelect) -> i64 {
         seams.push("");
     }
     var jobs: List<proc.ProcessJob> = [];
-    for c in cases { jobs.push(job(c, "run-roundtrip")); }
+    for c in cases { jobs.push(job(c, if via { via_ir_mode() } else { "run-roundtrip" })); }
     var pool = proc.job_pool_at_most(jobs, sel.jobs);
     test_set_limits(pool, sel, cases);
     var done = 0;
@@ -293,6 +308,6 @@ pub fn test_ir_command(ref paths: List<str>, ref sel: TestSelect) -> i64 {
         i = i + 1;
     }
     test_report_stopped(not_run);
-    print(f"RESULT (ir): {tally.passed} passed, {tally.failed} failed, {tally.at_seam} stopped at a seam, {tally.not_eligible} not eligible");
+    print(f"RESULT ({if via { via_ir_mode() } else { "ir" }}): {tally.passed} passed, {tally.failed} failed, {tally.at_seam} stopped at a seam, {tally.not_eligible} not eligible");
     return if tally.failed == 0 { 0 } else { 1 };
 }

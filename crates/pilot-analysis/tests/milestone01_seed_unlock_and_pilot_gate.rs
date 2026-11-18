@@ -118,33 +118,26 @@ fn workspace_root() -> PathBuf {
     anticheat::workspace_root()
 }
 
+/// The gate's link list, read from `cli_gate_files()` in
+/// selfhost/cli/commands.pilot, so this test links what `pilot gate` links.
+fn gate_files(root: &Path) -> Vec<String> {
+    let src = std::fs::read_to_string(root.join("selfhost/cli/commands.pilot"))
+        .expect("selfhost/cli/commands.pilot");
+    let head = "pub fn cli_gate_files() -> List<str> => [";
+    let start = src.find(head).expect("cli_gate_files() in commands.pilot") + head.len();
+    let end = start + src[start..].find("];").expect("end of cli_gate_files()");
+    src[start..end]
+        .split('"')
+        .skip(1)
+        .step_by(2)
+        .map(str::to_string)
+        .collect()
+}
+
 fn load_gate_bundle(root: &Path) -> String {
-    let deps = [
-        "stdlib/core/os_abi.pilot",
-        "stdlib/core/host_raw.pilot",
-        "stdlib/core/builtins/native_calls.pilot",
-        "stdlib/core/file.pilot",
-        "stdlib/core/env.pilot",
-        "stdlib/crypto/hash.pilot",
-        "stdlib/std/proc.pilot",
-        "stdlib/std/text.pilot",
-        "selfhost/lexer.pilot",
-        "selfhost/ast.pilot",
-        "selfhost/parser.pilot",
-        "selfhost/pilotc.pilot",
-        "selfhost/gate/airlock_abi.pilot",
-        "selfhost/gate/manifest.pilot",
-        "selfhost/gate/seed_audit.pilot",
-        "selfhost/gate/rename_litmus.pilot",
-        "selfhost/gate/bootstrap_parity.pilot",
-        "selfhost/gate/ledger/seams.pilot",
-        "selfhost/gate/ledger/wiring.pilot",
-        "selfhost/gate/seam_gate.pilot",
-        "selfhost/gate/keyword_gate.pilot",
-        "selfhost/gate/runner.pilot",
-    ];
+    let deps = gate_files(root);
     let mut combined = String::with_capacity(96 * 1024);
-    for rel in deps {
+    for rel in &deps {
         let s = std::fs::read_to_string(root.join(rel))
             .unwrap_or_else(|e| panic!("Failed reading {}: {}", rel, e));
         combined.push_str(&s);

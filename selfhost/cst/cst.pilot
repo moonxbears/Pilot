@@ -1,7 +1,7 @@
 // ============================================================================
 // FILE: selfhost/cst/cst.pilot
-// Milestone 53.1: Lossless Red-Green Concrete Syntax Tree (CST) in Pure Pilot
-// Immutable width-relative GreenNodes & ephemeral parent-linked SyntaxNodes
+// Lossless red-green CST: GreenNode and parent-linked SyntaxNode records.
+// Reached only by the milestone53 Rust test; no `pilot` command runs it.
 // ============================================================================
 
 pub pkg selfhost.cst;

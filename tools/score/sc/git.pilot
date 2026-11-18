@@ -1,0 +1,206 @@
+// The scorer's view of the repository: the base commit through git, the
+// working tree through the file system and git. Every measure is taken the
+// same way on both sides, so a difference is a change and not a change of
+// method.
+pkg sc.git;
+
+use std.proc;
+use std.text;
+
+/// A repository root and the commit a change is scored against.
+pub struct Repo {
+    pub root: str;
+    pub base: str;
+}
+
+/// One changed path: `A` added (new or untracked), `M` modified, `D` deleted.
+pub struct Change {
+    pub status: str;
+    pub path: str;
+}
+
+/// Paths a score never looks at: other worktrees and build output.
+pub const IGNORED_PREFIXES: List<str> = [".claude/", "target/"];
+/// The same as git pathspecs, appended to every search.
+pub const IGNORED_SPECS: List<str> = [":(exclude).claude", ":(exclude)target"];
+
+/// `git <args>` run in the repository.
+pub fn run_git(ref r: Repo, args: List<str>) -> proc.ProcessOutput {
+    return proc.run_in(r.root, "git", args, "");
+}
+
+/// Whether `r.base` names a commit.
+pub fn base_exists(ref r: Repo) -> bool {
+    return run_git(r, ["rev-parse", "--verify", "--quiet", r.base + "^{commit}"]).exit_code == 0;
+}
+
+/// The commit `r.base` names, as a full hash.
+pub fn base_hash(ref r: Repo) -> str {
+    return run_git(r, ["rev-parse", r.base + "^{commit}"]).stdout.trim();
+}
+
+/// Whether `path` is one a score never looks at.
+pub fn ignored(path: str) -> bool {
+    for p in IGNORED_PREFIXES {
+        if path.starts_with(p) { return true; }
+    }
+    return false;
+}
+
+/// The lines of `out`, without empty ones.
+pub fn out_lines(out: str) -> List<str> {
+    var lines: List<str> = [];
+    for line in text.split_text(out, "\n") {
+        if line.len() > 0 { lines.push(line); }
+    }
+    return lines;
+}
+
+/// Every path that differs between the base commit and the working tree,
+/// untracked files included, sorted by path within each status.
+pub fn changes(ref r: Repo) -> List<Change> {
+    var out: List<Change> = [];
+    for line in out_lines(run_git(r, ["diff", "--name-status", "--no-renames", r.base, "--"]).stdout) {
+        let tab = line.find("\t", 0);
+        if tab < 0 { continue; }
+        let path = line.slice((tab as i64) + 1, line.len());
+        if ignored(path) { continue; }
+        out.push(Change { status: line.slice(0, 1), path: path });
+    }
+    for path in out_lines(run_git(r, ["ls-files", "--others", "--exclude-standard"]).stdout) {
+        if !ignored(path) { out.push(Change { status: "A", path: path }); }
+    }
+    return out;
+}
+
+/// Lines per file for `specs` (git pathspecs): at the base commit when
+/// `at_base`, else in the working tree with untracked files included.
+pub fn line_counts(ref r: Repo, at_base: bool, specs: List<str>) -> Map<str, i64> {
+    return match_counts(r, at_base, ["-c", "-e", ""], specs);
+}
+
+/// How many times `needle` (fixed text) appears in code in the files
+/// `specs` name: outside `//` comments, string literals and character
+/// literals, as the `__engine` ratchet counts. A `/* */` comment that
+/// started on an earlier line is not seen.
+pub fn count_in_code(ref r: Repo, at_base: bool, needle: str, specs: List<str>) -> i64 {
+    var args: List<str> = ["grep", "-I", "-h"];
+    if !at_base { args.push("--untracked"); }
+    for f in ["-F", "-e", needle] { args.push(f); }
+    if at_base { args.push(r.base); }
+    args.push("--");
+    for s in specs { args.push(s); }
+    for s in IGNORED_SPECS { args.push(s); }
+    var total = 0;
+    for line in out_lines(run_git(r, args).stdout) { total = total + code_occurrences(line, needle); }
+    return total;
+}
+
+/// How many times `needle` occurs in `line` outside comments and literals.
+pub fn code_occurrences(line: str, needle: str) -> i64 {
+    var n = 0;
+    var i = 0;
+    let len = line.len();
+    while i < len {
+        let b = line.byte_at(i);
+        if b == 47 && i + 1 < len && line.byte_at(i + 1) == 47 { return n; }
+        if b == 47 && i + 1 < len && line.byte_at(i + 1) == 42 {
+            let close = line.find("*/", i + 2);
+            if close < 0 { return n; }
+            i = (close as i64) + 2;
+            continue;
+        }
+        if b == 34 {
+            i = i + 1;
+            while i < len && line.byte_at(i) != 34 {
+                if line.byte_at(i) == 92 { i = i + 1; }
+                i = i + 1;
+            }
+            i = i + 1;
+            continue;
+        }
+        if b == 39 && i + 2 < len && (line.byte_at(i + 2) == 39 || (line.byte_at(i + 1) == 92 && i + 3 < len && line.byte_at(i + 3) == 39)) {
+            i = if line.byte_at(i + 1) == 92 { i + 4 } else { i + 3 };
+            continue;
+        }
+        if line.slice(i, len).starts_with(needle) {
+            n = n + 1;
+            i = i + needle.len();
+            continue;
+        }
+        i = i + 1;
+    }
+    return n;
+}
+
+fn match_counts(ref r: Repo, at_base: bool, flags: List<str>, specs: List<str>) -> Map<str, i64> {
+    var args: List<str> = ["grep", "-I"];
+    if !at_base { args.push("--untracked"); }
+    for f in flags { args.push(f); }
+    if at_base { args.push(r.base); }
+    args.push("--");
+    for s in specs { args.push(s); }
+    for s in IGNORED_SPECS { args.push(s); }
+    var counts: Map<str, i64> = [:];
+    let prefix = r.base + ":";
+    for line in out_lines(run_git(r, args).stdout) {
+        var entry = line;
+        if at_base && entry.starts_with(prefix) { entry = entry.slice(prefix.len(), entry.len()); }
+        let colon = last_colon(entry);
+        if colon < 0 { continue; }
+        counts.set(entry.slice(0, colon), text.parse_i64(entry.slice(colon + 1, entry.len())) ?? 0);
+    }
+    return counts;
+}
+
+fn last_colon(s: str) -> i64 {
+    var i = s.len() - 1;
+    while i >= 0 {
+        if s.byte_at(i) == 58 { return i; }
+        i = i - 1;
+    }
+    return -1;
+}
+
+/// The sum of a map's values.
+pub fn total(ref counts: Map<str, i64>) -> i64 {
+    var sum = 0;
+    for k in counts.keys() { sum = sum + (counts[k] ?? 0); }
+    return sum;
+}
+
+/// `path`'s text at the base commit; `none` when it did not exist there.
+pub fn base_text(ref r: Repo, path: str) -> str? {
+    let out = run_git(r, ["show", r.base + ":" + path]);
+    if out.exit_code != 0 { return none; }
+    return out.stdout;
+}
+
+/// `path`'s text in the working tree; `none` when it does not exist.
+pub fn head_text(ref r: Repo, path: str) -> str? {
+    let full = if r.root == "." { path } else { r.root + "/" + path };
+    if !File.exists(full) { return none; }
+    return File.read_text(full);
+}
+
+/// The paths under `prefix` at the base commit.
+pub fn base_files(ref r: Repo, prefix: str) -> List<str> {
+    return out_lines(run_git(r, ["ls-tree", "-r", "--name-only", r.base, "--", prefix]).stdout);
+}
+
+/// The paths under `prefix` in the working tree, untracked ones included.
+pub fn head_files(ref r: Repo, prefix: str) -> List<str> {
+    var out: List<str> = [];
+    for path in out_lines(run_git(r, ["ls-files", "--cached", "--others", "--exclude-standard", "--", prefix]).stdout) {
+        let full = if r.root == "." { path } else { r.root + "/" + path };
+        if File.exists(full) { out.push(path); }
+    }
+    return out;
+}
+
+/// The working-tree `.pilot` and `.rs` files that mention `needle`.
+pub fn referrers(ref r: Repo, needle: str) -> List<str> {
+    var args: List<str> = ["grep", "-I", "--untracked", "-l", "-F", "-e", needle, "--", "*.pilot", "*.rs"];
+    for s in IGNORED_SPECS { args.push(s); }
+    return out_lines(run_git(r, args).stdout);
+}

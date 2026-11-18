@@ -1,7 +1,7 @@
 // ==============================================================================
 // FILE: selfhost/adapter/cpp_abi.pilot
-// Milestone 15.2: Native C++ Class, RAII, Vtable & Exception Boundary Adapter
-// C++ Class Layout Engine, Tail-Padding Reuse, Vtable Slots & Invisible-Ref ABI
+// C++ class layout: tail-padding reuse, vtable slots, pass-by-invisible-reference.
+// Reached only by the milestone15 Rust test; no `pilot` command runs it.
 // ==============================================================================
 pub lvl(0) pkg selfhost.adapter;
 

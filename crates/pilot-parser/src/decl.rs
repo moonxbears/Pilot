@@ -813,7 +813,7 @@ impl<'a> Parser<'a> {
         let ret_ty = if !self.eat(TokenKind::Arrow) {
             NodeId::NONE
         } else if self.tuple_return_before_body() {
-            self.parse_type_bp(ret_type::ABOVE_FN_ARROW)
+            self.parse_type_bp(self.above_fn_arrow())
         } else {
             self.parse_type()
         };

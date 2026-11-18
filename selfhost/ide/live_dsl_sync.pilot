@@ -1,8 +1,8 @@
 // ==============================================================================
 // FILE: selfhost/ide/live_dsl_sync.pilot
-// Milestone 27: Scoped User Sublanguage Builder - Live LSP/IDE DSL Sync
-// Automatically derives LSP semanticTokens, contextual keyword completions,
-// hover signatures, and formatter rules directly from active scoped syntax.
+// Derives LSP semantic tokens, keyword completions, hover text and formatter
+// rules from scoped `syntax` declarations.
+// Reached only by the milestone27 Rust test; no `pilot` command runs it.
 // ==============================================================================
 
 pub lvl(0) pkg selfhost.ide;

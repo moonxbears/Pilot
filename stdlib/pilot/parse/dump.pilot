@@ -1,0 +1,46 @@
+// ==============================================================================
+// FILE: stdlib/pilot/parse/dump.pilot
+// Ring 3: a parse tree as text (pub pkg pilot.parse.dump;) — PROP-025 step 2.
+// ==============================================================================
+// `(op lhs rhs)` for an operator, `(call f args..)`, `(. x name)` (`(?. x name)` when safe),
+// `([] x i)`, `(? x)`, `(tuple ..)`, `(list ..)`, `(name: value)` for a
+// named argument; a name prints as itself, a number as its value. Used by
+// the tests and by the comparison with the seed's parser.
+pub pkg pilot.parse.dump;
+
+use pilot.parse.arena;
+
+pub fn sexpr(ref a: ParseArena, n: i64) -> str => sexpr_of(a, n, false);
+
+/// `sexpr`, each node followed by `@start:end` when `spans`.
+pub fn sexpr_of(ref a: ParseArena, n: i64, spans: bool) -> str {
+    let at = if spans { f"@{a.starts[n]}:{a.ends[n]}" } else { "" };
+    return sexpr_node(a, n, spans) + at;
+}
+
+fn sexpr_node(ref a: ParseArena, n: i64, spans: bool) -> str {
+    let k = a.kinds[n];
+    let ch = a.children(n);
+    if k == NK_IDENT { return a.names[n]; }
+    if k == NK_INT { return f"{a.values[n]}"; }
+    if k == NK_FLOAT { return "float"; }
+    if k == NK_STR { return "str"; }
+    if k == NK_BOOL { return if a.values[n] == 1 { "bool:1" } else { "bool:0" }; }
+    if k == NK_NONE { return "none"; }
+    var head = "";
+    if k == NK_BINARY || k == NK_UNARY { head = a.names[n]; }
+    else if k == NK_CALL { head = "call"; }
+    else if k == NK_MEMBER {
+        let dot = if a.flags[n] == 1 { "?." } else { "." };
+        return f"({dot} {sexpr_of(a, ch[0], spans)} {a.names[n]})";
+    }
+    else if k == NK_INDEX { head = "[]"; }
+    else if k == NK_TRY_PROPAGATE { head = "?"; }
+    else if k == NK_TUPLE { head = "tuple"; }
+    else if k == NK_LIST { head = "list"; }
+    else if k == NK_CALL_ARG { return f"({a.names[n]}: {sexpr_of(a, ch[0], spans)})"; }
+    else { head = f"kind{k}"; }
+    var out = "(" + head;
+    for c in ch { out = out + " " + sexpr_of(a, c, spans); }
+    return out + ")";
+}

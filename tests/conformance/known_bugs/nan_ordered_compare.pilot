@@ -1,0 +1,22 @@
+// KNOWN BUG seed.nan_compare_trap: an ordered comparison with a NaN operand
+// should answer as the operator's declaration says. `f64`'s `op <` is
+// `__ssa(MachineOp::FLt, self, rhs)` (stdlib/core/primitives/f64.pilot), a
+// hardware compare, which IEEE 754-2019 section 5.11 defines as false when an
+// operand is NaN. The seed (crates/pilot-vm/src/ops.rs `ordering`) and the
+// IR interpreter (selfhost/ir/interp_ops.pilot `ir_compare`) stop instead with
+// "comparison with NaN"; emitted C answers false. Found 2026-11-18 building
+// PROP-022 slice 22B.
+//
+// Expected output, worked by hand (IEEE 754-2019 section 5.11): every ordered
+// comparison with NaN is false, `==` is false and `!=` is true, so false,
+// false, false, false, false, true.
+fn main() {
+    let inf: f64 = 1.0 / 0.0;
+    let nan: f64 = inf - inf;
+    print(nan > 1.0);
+    print(nan >= 1.0);
+    print(nan < 1.0);
+    print(nan <= 1.0);
+    print(nan == nan);
+    print(nan != nan);
+}

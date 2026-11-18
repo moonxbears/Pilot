@@ -1,0 +1,8 @@
+error[TYPE001]: expected `ptr<fn<i64, fn<bool, str>>>`, found `i64`
+error[TYPE001]: expected `ptr<result<i64, bool | str>>`, found `i64`
+error[TYPE001]: expected `ptr<str | option<i64>>`, found `i64`
+error[TYPE001]: expected `ptr<fn<i64, bool | str>>`, found `i64`
+error[TYPE001]: expected `ptr<result<fn<i64, bool>, str>>`, found `i64`
+error[TYPE001]: expected `ptr<option<slice<i64>>>`, found `i64`
+error[TYPE001]: expected `ptr<fn<i64 | str, bool>>`, found `i64`
+error[TYPE001]: expected `ptr<option<i64>>`, found `i64`

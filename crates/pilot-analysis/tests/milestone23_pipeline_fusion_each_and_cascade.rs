@@ -1,6 +1,6 @@
 //! ============================================================================
 //! Milestone 23 Verification Suite:
-//! Zero-Allocation Pipeline Fusion, `each` Vectorization & Cascade Polish
+//! Pipeline Fusion, `each` Vectorization & Cascade Polish
 //! ============================================================================
 
 use pilot_analysis::PhysicsRegistry;
@@ -107,7 +107,7 @@ fn eval_m23(deps: &[&str], script: &str) -> String {
 }
 
 // -----------------------------------------------------------------------------
-// Test 1: Zero-Allocation Pull-Cursor Stream Combinators & Terminals
+// Test 1: Pull-Cursor Stream Combinators & Terminals
 // -----------------------------------------------------------------------------
 #[test]
 fn test_m23_1_zero_allocation_pull_stream_combinators() {

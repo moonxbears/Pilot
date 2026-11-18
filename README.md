@@ -1,10 +1,10 @@
 # Pilot Programming Language
 
-> **Self-Hosted (Stage-3 Fixed-Point), Name-Blind 14-Token Seed, Deterministic Zero-GC, Type-Safe, and Multi-Target.**
+> **A systems and application language whose compiler, tools and standard library are being moved from a Rust bootstrap seed into Pilot itself.**
 
-**Pilot** (`v1.1.51`) is a modern systems and application programming language built on an irreducible **14-Token Name-Blind Rust Hardware & Physics Engine** (`5,312` LOC across 12 crates) that self-bootstraps over **90% of its compiler, syntax grammar, type library, memory verifier, code emitters, LSP/DAP tooling, and standard library in pure Pilot** (`stdlib/` and `selfhost/`).
+**Pilot** (`v1.1.51`) runs today on a Rust bootstrap seed: 8 crates of about 27,150 lines (`crates/`, capped by `paused_max_total_rust_loc()` in `selfhost/gate/manifest.pilot`). The seed reads `.pilot` source, and runs it on its register VM (PilVM). The checker, PilIR lowering and passes, the C11 emitter, the CLI commands and the standard library are written in Pilot (`selfhost/`, `stdlib/`). The plan is to shrink the seed to a small `.pilc` loader and VM (see [`docs/roadmap.md`](docs/roadmap.md)). Pilot does **not** compile itself yet: the bootstrap parity gate stops at the registered seam `bootstrap.stage_compile`.
 
-Pilot unifies C#-grade ergonomics (`interface` hierarchies, implicit `field`/`value` properties & indexers, operator contracts, `[...]` attribute pipelines, distributive headers, Fluid Cascades `..`, native LINQ/SQL) with deterministic **2-Bit Hardware Lattice Perceus ARC + lexical arenas (`0.0 ms` GC pauses)**, 6 homoiconic call-quoting projections (`!`, `!!`, `!&`, `!^`, `!@`, `!?`), bidirectional 7-language source transpilation, and native compilation to **PilVM v3 (`.pilc`), C11/C23 (`clang`), LLVM IR, WebAssembly (`WASI`), x86_64/ARM64 assembly, and 8 GPU compute targets**.
+**What is real today and what is design.** This README and [`VISION.md`](VISION.md) describe the target design. What actually runs, per engine, is recorded in [`docs/keyword_matrix.md`](docs/keyword_matrix.md), [`docs/concept_matrix.md`](docs/concept_matrix.md) and `selfhost/gate/ledger/wiring.pilot`. When this page and those files disagree, the files win. Every program is checked on three engines: the seed VM (`pilot test`), the PilIR interpreter (`pilot test --ir`) and generated C (`pilot test --emit c`).
 
 ---
 
@@ -36,10 +36,10 @@ Pilot unifies C#-grade ergonomics (`interface` hierarchies, implicit `field`/`va
   - `fn!^(a, b)` $\rightarrow$ `Signal<TReturn>` (`ReactiveSignal` glitch-free topological push-pull node)
   - `fn!@(a, b)` $\rightarrow$ `Dual<TReturn, TGrad>` (`SymbolicAdjoint` compile-time CSE forward/reverse derivative)
   - `fn!?(a, b)` $\rightarrow$ `EffectPlan<TReturn>` (`EffectDryRun` Copy-on-Write transactional sandbox)
-  - Backed by a **Pilot-First Mutable AST Arena** (`AstNodeSlot` 16B `0b00 : IValue`, `AstSubtreeView` `0b01 : IReference`, `AstArenaBuffer` `0b10 : IObject` with Perceus `drop_reuse` free-list slot recycling, bidirectional parent links, `$hole` & variadic `$*splat` splicing, `~expr` compile-time unquoting, lexical hygiene alpha-renaming, in-place constant folding, and `PhysicsRegistry` hydration via `selfhost/ast_bridge.pilot`).
+  - Backed by a **Pilot-First Mutable AST Arena** (`AstNodeSlot` 16B `0b00 : IValue`, `AstSubtreeView` `0b01 : IReference`, `AstArenaBuffer` `0b10 : IObject` with Perceus `drop_reuse` free-list slot recycling, bidirectional parent links, `$hole` & variadic `$*splat` splicing, `~expr` compile-time unquoting, lexical hygiene alpha-renaming, in-place constant folding).
 
-- **Stage-3 Fixed-Point Self-Hosting & Multi-Target Codegen (`selfhost/`):**
-  `selfhost/pilotc.pilot` compiles itself to both native C11 (`clang`) and `.pilc` v3 bytecode with bit-for-bit **Stage-2 == Stage-3 SHA-256 parity**, backed by pure-Pilot emitters for **C11, LLVM IR, WASM (`WASI`), x86_64/ARM64 ASM, 8 GPU backends (`PTX`, `AMDGPU`, `SPIR-V`, `WGSL`, `MSL`, `HLSL`, `CUDA C++`, `HIP C++`), 7 bidirectional transpilers (`C`, `C++`, `C#`, `Rust`, `Python`, `JS`, `Lua`)**, lossless Red/Green CST & Wadler-Lindig formatting, resident incremental LSP, and `VmHook`-stepped DAP debugging.
+- **Self-Hosting & Code Generation (`selfhost/`) — partly built:**
+  Built and tested on every engine: PilIR lowering and passes (`selfhost/ir/`), C11 output (`selfhost/transpile/c_family.pilot` with `runtime/c/`; `pilot build`, `pilot test --emit c`), PilIR to `.pilc` bytecode (`selfhost/vm/`, `pilot compile`, `pilot test --via-ir`). Present but covering only a subset (check the matrices before relying on them): the source transpilers in `selfhost/transpile/` (`pilot emit <lang>`). There is no LLVM, WASM, assembly or GPU backend: the unused emitters once in `selfhost/codegen/` were deleted on 2026-11-18. Not built: the driver that compiles the compiler with itself (`selfhost/pilotc.pilot` stops at seam `bootstrap.stage_compile`), so there is no Stage-2 == Stage-3 parity yet.
 
 ---
 
@@ -148,87 +148,54 @@ pub fn projections_demo(m: f64, v: f64) {
 
 ```plaintext
 Pilot/
-├── crates/                      # Irreducible 14-Token Name-Blind Hardware & Physics Engine (12 crates)
-│   ├── pilot-arena/             # 64KB slab bump allocator & typed generational arenas
-│   ├── pilot-span/              # Zero-copy SIMD SWAR byte spans & LineIndex
-│   ├── pilot-intern/            # Lock-free symbol & `:ns/kw` interner (14 seed keywords only)
-│   ├── pilot-ast/               # Packed 16-byte `AstNode` & `AstArena`
-│   ├── pilot-lexer/             # 14-token SIMD lexer, two-way dot, 6 call-quote modes & `bracket_links`
-│   ├── pilot-parser/            # 14-token seed recursive-descent + Pratt parser & `ParserTables`
-│   ├── pilot-analysis/          # Hardware layout physics (`LayoutTable`), `PhysicsRegistry` & bootstrap bridge
-│   ├── pilot-rt/                # Zero-GC C-ABI runtime (`PilotVal` 14B SSO, OS `getrandom`, sockets, `dlopen`, threads)
-│   ├── pilot-vm/                # 32-bit register `PilVM` v3, `VmHook` & `.pilc` v3 (`PIL3`) binary loader
-│   ├── pilot-codegen/           # System toolchain link driver (`BuildDriver` -> `selfhost/codegen/*`)
-│   ├── pilot-ffi/               # Minimal C-ABI host shim (`<= 180` LOC -> `selfhost/ffi_bindgen.pilot`)
-│   └── pilot-cli/               # Thin `.pilc` & self-hosted CLI bootstrapper (`<= 100` LOC)
-├── stdlib/                      # Pure Pilot Self-Genesis & Standard Library
-│   ├── core/                    # 4-Stage Self-Genesis (`bootstrap`, `core`, `operator`, `mem`, `option`, `result`,
-│   │   ├── primitives/          # 39 `[Lang]` layout-bound primitives (`i8`..`i128`, `f16`..`f128`, `slice`, `simd`, `frame`, ...)
-│   │   ├── operators/           # 19 algebraic & structural operator contracts (`ITryOperator`, `ISplatOperator`, ...)
-│   │   └── syntax/              # 16 homoiconic `syntax` & `syntax type_construct` modules (`for`, `switch`, `guard`, ...)
-│   ├── crypto/                  # Pure Pilot SHA-256, SHA-512, BLAKE3, HMAC-SHA256 & RFC 8032 Ed25519
-│   ├── db/                      # Relational SQL/B-Tree engine, PostgreSQL v3 & MySQL binary wire protocols
-│   ├── http/                    # HTTP/1.1 client/server over `pilot-rt` raw TCP sockets
-│   ├── polyglot/                # Bounds-checked SHM views, JSON marshaling & Python/Node/C bridges
-│   ├── pkg/                     # SPDX license expression parser & compatibility gate (`licensing.pilot`)
-│   └── ...                      # 35+ standard library packages (`collections`, `asyncio`, `realtime`, `contracts`, `numpy`, ...)
-├── selfhost/                    # Self-Hosted Pilot Compiler, Backends & Developer Toolchain
-│   ├── pilotc.pilot             # Stage-3 fixed-point compiler driver (Stage-2 == Stage-3 parity)
-│   ├── lexer.pilot / parser.pilot / ast.pilot / ast_bridge.pilot / preprocessor.pilot
-│   ├── analyzer.pilot / attr_weaver.pilot / diagnostics.pilot / ffi_bindgen.pilot
-│   ├── cst/ & fmt/              # Lossless Red/Green CST, O(1) bracket recovery & Wadler-Lindig formatter
-│   ├── perceus/                 # 2-bit lattice Perceus ARC (`Dup`/`Drop`/`DropReuse`), escape & `[HardRealtime]` verifier
-│   ├── vm/                      # `PilVM` v3 bytecode compiler & `.pilc` v3 debug-table binary writer
-│   ├── codegen/                 # Layout-driven C11, LLVM IR, WASM, x86_64/ARM64 ASM & 8 GPU shader/kernel emitters
-│   ├── transpile/               # 7-language emitters (`c`, `cpp`, `csharp`, `rust`, `python`, `js`, `lua`) & 6 ingesters
-│   ├── lsp/ & dap/ & ide/       # Persistent incremental PilVM LSP, `VmHook`-stepped DAP & VS Code grammar generator
-│   └── cli/ & pkg/ & perf/ & bench/ # Self-hosted CLI router, REPL, `pilot.toml`/archive/venv, profiler, WCET & optimizer
-├── examples/                    # Canonical Tutorials (`tutorial/`), Concept Showcases (`showcase/`) & Benchmarks
-├── scripts/                     # 4 Automated Architecture & Name-Blind Verification Gates (`gate1`–`gate4`)
-└── vscode-pilot/                # Visual Studio Code extension generated via `selfhost/ide/vscode_gen.pilot`
+├── AGENTS.md            # Rules for every contributor and AI coder (read first)
+├── crates/              # The Rust bootstrap seed, 8 crates (~27,150 lines; rust.md maps every file)
+│   ├── pilot-span/      # FileId and ByteSpan
+│   ├── pilot-intern/    # String interner
+│   ├── pilot-lexer/     # Runs the token table Pilot builds (stdlib/core/lex/toolchain.lex)
+│   ├── pilot-ast/       # 16-byte AstNode arena
+│   ├── pilot-parser/    # Seed parser
+│   ├── pilot-analysis/  # Seed type inference (being replaced by selfhost/check/)
+│   ├── pilot-vm/        # PilVM, .pilc loader, bytecode compiler, host ops (bridge.rs)
+│   └── pilot-cli/       # The `pilot` executable: runs the Pilot CLI in selfhost/cli/
+├── stdlib/              # Standard library in Pilot: core/ (language core), std/ (hosted), pilot/ (compiler as a library)
+├── selfhost/            # Compiler and tools in Pilot: cli/, check/, ir/, vm/, transpile/, lsp/, dap/, gate/, ...
+├── tests/conformance/   # The test corpus: <name>.pilot with .stdout/.stderr/.exit, run by `pilot test`
+├── tools/               # Pilot tools (keyword_matrix, score) and capped.sh
+├── docs/                # roadmap, keyword and concept matrices
+└── vscode-pilot/        # VS Code extension
 ```
+
+`pilot.md` maps every Pilot file and `rust.md` every Rust file.
 
 ---
 
-## Build, Toolchain & Verification Commands
+## Build, Run & Verify
 
 ```bash
-# Build the Pilot CLI binary
-cargo build --release
+# Build the seed (debug build; agents and tests use target/debug/pilot)
+cargo build -p pilot-cli
 
-# Execute a Pilot source file or precompiled `.pilc` v3 binary
-./target/release/pilot run examples/execution_demo.pilot
+# Run, check, build to C, or compile to .pilc
+./target/debug/pilot run examples/execution_demo.pilot
+./target/debug/pilot check examples/overview.pilot
+./target/debug/pilot build examples/execution_demo.pilot
+./target/debug/pilot compile examples/execution_demo.pilot
 
-# Verify syntax, 2-bit hardware lattice, clearance rings & Perceus contracts
-./target/release/pilot check examples/overview.pilot
+# Transpile Pilot to another language, or ingest foreign source (subset; see the matrices)
+./target/debug/pilot emit --help
+./target/debug/pilot from --help
 
-# Compile source to `.pilc` v3 bytecode or native AOT executable
-./target/release/pilot compile examples/execution_demo.pilot -o execution_demo.pilc
-./target/release/pilot build examples/execution_demo.pilot
+# Conformance tests on the three engines (add --changed while iterating)
+./target/debug/pilot test
+./target/debug/pilot test --ir
+./target/debug/pilot test --emit c
 
-# Bidirectional source transpilation (`c`, `cpp`, `csharp`, `rust`, `python`, `js`, `lua`)
-./target/release/pilot --emit rust app.pilot -o app.rs
-./target/release/pilot --from python lib.py -o lib.pilot
+# Architecture gates (airlock, hygiene, seams, keywords, rename litmus, bootstrap parity)
+./target/debug/pilot gate --full
 
-# Launch resident PilVM Language Server, stepped DAP server, or sync VS Code grammar
-./target/release/pilot lsp
-./target/release/pilot debug app.pilot
-./target/release/pilot ide-sync
-
-# Run all interactive concept showcases (`examples/showcase/`)
-bash examples/showcase/run_all.sh
-
-# Run the 4 Name-Blind & Rust Contraction Architecture Gates
-python3 scripts/gate1_check.py && python3 scripts/gate2_check.py
-python3 scripts/gate3_check.py && python3 scripts/gate4_selfhost_contraction.py
-
-# Run the workspace tests, skipping the slow whole-corpus ones
-cargo test --workspace
-
-# Run every workspace test, the slow ones included (before a commit)
-cargo test-full
-
-# While working: run only the conformance cases your uncommitted changes
-# reach (add --ir or --emit <lang> for the other engines; --since <rev>)
-./target/debug/pilot test --changed
+# Score a change against a base commit (tools/score; vetoes exit 1)
+./target/debug/pilot run tools/score/main.pilot -- --base HEAD
 ```
+
+Run long jobs under `tools/capped.sh SECONDS <cmd>` (AGENTS.md section 12). Rust crate tests (`cargo test -p <crate>`) matter only when a change touches the seed.

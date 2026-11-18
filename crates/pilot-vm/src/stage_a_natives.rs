@@ -1,7 +1,7 @@
 //! Stage-A string-matched native dispatch table (`PROP-002a` §4).
 //!
 //! All string-matched `CallNative` / `EngineIntrinsic` arms live in this single
-//! shrink-only file (`STAGE_A_VM_NATIVES` in `selfhost/gate/manifest.pilot`).
+//! shrink-only file (`stage_a_vm_natives()` in `selfhost/gate/manifest.pilot`).
 
 use crate::collect::Record;
 use crate::heap::{arg, char_floor, int_arg, str_arg, with_key, IntrinsicResult};

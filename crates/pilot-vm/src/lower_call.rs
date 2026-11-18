@@ -9,7 +9,7 @@ use pilot_parser::NativeKind;
 
 /// Where a call-quote mode stops until its carrier values exist.
 const QUOTED_CALL_SEAM: &str = "SEAM001: unconnected seam `vm.call_quote`: \
-    call-quote modes build their carrier values once the type checker exists (F4)";
+    call-quote modes do not build their carrier values (CallExpr, Signal, Dual, frame, ast, EffectPlan) yet";
 
 impl BytecodeCompiler {
     /// True for `f!(..)`, `sig f(..)` and the other call-quote modes: the

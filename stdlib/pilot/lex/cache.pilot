@@ -89,7 +89,7 @@ fn kind_index(k: PatKind) -> i64 {
 }
 
 /// A name written as one word: `=` then the name, so an empty one is `=`.
-fn word(name: str) -> str => "=" + name;
+fn one_word(name: str) -> str => "=" + name;
 
 /// Whether `name` can be written as one word (no space or line break).
 fn plain(name: str) -> bool {
@@ -110,10 +110,10 @@ pub fn modes_key(ref modes: List<LexMode>) -> str {
     b += builder;
     for m in modes {
         if !plain(m.name) { return ""; }
-        b += f"mode {word(m.name)}\n";
+        b += f"mode {one_word(m.name)}\n";
         for t in m.tokens {
             if !plain(t.name) || !plain(t.enters) { return ""; }
-            b += f"tok {word(t.name)} {t.priority} {when_index(t.when)} {role_index(t.role)} {word(t.enters)} {if t.leaves { 1 } else { 0 }} {t.trails}";
+            b += f"tok {one_word(t.name)} {t.priority} {when_index(t.when)} {role_index(t.role)} {one_word(t.enters)} {if t.leaves { 1 } else { 0 }} {t.trails}";
             for o in t.pattern.ops {
                 b += f" {kind_index(o.kind)} {o.lo} {o.hi} {o.n}";
             }
@@ -192,12 +192,12 @@ fn run_of(v: i64, times: i64) -> List<i64> {
 /// The lists of `parts`, one after another: one engine step
 /// (`list_extend`, deep) for them all, where pushing each number would be a
 /// step per number on the PilIR interpreter.
-fn joined(ref parts: List<List<i64>>) -> List<i64> => [*..parts];
+fn all_of(ref parts: List<List<i64>>) -> List<i64> => [*..parts];
 
 fn words_line(label: str, ref xs: List<str>) -> str {
     var b = StrBuilder();
     b += f"{label} {xs.len()}";
-    for x in xs { b += " " + word(x); }
+    for x in xs { b += " " + one_word(x); }
     b += "\n";
     return b.to_string();
 }
@@ -335,7 +335,7 @@ struct Reader : IObject {
             }
         }
         if single.len() > 0 { parts.push(single); }
-        return joined(parts);
+        return all_of(parts);
     }
 
     fn names(var ref self, field: CacheField) -> List<str> {
@@ -362,6 +362,19 @@ fn read_automaton(var ref r: Reader) -> LexTable {
     let next = r.ints(CacheField::Next);
     let accept = r.ints(CacheField::Accept);
     return LexTable { names: names, class_of: class_of, classes: classes, states: states, starts: starts, next: next, accept: accept, actions: [] };
+}
+
+/// The declarations key the cache file text `src` was written with, so a
+/// reader that takes the file as it is (the seed's table) can read it.
+pub fn written_key(src: str) -> str? {
+    let first = CACHE_FORMAT + "\n";
+    if !src.starts_with(first) { return none; }
+    var r = Reader { src: src, at: first.len(), bad: false };
+    r.expect(CacheField::Key);
+    let n = r.int();
+    let from = r.at + 1;
+    if r.bad || from + n > src.len() { return none; }
+    return src.slice(from, from + n);
 }
 
 /// The lexer in the cache file text `src`, when it holds one built from

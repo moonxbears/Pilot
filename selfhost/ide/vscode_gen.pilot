@@ -1,8 +1,10 @@
 // =========================================================================
 // FILE: selfhost/ide/vscode_gen.pilot
-// Milestone 59.1: 100% Pilot-Hosted VS Code Artifact Generator
-// Generates language-configuration.json, snippets/pilot.json,
-// syntaxes/pilot.tmLanguage.json, and package.json via direct JSON serialization.
+// Generates the VS Code extension files (language-configuration.json,
+// snippets/pilot.json, syntaxes/pilot.tmLanguage.json, package.json).
+// `pilot ide-sync` has no handler (seam cli.command_handler).
+// Reached only by the milestone04 and milestone59 Rust tests; no `pilot`
+// command runs it.
 // =========================================================================
 pub pkg selfhost.ide;
 

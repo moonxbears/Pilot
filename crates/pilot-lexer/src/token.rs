@@ -1,7 +1,8 @@
-//! Milestone 29.3 & 52.2: Struct-of-Arrays (SoA) `TokenTape`, `TokenFlags`, and 14-Seed `TokenKind`.
+//! `TokenKind` (the 14 seed keywords, literals, punctuation and `Operator`),
+//! `TokenFlags`, and the struct-of-arrays `TokenTape`.
 //!
-//! `TokenKind` contains strictly the **14 Hardware Seed Keywords** (`KwEngine`..`KwAsm`),
-//! raw atomic literals, and punctuation/operators. All non-seed words lex as `TokenKind::Ident`.
+//! `TokenKind` holds the 14 seed keywords (`KwEngine`..`KwAsm`), raw
+//! literals, punctuation and `Operator` (any declared operator symbol). All non-seed words lex as `TokenKind::Ident`.
 
 use pilot_span::ByteSpan;
 
@@ -47,7 +48,6 @@ token_kinds! {
     FloatLit = 26,
     StrLit = 27,
     TripleStrLit = 28,
-    RawDslBlock = 29,
 
     // 2. The Strict 14 Hardware Seed Keywords
     KwEngine = 40,    // __engine
@@ -84,27 +84,21 @@ token_kinds! {
     Exclamation = 265, // ! (when not followed by '(')
     Tilde = 266,       // ~
 
-    // 4. Arithmetic, Bitwise & Relational Operators
+    // 4. Operators. `Operator` is every operator spelling the parser does
+    // not name: it reads those by their text (PROP-008 step 2).
+    Operator = 269,
     Plus = 270,         // +
     Minus = 271,        // -
     Star = 272,         // *
-    Slash = 273,        // /
-    Percent = 274,      // %
     DoubleStar = 275,   // **
     StarDotDot = 276,   // *..
     Amper = 278,        // &
     Vbar = 279,         // |
     Caret = 280,        // ^
-    ShiftLeft = 281,    // <<
     ShiftRight = 282,   // >>
     Equal = 283,        // =
-    EqEqual = 284,      // ==
-    NotEqual = 285,     // !=
     Less = 286,         // <
     Greater = 287,      // >
-    LessEqual = 288,    // <=
-    GreaterEqual = 289, // >=
-    Walrus = 290,       // :=
     ArrowLeft = 291,    // <-
 
     // 5. Compound Assignment Operators
@@ -113,7 +107,6 @@ token_kinds! {
     StarEqual = 302,       // *=
     SlashEqual = 303,      // /=
     PercentEqual = 304,    // %=
-    DoubleStarEqual = 305, // **=
     AmperEqual = 307,      // &=
     VbarEqual = 308,       // |=
     CaretEqual = 309,      // ^=
@@ -123,19 +116,15 @@ token_kinds! {
 
     // 6. Pipes, Navigation, Ranges & Lenses
     PipeForward = 320,   // |>
-    PipeBackward = 321,  // <|
     SafeCascade = 322,   // ?..
     SafeNav = 323,       // ?.
-    Coalesce = 324,      // ??
     Arrow = 325,         // ->
     FatArrow = 326,      // =>
-    JsonGetText = 327,   // ->>
-    JsonContains = 328,  // @>
-    JsonContained = 329, // <@
     DotDot = 330,        // ..
     DotDotEqual = 331,   // ..=
     DotDotLess = 332,    // ..<
     Ellipsis = 333,      // ...
+    GreaterDotDot = 365, // >..
 
     // 7. Homoiconic Call-Quoting Projections (when immediately followed by '(')
     CallQuoteShallow = 340, // fn!(
@@ -144,25 +133,6 @@ token_kinds! {
     CallQuoteReact = 343,   // fn!^(
     CallQuoteAdjoint = 344, // fn!@(
     CallQuoteEffect = 345,  // fn!?(
-
-    // 8. Symbolic Logical, Comparison & Overflow Operators
-    DoubleAmper = 350,       // &&
-    DoublePipe = 351,        // ||
-    Spaceship = 352,         // <=>
-    PlusPipe = 353,          // +|
-    MinusPipe = 354,         // -|
-    StarPipe = 355,          // *|
-    PlusPercent = 356,       // +%
-    MinusPercent = 357,      // -%
-    StarPercent = 358,       // *%
-    PlusQuestion = 359,      // +?
-    MinusQuestion = 360,     // -?
-    StarQuestion = 361,      // *?
-    DoublePercent = 362,     // %%
-    TildeGreater = 363,      // ~>
-    GreaterDotDotLess = 364, // >..<
-    GreaterDotDot = 365,     // >..
-    SwapEqual = 366,         // :=:
 }
 
 #[allow(non_upper_case_globals)]
@@ -250,10 +220,6 @@ impl TokenTape {
     #[inline(always)]
     pub fn span(&self, idx: usize) -> ByteSpan {
         self.spans[idx]
-    }
-    #[inline(always)]
-    pub fn slice_str<'a>(&self, idx: usize, source: &'a str) -> &'a str {
-        self.text(idx, source)
     }
     #[inline(always)]
     pub fn text<'a>(&self, idx: usize, src: &'a str) -> &'a str {

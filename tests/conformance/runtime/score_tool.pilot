@@ -1,0 +1,299 @@
+// The scorecard (tools/score/main.pilot) on scratch git repositories: each
+// scenario commits a base, changes the working tree, scores it, and prints
+// the vetoes, credits and debts found, the score line and the exit code.
+//
+// Expected, worked by hand from the rules in tools/score/sc/rules.pilot:
+//   clean: nothing changed, so nothing found: score 0, exit 0.
+//   rust_delete: crates/a/src/lib.rs 25 -> 3 lines, its directory approved:
+//     C1 = 22 / 10 = 2 points; no veto. score +2, exit 0.
+//   rust_unapproved: the same file edited, nothing approved: V3, exit 1.
+//   rust_grow: 3 -> 5 lines, the path approved but 0 lines: V1 (5 > 3 + 0).
+//   rust_grow_approved: the same with 2 lines approved: no veto, score 0.
+//   outputs: p.stdout edited (V5); q moved unchanged to known_bugs/ (no
+//     veto, still 2 programs). VETOED by 1, exit 1.
+//   outputs_drop: q.pilot and q.stdout deleted: V5 for q.stdout, V6 for
+//     2 -> 1 programs. VETOED by 2.
+//   ledgers: seam s.one closed +5, s.three opened -5, bug b.one fixed +5;
+//     C01 PARTIAL -> REAL +10, C02 REAL -> PARTIAL -10; row a Draft -> Wired
+//     +3, row b Wired -> Core -3, row c (Wired) removed -3. Credits
+//     5 + 5 + 10 + 3 = 23, debts -5 - 10 - 3 - 3 = -21, score +2.
+//   complete: row a set to Complete: V8.
+//   engine_down: 6 calls in code -> 1 (a string and a comment naming it do
+//     not count): 5 removed, C6 = 5 / 5 = 1. score +1.
+//   engine_up: 1 call -> 2: V4.
+//   frozen: rules.pilot edited (V7), approvals.pilot edited in the same
+//     change to approve it (V7: approvals come from the base only), the Rust
+//     ceiling 100 -> 120 with 0 lines approved (V7). VETOED by 3.
+//   files: lib/dead.pilot deleted, nothing names it: C7 +2; lib/used.pilot
+//     deleted but lib/user.pilot names it: no credit; new tests n/ok.pilot
+//     and n/err_bad.pilot with 3-line headers: one pair, C8 +2 (n/ok2.pilot
+//     has a 1-line header: no credit). score +4.
+//   too_long: big.pilot 1500 -> 1501 lines: V10.
+//   owner_penalty: an unapproved Rust edit (V3) and an owner entry of -100
+//     added with --adjust: the veto makes the score 0, the penalty still
+//     counts: change total -100.
+//   owner_reward: no veto, an owner entry of +20: score 0, total +20.
+//   owner_tamper: the base ledger's +5 entry edited to +50: the +5 entry is
+//     gone (V7o) and the +50 one reads as new; vetoed, so the reward does
+//     not count: change total 0.
+use std.proc;
+
+fn main() {
+    let made = proc.run("mktemp", ["-d"], "");
+    let tmp = made.stdout.trim();
+    if !tmp.starts_with("/tmp/") {
+        print("no scratch directory");
+        return;
+    }
+    clean(tmp + "/clean");
+    rust_delete(tmp + "/rust_delete");
+    rust_unapproved(tmp + "/rust_unapproved");
+    rust_grow(tmp + "/rust_grow", 0);
+    rust_grow(tmp + "/rust_grow_approved", 2);
+    outputs(tmp + "/outputs", false);
+    outputs(tmp + "/outputs_drop", true);
+    ledgers(tmp + "/ledgers");
+    complete(tmp + "/complete");
+    engine(tmp + "/engine_down", 3, 1);
+    engine(tmp + "/engine_up", 1, 2);
+    frozen(tmp + "/frozen");
+    files(tmp + "/files");
+    too_long(tmp + "/too_long");
+    owner_penalty(tmp + "/owner_penalty");
+    owner_reward(tmp + "/owner_reward");
+    owner_tamper(tmp + "/owner_tamper");
+    let _ = proc.run("rm", ["-rf", tmp], "");
+}
+
+// ---- helpers ----
+
+fn put(dir: str, path: str, content: str) {
+    let _ = File.write_text(dir + "/" + path, content);
+}
+
+fn gone(dir: str, path: str) {
+    let _ = File.delete(dir + "/" + path);
+}
+
+fn git(dir: str, args: List<str>) {
+    var all: List<str> = ["-c", "user.name=score", "-c", "user.email=score@example.invalid", "-c", "commit.gpgsign=false"];
+    for a in args { all.push(a); }
+    let _ = proc.run_in(dir, "git", all, "");
+}
+
+/// A new repository at `dir` holding an approvals file with the given lists
+/// (each written as list items) and approved line count.
+fn repo(dir: str, rust_paths: str, rust_lines: i64, scorer_paths: str) {
+    put(dir, "README", "scratch\n");
+    put(dir, "tools/score/approvals.pilot",
+        "pkg sc.approvals;\n" +
+        "pub const SCORE_APPROVED_RUST_PATHS: List<str> = [\n" + rust_paths + "];\n" +
+        f"pub const SCORE_APPROVED_RUST_LINES: i64 = {rust_lines};\n" +
+        "pub const SCORE_APPROVED_OUTPUTS: List<str> = [\n];\n" +
+        "pub const SCORE_APPROVED_SCORER_PATHS: List<str> = [\n" + scorer_paths + "];\n");
+    git(dir, ["init", "-q"]);
+}
+
+fn commit(dir: str) {
+    git(dir, ["add", "-A"]);
+    git(dir, ["commit", "-q", "-m", "base"]);
+}
+
+fn lines(n: i64, text: str) -> str {
+    var s = "";
+    var i = 0;
+    while i < n {
+        s = s + text + "\n";
+        i = i + 1;
+    }
+    return s;
+}
+
+/// Scores `dir` and prints what was found.
+fn score(name: str, dir: str) {
+    print(f"== {name}");
+    let out = proc.run(proc.pilot_cli_path(), ["run", "tools/score/main.pilot", "--", "--root", dir, "--verbose"], "");
+    var at = 0;
+    let s = out.stdout;
+    while at < s.len() {
+        var end = s.find("\n", at);
+        let stop = if end < 0 { s.len() } else { end as i64 };
+        let line = s.slice(at, stop);
+        if line.starts_with("  [VETO") || line.starts_with("  [CREDIT") || line.starts_with("  [DEBT") || line.starts_with("  [OWNER")
+            || line.starts_with("score:") || line.starts_with("owner adjustments") {
+            print(line);
+        }
+        at = stop + 1;
+    }
+    print(f"exit {out.exit_code}");
+}
+
+// ---- scenarios ----
+
+fn clean(dir: str) {
+    repo(dir, "", 0, "");
+    commit(dir);
+    score("clean", dir);
+}
+
+fn rust_delete(dir: str) {
+    repo(dir, "    \"crates/a/src/\",\n", 0, "");
+    put(dir, "crates/a/src/lib.rs", lines(25, "// rust"));
+    commit(dir);
+    put(dir, "crates/a/src/lib.rs", lines(3, "// rust"));
+    score("rust_delete", dir);
+}
+
+fn rust_unapproved(dir: str) {
+    repo(dir, "", 0, "");
+    put(dir, "crates/a/src/lib.rs", lines(3, "// rust"));
+    commit(dir);
+    put(dir, "crates/a/src/lib.rs", lines(3, "// edited"));
+    score("rust_unapproved", dir);
+}
+
+fn rust_grow(dir: str, approved_lines: i64) {
+    repo(dir, "    \"crates/a/src/lib.rs\",\n", approved_lines, "");
+    put(dir, "crates/a/src/lib.rs", lines(3, "// rust"));
+    commit(dir);
+    put(dir, "crates/a/src/lib.rs", lines(5, "// rust"));
+    score(if approved_lines == 0 { "rust_grow" } else { "rust_grow_approved" }, dir);
+}
+
+fn outputs(dir: str, drop: bool) {
+    repo(dir, "", 0, "");
+    put(dir, "tests/conformance/a/p.pilot", "fn main() { }\n");
+    put(dir, "tests/conformance/a/p.stdout", "1\n");
+    put(dir, "tests/conformance/a/q.pilot", "fn main() { }\n");
+    put(dir, "tests/conformance/a/q.stdout", "2\n");
+    commit(dir);
+    if drop {
+        gone(dir, "tests/conformance/a/q.pilot");
+        gone(dir, "tests/conformance/a/q.stdout");
+        score("outputs_drop", dir);
+        return;
+    }
+    put(dir, "tests/conformance/a/p.stdout", "9\n");
+    gone(dir, "tests/conformance/a/q.pilot");
+    gone(dir, "tests/conformance/a/q.stdout");
+    put(dir, "tests/conformance/known_bugs/q.pilot", "fn main() { }\n");
+    put(dir, "tests/conformance/known_bugs/q.stdout", "2\n");
+    score("outputs", dir);
+}
+
+fn ledgers(dir: str) {
+    repo(dir, "", 0, "");
+    put(dir, "selfhost/gate/ledger/seams.pilot",
+        "seam_entry(\"s.one\", ::Entry, \"x\", \"F1\"),\n" +
+        "seam_entry(\"s.two\", ::Entry, \"x\", \"F1\"),\n" +
+        "known_bug(\"b.one\", \"p\", \"summary\"),\n");
+    put(dir, "selfhost/gate/ledger/wiring.pilot",
+        "cap(\"F1\", \"row a\", ::Draft, \"e\", \"\"),\n" +
+        "cap(\"F1\", \"row b\", ::Wired, \"e\", \"\"),\n" +
+        "cap(\"F1\", \"row c\", ::Wired, \"e\", \"\"),\n");
+    put(dir, "docs/concept_matrix.md",
+        "| **C01. One** | s | ok | ok | ok | `PARTIAL` | m | r | n |\n" +
+        "| **C02. Two** | s | ok | ok | ok | `REAL` | m | r | n |\n");
+    commit(dir);
+    put(dir, "selfhost/gate/ledger/seams.pilot",
+        "seam_entry(\"s.two\", ::Entry, \"x\", \"F1\"),\n" +
+        "seam_entry(\"s.three\", ::Entry, \"x\", \"F1\"),\n");
+    put(dir, "selfhost/gate/ledger/wiring.pilot",
+        "cap(\"F1\", \"row a\", ::Wired, \"e\", \"\"),\n" +
+        "cap(\"F1\", \"row b\", ::Core, \"e\", \"\"),\n");
+    put(dir, "docs/concept_matrix.md",
+        "| **C01. One** | s | ok | ok | ok | `REAL` | m | r | n |\n" +
+        "| **C02. Two** | s | ok | ok | ok | `PARTIAL` | m | r | n |\n");
+    score("ledgers", dir);
+}
+
+fn complete(dir: str) {
+    repo(dir, "", 0, "");
+    put(dir, "selfhost/gate/ledger/wiring.pilot", "cap(\"F1\", \"row a\", ::Wired, \"e\", \"\"),\n");
+    commit(dir);
+    put(dir, "selfhost/gate/ledger/wiring.pilot", "cap(\"F1\", \"row a\", ::Complete, \"e\", \"\"),\n");
+    score("complete", dir);
+}
+
+/// `base_lines` lines of two calls each, or of one when 1; then
+/// `head_calls` calls, plus a string and a comment naming the call.
+fn engine(dir: str, base_lines: i64, head_calls: i64) {
+    repo(dir, "", 0, "");
+    let two = "    __engine(\"a\"); __engine(\"b\");";
+    let body = if base_lines == 1 { "    __engine(\"a\");\n" } else { lines(base_lines, two) };
+    put(dir, "x.pilot", "fn f() {\n" + body + "}\n");
+    commit(dir);
+    var after = lines(head_calls, "    __engine(\"a\");");
+    after = after + "    let s = \"__engine(\";\n    // __engine( in a comment\n";
+    put(dir, "x.pilot", "fn f() {\n" + after + "}\n");
+    score(if head_calls == 1 { "engine_down" } else { "engine_up" }, dir);
+}
+
+fn frozen(dir: str) {
+    repo(dir, "", 0, "");
+    put(dir, "tools/score/sc/rules.pilot", "// rules\n");
+    put(dir, "selfhost/gate/manifest.pilot", "pub pure fn paused_max_total_rust_loc() -> usize => 100;\n");
+    commit(dir);
+    put(dir, "tools/score/sc/rules.pilot", "// rules, eased\n");
+    repo(dir, "", 0, "    \"tools/score/sc/rules.pilot\",\n");
+    put(dir, "selfhost/gate/manifest.pilot", "pub pure fn paused_max_total_rust_loc() -> usize => 120;\n");
+    score("frozen", dir);
+}
+
+fn files(dir: str) {
+    repo(dir, "", 0, "");
+    put(dir, "lib/dead.pilot", "fn dead() { }\n");
+    put(dir, "lib/used.pilot", "fn used() { }\n");
+    put(dir, "lib/user.pilot", "// reads lib/used.pilot\n");
+    commit(dir);
+    gone(dir, "lib/dead.pilot");
+    gone(dir, "lib/used.pilot");
+    let header = "// one\n// two\n// three\n";
+    put(dir, "tests/conformance/n/ok.pilot", header + "fn main() { }\n");
+    put(dir, "tests/conformance/n/ok.stdout", "\n");
+    put(dir, "tests/conformance/n/err_bad.pilot", header + "fn main() { }\n");
+    put(dir, "tests/conformance/n/err_bad.stderr", "\n");
+    put(dir, "tests/conformance/n/ok2.pilot", "// one\nfn main() { }\n");
+    put(dir, "tests/conformance/n/ok2.stdout", "\n");
+    score("files", dir);
+}
+
+fn too_long(dir: str) {
+    repo(dir, "", 0, "");
+    put(dir, "big.pilot", lines(1500, "// line"));
+    commit(dir);
+    put(dir, "big.pilot", lines(1501, "// line"));
+    score("too_long", dir);
+}
+
+fn adjust(dir: str, points: str, reason: str, extra: List<str>) {
+    var args: List<str> = ["run", "tools/score/main.pilot", "--", "--root", dir, "--adjust", points, reason];
+    for e in extra { args.push(e); }
+    let _ = proc.run(proc.pilot_cli_path(), args, "");
+}
+
+fn owner_penalty(dir: str) {
+    repo(dir, "", 0, "");
+    put(dir, "crates/a/src/lib.rs", lines(3, "// rust"));
+    adjust(dir, "+5", "earlier work", ["--date", "2026-11-01"]);
+    commit(dir);
+    put(dir, "crates/a/src/lib.rs", lines(3, "// edited"));
+    adjust(dir, "-100", "faked numbers", ["--for", "PROP-x", "--date", "2026-11-18"]);
+    score("owner_penalty", dir);
+}
+
+fn owner_reward(dir: str) {
+    repo(dir, "", 0, "");
+    commit(dir);
+    adjust(dir, "+20", "clean split of the parser pass", ["--date", "2026-11-18"]);
+    score("owner_reward", dir);
+}
+
+fn owner_tamper(dir: str) {
+    repo(dir, "", 0, "");
+    adjust(dir, "+5", "kept", ["--date", "2026-11-01"]);
+    commit(dir);
+    let path = dir + "/tools/score/adjustments.pilot";
+    let _ = File.write_text(path, File.read_text(path).replace("points: 5,", "points: 50,"));
+    score("owner_tamper", dir);
+}

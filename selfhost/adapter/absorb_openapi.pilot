@@ -1,7 +1,7 @@
 // ==============================================================================
 // selfhost/adapter/absorb_openapi.pilot
-// Ring 3 / Self-Host Compiler: OpenAPI 3.0/3.1 Schema & Route Absorber (`use openapi`)
-// Package: selfhost.adapter (Milestone 20)
+// OpenAPI 3.0/3.1 schema and route absorber for `use openapi`.
+// Reached only by the milestone20 Rust test; no `pilot` command runs it.
 // ==============================================================================
 
 pub lvl(0) pkg selfhost.adapter;

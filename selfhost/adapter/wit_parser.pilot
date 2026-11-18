@@ -1,7 +1,7 @@
 // ==============================================================================
 // selfhost/adapter/wit_parser.pilot
-// Ring 3 / Self-Host Compiler: WebAssembly Component Model & WIT Universal Parser
-// Package: selfhost.adapter (Milestone 19)
+// WIT (WebAssembly Component Model) parser.
+// Reached only by the milestone19 Rust test; no `pilot` command runs it.
 // ==============================================================================
 
 pub lvl(0) pkg selfhost.adapter;

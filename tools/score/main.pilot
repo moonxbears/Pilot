@@ -1,0 +1,126 @@
+// ==============================================================================
+// FILE: tools/score/main.pilot
+// The scorecard: scores the change from a base commit to the working tree
+// against the rules in tools/score/sc/rules.pilot (vetoes, credits, debts).
+// ==============================================================================
+// Usage, from the repository root:
+//
+//   pilot run tools/score/main.pilot                       score against HEAD
+//   pilot run tools/score/main.pilot -- --base <rev>       against another commit
+//   pilot run tools/score/main.pilot -- --verbose          print the whole audit
+//   pilot run tools/score/main.pilot -- --log <file>       write the whole audit
+//   pilot run tools/score/main.pilot -- --root <dir>       score another checkout
+//   pilot run tools/score/main.pilot -- --adjust <points> "<reason>" [--for <what>] [--date <yyyy-mm-dd>]
+//                                                          owner only: add an entry to
+//                                                          tools/score/adjustments.pilot
+//
+// By default only the accumulated score prints. --verbose prints the audit
+// log instead: every veto, credit, debt and measurement found, then each
+// rule's subtotal and the score. --log writes that log to a file as well.
+// Exit code: 0 scored, 1 vetoed, 2 bad arguments or no such base commit.
+//
+// Everything is measured against the base commit by git and the ledgers;
+// the owner's approvals come from tools/score/approvals.pilot as it is in
+// the base commit, so a change cannot approve itself.
+use std.env;
+use sc.rules;
+use sc.git;
+use sc.audit;
+use sc.report;
+use sc.owner;
+use std.text;
+use std.proc;
+
+fn main() -> i64 {
+    var root = ".";
+    var base = "HEAD";
+    var verbose = false;
+    var log_path = "";
+    var adjust = "";
+    var reason = "";
+    var applies_to = "";
+    var date = "";
+    let args = env.args();
+    var a = 0;
+    while a < args.len() {
+        let arg = args[a];
+        let has_value = a + 1 < args.len();
+        if arg == "--verbose" || arg == "-v" {
+            verbose = true;
+        } else if arg == "--base" && has_value {
+            base = args[a + 1];
+            a = a + 1;
+        } else if arg == "--root" && has_value {
+            root = args[a + 1];
+            a = a + 1;
+        } else if arg == "--log" && has_value {
+            log_path = args[a + 1];
+            a = a + 1;
+        } else if arg == "--adjust" && a + 2 < args.len() {
+            adjust = args[a + 1];
+            reason = args[a + 2];
+            a = a + 2;
+        } else if arg == "--for" && has_value {
+            applies_to = args[a + 1];
+            a = a + 1;
+        } else if arg == "--date" && has_value {
+            date = args[a + 1];
+            a = a + 1;
+        } else if arg == "--help" || arg == "-h" {
+            print("usage: pilot run tools/score/main.pilot -- [--base <rev>] [--verbose] [--log <file>] [--root <dir>]\n       pilot run tools/score/main.pilot -- --adjust <points> \"<reason>\" [--for <what>] [--date <yyyy-mm-dd>]   (owner only)");
+            return 0;
+        } else {
+            print(f"score: unknown argument `{arg}`; use --base <rev>, --verbose, --log <file> or --root <dir>");
+            return 2;
+        }
+        a = a + 1;
+    }
+    if adjust != "" { return add_adjustment(root, adjust, reason, applies_to, date); }
+    let repo = Repo { root: root, base: base };
+    if !base_exists(repo) {
+        print(f"score: `{base}` is not a commit in {root}");
+        return 2;
+    }
+    let findings = audit(repo);
+    let audit_log = log(findings, base, base_hash(repo));
+    if log_path != "" {
+        if !File.write_text(log_path, audit_log) {
+            print(f"score: could not write {log_path}");
+            return 2;
+        }
+    }
+    if verbose {
+        print(audit_log);
+    } else {
+        print(summary(findings));
+        if log_path != "" { print(f"audit log: {log_path}"); }
+    }
+    return if totals(findings).vetoes > 0 { 1 } else { 0 };
+}
+
+/// Appends an owner entry to the ledger (creating it when missing) and
+/// says what was added. Scores nothing.
+fn add_adjustment(root: str, points_text: str, reason: str, applies_to: str, date_given: str) -> i64 {
+    guard some points = text.parse_i64(points_text) else {
+        print(f"score: --adjust needs whole points such as +20 or -100, not `{points_text}`");
+        return 2;
+    }
+    if points == 0 || reason.trim() == "" {
+        print("score: --adjust needs points other than 0 and a reason");
+        return 2;
+    }
+    let date = if date_given != "" { date_given } else { proc.run("date", ["+%Y-%m-%d"], "").stdout.trim() };
+    let path = if root == "." { ADJUSTMENTS_PATH } else { root + "/" + ADJUSTMENTS_PATH };
+    let src = if File.exists(path) { File.read_text(path) } else { empty_ledger() };
+    let entry = Adjustment { points: points, date: date, reason: reason, applies_to: applies_to };
+    guard some updated = append_entry(src, entry) else {
+        print(f"score: {path} has no OWNER_ADJUSTMENTS list to add to");
+        return 2;
+    }
+    if !File.write_text(path, updated) {
+        print(f"score: could not write {path}");
+        return 2;
+    }
+    print(f"owner adjustment {signed(points)} added to {path}: {reason}");
+    return 0;
+}

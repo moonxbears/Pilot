@@ -1,0 +1,166 @@
+// ==============================================================================
+// FILE: selfhost/vm/pilc_aggregates.pilot
+// PROP-005 5D: records and tuples -> VM records and lists.
+// ==============================================================================
+// The PilIR interpreter holds an aggregate as the seed does (`run_construct_
+// aggregate`): a struct (a layout with a record entry whose names match its
+// values) is a record from field name to value, carrying its layout; any
+// other aggregate (a tuple, a variant, a function record) is a list. On the
+// VM the same: a record is `map_new` + `map_set` per field, marked with its
+// layout id (`record_set_type`); anything else is `list_new` + `list_push`.
+//
+// `extract_field` / `insert_field` name a field by its slot:
+//   - when the operand's own layout is a record, the slot's name is known
+//     here, and the access is `map_get` / `map_set` under it;
+//   - otherwise (layout "?", or a layout with no record entry) the value
+//     decides when the program runs, as in the interpreter: a value with no
+//     layout mark is a list, read at the slot; a marked record is read under
+//     the name its layout gives the slot, found in the table of every
+//     record layout's field names, which the program builds once at start
+//     (`pilc_emit_field_names`) in the global `RECORD_FIELDS_GLOBAL`.
+pub lvl(0) pkg selfhost.vm;
+
+use selfhost.ir.*;
+use pilot.vm.pilc;
+
+/// The global holding, by layout id, each record layout's field names (or
+/// `null`); its name is no Pilot identifier, so no program's global meets it.
+const RECORD_FIELDS_GLOBAL: str = "<record fields>";
+
+pub fn pilc_lower_aggregate(var ref e: PilcEmit, inst: IrInst, ref a: List<u32>) {
+    if inst.opcode == op_construct_aggregate() {
+        lower_construct(e, inst, a);
+    } else if inst.opcode == op_extract_field() {
+        lower_extract(e, inst, a);
+    } else {
+        lower_insert(e, inst, a);
+    }
+}
+
+/// `map_set(obj, key constant, value)`, its result dropped.
+fn put_map_set_const(var ref e: PilcEmit, obj: i64, key: i64, v: i64) {
+    put_move(e, 1, obj);
+    put_const(e, 2, key);
+    put_move(e, 3, v);
+    let _ = put_op(e, VmOp::OpEngineIntrinsic, PILC_SCRATCH, VM_CONST_REG, 3, pilc_const_text(e.img, "map_set"));
+}
+
+/// `map_set(obj, key register, value)`, its result dropped.
+fn put_map_set_reg(var ref e: PilcEmit, obj: i64, key: i64, v: i64) {
+    put_move(e, 1, obj);
+    put_move(e, 2, key);
+    put_move(e, 3, v);
+    let _ = put_op(e, VmOp::OpEngineIntrinsic, PILC_SCRATCH, VM_CONST_REG, 3, pilc_const_text(e.img, "map_set"));
+}
+
+/// The field names of layout `layout` when it is a struct record of `n`
+/// values (`n` < 0: any number), else none.
+fn record_names(ref e: PilcEmit, layout: u32, n: i64) -> List<str>? {
+    guard some rec = ir_record_of(e.m, layout) else { return none; };
+    if n >= 0 && rec.names.len() != n { return none; }
+    return rec.names;
+}
+
+fn lower_construct(var ref e: PilcEmit, inst: IrInst, ref a: List<u32>) {
+    let dst = result_reg(e, inst);
+    let layout = inst.physics.layout_id;
+    if some names = record_names(e, layout, a.len()) {
+        let none_args: List<i64> = [];
+        put_engine(e, "map_new", none_args, dst);
+        var i = 0;
+        while i < a.len() {
+            put_map_set_const(e, dst, pilc_const_text(e.img, names[i]), reg_of(e, a[i]));
+            i = i + 1;
+        }
+        let _ = put_op(e, VmOp::OpLoadConst, PILC_SCRATCH2, 0, 0, pilc_const_int(e.img, layout as i64));
+        put_engine2(e, "record_set_type", dst, PILC_SCRATCH2, PILC_SCRATCH);
+        return;
+    }
+    let none_args: List<i64> = [];
+    put_engine(e, "list_new", none_args, dst);
+    for v in a { put_engine2(e, "list_push", dst, reg_of(e, v), PILC_SCRATCH); }
+}
+
+fn lower_extract(var ref e: PilcEmit, inst: IrInst, ref a: List<u32>) {
+    let dst = result_reg(e, inst);
+    let v = reg_of(e, a[0]);
+    let slot = inst.subop as i64;
+    if some names = record_names(e, e.f.value_physics[a[0] as i64].layout_id, -1) {
+        if slot < names.len() {
+            put_engine_key(e, "map_get", v, pilc_const_text(e.img, names[slot]), dst);
+            return;
+        }
+    }
+    // When the program runs: a list, or a record of some layout.
+    put_engine1(e, "record_type", v, PILC_SCRATCH2);
+    let to_record = put_op(e, VmOp::OpJumpIfNotNull, 0, PILC_SCRATCH2, 0, 0);
+    put_engine_key(e, "list_get", v, pilc_const_int(e.img, slot), dst);
+    let to_end = put_op(e, VmOp::OpJump, 0, 0, 0, 0);
+    pilc_patch_wide(e.img, to_record, pilc_here(e.img));
+    put_field_name(e, slot);
+    put_engine2(e, "map_get", v, PILC_SCRATCH2, dst);
+    pilc_patch_wide(e.img, to_end, pilc_here(e.img));
+}
+
+fn lower_insert(var ref e: PilcEmit, inst: IrInst, ref a: List<u32>) {
+    let v = reg_of(e, a[0]);
+    let x = reg_of(e, a[1]);
+    let slot = inst.subop as i64;
+    if some names = record_names(e, e.f.value_physics[a[0] as i64].layout_id, -1) {
+        if slot < names.len() {
+            put_map_set_const(e, v, pilc_const_text(e.img, names[slot]), x);
+            return;
+        }
+    }
+    put_engine1(e, "record_type", v, PILC_SCRATCH2);
+    let to_record = put_op(e, VmOp::OpJumpIfNotNull, 0, PILC_SCRATCH2, 0, 0);
+    put_map_set_const(e, v, pilc_const_int(e.img, slot), x);
+    let to_end = put_op(e, VmOp::OpJump, 0, 0, 0, 0);
+    pilc_patch_wide(e.img, to_record, pilc_here(e.img));
+    put_field_name(e, slot);
+    put_map_set_reg(e, v, PILC_SCRATCH2, x);
+    pilc_patch_wide(e.img, to_end, pilc_here(e.img));
+}
+
+/// Replaces the layout id in scratch register 2 with the name its layout
+/// gives field `slot` (the interpreter's `field_name`), read from the field
+/// table; a layout whose record has no such field names it by its number.
+fn put_field_name(var ref e: PilcEmit, slot: i64) {
+    e.field_names_global = RECORD_FIELDS_GLOBAL;
+    put_global_get(e, RECORD_FIELDS_GLOBAL, PILC_SCRATCH);
+    put_engine2(e, "list_get", PILC_SCRATCH, PILC_SCRATCH2, PILC_SCRATCH);
+    put_engine_key(e, "list_get", PILC_SCRATCH, pilc_const_int(e.img, slot), PILC_SCRATCH2);
+}
+
+/// Start-up code building the field table, when a lowering asked for it:
+/// per layout id, the list of its record's field names, or `null`,
+/// each list as long as the greatest slot any record has, a missing name
+/// being the slot's number as text.
+pub fn pilc_emit_field_names(var ref e: PilcEmit) {
+    e.span = ir_no_span();
+    if e.field_names_global != "" {
+        var widest = 0;
+        for rec in e.m.records { if rec.names.len() > widest { widest = rec.names.len(); } }
+        let none_args: List<i64> = [];
+        put_engine(e, "list_new", none_args, PILC_FIRST_REG);
+        var layout = 0;
+        while layout < e.m.layouts.len() {
+            if some names = record_names(e, layout as u32, -1) {
+                put_engine(e, "list_new", none_args, PILC_FIRST_REG + 1);
+                var k = 0;
+                while k < widest {
+                    let name = if k < names.len() { names[k] } else { f"{k}" };
+                    put_const(e, PILC_FIRST_REG + 2, pilc_const_text(e.img, name));
+                    put_engine2(e, "list_push", PILC_FIRST_REG + 1, PILC_FIRST_REG + 2, PILC_SCRATCH);
+                    k = k + 1;
+                }
+                put_engine2(e, "list_push", PILC_FIRST_REG, PILC_FIRST_REG + 1, PILC_SCRATCH);
+            } else {
+                put_const(e, PILC_FIRST_REG + 1, pilc_const_null(e.img));
+                put_engine2(e, "list_push", PILC_FIRST_REG, PILC_FIRST_REG + 1, PILC_SCRATCH);
+            }
+            layout = layout + 1;
+        }
+        put_global_set(e, RECORD_FIELDS_GLOBAL, PILC_FIRST_REG);
+    }
+}

@@ -1,0 +1,89 @@
+// ==============================================================================
+// FILE: selfhost/check/type_levels.pilot
+// GRAM012: a program's `syntax type_construct` rule whose operator symbol has
+// no type level (PROP-019).
+// ==============================================================================
+// How tightly a type-position symbol binds is declared by a level entry
+// (`TypeInfix`, `TypePrefix`, `TypePostfix`, stdlib/core/operators/shapes.pilot;
+// the library's own in stdlib/core/syntax/type_construct.pilot). The seed
+// applies a rule only when its symbol has one, so a rule written without it
+// would never apply and its types would stop with SYN001 at their use. This
+// check names the missing entry at the rule instead.
+//
+// The rule's pattern is not kept in the AST, so the declaring file is lexed
+// with the seed's own table into a tape (pilot.parse.tape) and each arm's
+// symbol read from its tokens (pilot.parse.type_rules).
+pub lvl(0) pkg selfhost.check;
+
+use pilot.lex.modes;
+use pilot.lex.seed;
+use pilot.parse.tape;
+use pilot.parse.type_rules;
+
+/// GRAM012 over the user's files.
+pub fn check_type_rule_levels(ref s: Snap, var ref sink: DiagSink) {
+    var have_levels = false;
+    var levels = Map<str, bool>();
+    var m_opt: ModalLexer? = none;
+    var u = 0;
+    while u < s.files.len() {
+        let row = s.files[u];
+        u = u + 1;
+        if !row.1 || !row.3.contains(nameof(type_construct)) { continue; }
+        if !have_levels {
+            levels = type_level_symbols(s);
+            have_levels = true;
+            m_opt = read_seed_table();
+        }
+        guard some m = m_opt else { return; }
+        check_file_rules(sink, m, levels, row.2, row.3);
+    }
+}
+
+/// The symbol argument of every level entry for a type-position symbol in
+/// the linked program, the library's included.
+fn type_level_symbols(ref s: Snap) -> Map<str, bool> {
+    var out = Map<str, bool>();
+    var d = 0;
+    while d < s.count {
+        if kind(s, d) == nk_call() {
+            let ch = children(s, d);
+            if ch.len() >= 2 && kind(s, ch[0]) == nk_ident() {
+                let callee = node_name(s, ch[0]);
+                if callee == nameof(TypeInfix) || callee == nameof(TypePrefix) || callee == nameof(TypePostfix) {
+                    out.set(str_value(s, arg_value(s, ch[1])), true);
+                } else if callee == nameof(grammar_entry) && ch.len() >= 3 && nameof_arg(s, arg_value(s, ch[1])) == nameof(type_construct) {
+                    out.set(str_value(s, arg_value(s, ch[2])), true);
+                }
+            }
+        }
+        d = d + 1;
+    }
+    return out;
+}
+
+/// A call argument's value node.
+fn arg_value(ref s: Snap, a: i64) -> i64 => if kind(s, a) == nk_call_arg() { rhs(s, a) } else { a };
+
+/// The word in `nameof(word)`, or "".
+fn nameof_arg(ref s: Snap, a: i64) -> str {
+    if kind(s, a) != nk_call() { return ""; }
+    let ch = children(s, a);
+    if ch.len() == 2 && kind(s, ch[0]) == nk_ident() && node_name(s, ch[0]) == nameof(nameof) {
+        return node_name(s, arg_value(s, ch[1]));
+    }
+    return "";
+}
+
+/// GRAM012 for every `syntax type_construct` rule of one file, whose text is
+/// `text` at offset `base` of the linked program.
+fn check_file_rules(var ref sink: DiagSink, ref m: ModalLexer, ref levels: Map<str, bool>, base: i64, text: str) {
+    let t = tape_of(m, text);
+    for arm in type_rule_arms(t) {
+        if arm.symbol.len() == 0 || levels.has(arm.symbol) { continue; }
+        let end = if arm.close < t.len() { t.ends[arm.close] } else { t.ends[arm.open] };
+        sink.rows.push(("GRAM012",
+            f"this `{nameof(type_construct)}` rule uses `{arm.symbol}`, which has no type level, so the rule would never apply; declare its level beside it in a `{nameof(comptime)}` block with `{nameof(TypeInfix)}`, `{nameof(TypePrefix)}` or `{nameof(TypePostfix)}`",
+            base + t.starts[arm.open], base + end, 1));
+    }
+}

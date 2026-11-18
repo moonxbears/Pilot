@@ -1,6 +1,8 @@
 // =========================================================================
 // FILE: selfhost/perf/profiler.pilot
-// Milestone 60.2: PilVM Call-Stack Profiler & SVG Flamegraph / Chrome Trace Emitter
+// Call-stack profile records and SVG flamegraph / Chrome trace output.
+// `pilot perf` has no handler (seam cli.command_handler).
+// Reached only by the milestone60 Rust test; no `pilot` command runs it.
 // =========================================================================
 pub pkg selfhost.perf;
 

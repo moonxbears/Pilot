@@ -1,13 +1,22 @@
 // =========================================================================
 // FILE: stdlib/core/naming_attr.pilot
 // CANONICAL 2-BIT HARDWARE LATTICE & CORE TAXONOMY NAMING ATTRIBUTE
-// Enforces AGENTS.md §3 across [EnforceCoreNaming] packages in Pilot.Core.*:
+// This file declares the `[EnforceCoreNaming]` attribute and the
+// `NamingRule` labels; it checks nothing itself. The naming rules of
+// AGENTS.md §3 it describes:
 //   1. Interfaces:        'I' + PascalCase (IAnyValue, IValue, IEquatable)
 //   2. [Lang] Primitives: lowercase hardware/ABI primitives (i64, slice, str)
 //   3. Attributes:        PascalCase + 'Attr' (ClampAttr, HardRealtimeAttr)
 //   4. 0b01 Views:        PascalCase + View | Lens | Cursor | Enumerator
 //   5. 0b11 Guards:       PascalCase + Guard | Scope | Lease
 //   6. 0b00 / 0b10 Types: Unadorned PascalCase (RangeWindow, SliceBuffer)
+// The check is selfhost/check/lint_decls.pilot (check_naming), run on files
+// that carry `[EnforceCoreNaming]`. It checks rules 1-5, PascalCase for other
+// structs and the reserved `I` + capital prefix. Rules 3-5 are decided from
+// the interfaces a struct names in its declaration (IAttribute, IReference,
+// IGuard, IReference + IObject), not from its computed lattice. Not checked:
+// that a 0b00 / 0b10 name is unadorned (rule 6), `partial` structs, enums,
+// and the attribute's `check_*` fields, which nothing reads.
 // =========================================================================
 [EnforceCoreNaming]
 pub pkg Pilot.Core.Naming;

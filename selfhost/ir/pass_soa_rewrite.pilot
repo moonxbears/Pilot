@@ -213,8 +213,8 @@ pub fn lower_choreographed_field_access(
 // ------------------------------------------------------------------------------
 
 /// Replaces a `FieldAddr` / `Load` / `Store` on choreographed storage in the
-/// caller's PilIR with the column address arithmetic `access` describes. The
-/// typed SSA IR it rewrites does not exist yet.
+/// caller's PilIR with the column address arithmetic `access` describes. Typed
+/// PilIR exists (selfhost/ir/model.pilot), but this pass is not connected to it.
 pub fn rewrite_field_access_ir(access: LoweredFieldAccess) -> i64 {
-    return seam("soa.rewrite_ir", "typed PilIR function builder arrives in F5");
+    return seam("soa.rewrite_ir", "the SoA rewrite is not connected to typed PilIR (selfhost/ir/model.pilot); nothing replaces field accesses with column address arithmetic");
 }
