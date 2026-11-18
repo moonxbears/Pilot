@@ -926,7 +926,26 @@ fn user_has_lambda(ref s: Snap) -> bool {
     return false;
 }
 
-fn check_assign(var ref inf: Infer, var ref sink: DiagSink, n: i64) {
+/// For each local binding, the identifier nodes in the user's files that
+/// name it, in node order; empty when the user's files have no lambda (then
+/// no write can miss a capture). Built once per check: looking the uses up
+/// per assignment walked every identifier for every assignment.
+fn capture_uses(ref inf: Infer) -> Map<i64, List<i64>> {
+    let s = inf.p.s;
+    var out = Map<i64, List<i64>>();
+    if !user_has_lambda(s) { return out; }
+    for u in nodes_of(s, nk_ident()) {
+        if u < s.user_lo || u >= s.user_hi { continue; }
+        let b = inf.r.ref_of[u];
+        if b < 0 { continue; }
+        var uses = out.get(b) ?? [];
+        uses.push(u);
+        out.set(b, uses);
+    }
+    return out;
+}
+
+fn check_assign(var ref inf: Infer, var ref sink: DiagSink, ref captures: Map<i64, List<i64>>, n: i64) {
     let p = inf.p;
     let s = p.s;
     let target = lhs(s, n);
@@ -952,11 +971,10 @@ fn check_assign(var ref inf: Infer, var ref sink: DiagSink, n: i64) {
     // A capture needs a lambda around a use; the uses checked are in the
     // user's files, and so are their ancestors, so a program whose user
     // files have no lambda has nothing to warn about here.
-    if b >= 0 && b < inf.r.site.len() && user_has_lambda(s) {
+    if b >= 0 && b < inf.r.site.len() && captures.has(b) {
         let site = inf.r.site[b];
         let n_start = span_start(s, n);
-        for u in nodes_of(s, nk_ident()) {
-            if u < s.user_lo || u >= s.user_hi || inf.r.ref_of[u] != b { continue; }
+        for u in captures.get(b) ?? [] {
             let lam = capturing_lambda(p, u, site);
             if lam >= 0 && span_start(s, lam) < n_start {
                 // Make sure `n` is not inside `lam` itself.
@@ -1091,8 +1109,8 @@ pub fn check_rules(var ref inf: Infer, var ref sink: DiagSink) {
     // The string tokens already checked for escapes, by where they start
     // (an f-string's pieces share its token).
     var escapes_seen = Map<i64, bool>();
-    var i = 0;
-    i = s.user_lo;
+    let captures = capture_uses(inf);
+    var i = s.user_lo;
     while i < s.user_hi {
         if in_user_file(s, i) {
             let k = kind(s, i);
@@ -1103,7 +1121,7 @@ pub fn check_rules(var ref inf: Infer, var ref sink: DiagSink) {
             if k == nk_let() || k == nk_var() || k == nk_const() { check_binding_value(inf, sink, i); }
             else if k == nk_return() { check_return(inf, sink, i); }
             else if k == nk_yield() { check_yield(inf, sink, i); }
-            else if k == nk_assign() { check_assign(inf, sink, i); }
+            else if k == nk_assign() { check_assign(inf, sink, captures, i); }
             else if k == nk_expr_stmt() { check_dropped_result(inf, sink, i); check_type_body_item(inf, sink, i); }
             else if k == nk_call() {
                 check_struct_literal_fields(inf, sink, i);

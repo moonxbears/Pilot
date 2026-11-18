@@ -92,8 +92,11 @@ fn write_out(text: str) {
     let _ = RawMem.free(buf, n, 1);
 }
 
-/// `body` framed for DAP.
-pub fn encode_dap_frame(body: str) -> str => f"Content-Length: {body.len()}\r\n\r\n{body}";
+/// `json` framed for DAP. The body ends with a line break, counted in
+/// `Content-Length`: standard output is line-buffered in the seed VM, so a
+/// frame not ending in one waits there until the next message (see `lsp_send`
+/// in selfhost/lsp/server.pilot; PROP-041).
+pub fn encode_dap_frame(json: str) -> str => f"Content-Length: {json.len() + 1}\r\n\r\n{json}\n";
 
 /// The next frame's body from standard input; none at its end. A header
 /// without a `Content-Length` ends the session with an error on stderr.

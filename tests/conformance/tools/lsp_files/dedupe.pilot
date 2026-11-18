@@ -1,0 +1,4 @@
+fn main() {
+    let total: i64 = 4;
+    print(total);
+}

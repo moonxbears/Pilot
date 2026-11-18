@@ -78,10 +78,14 @@ fn doc_above(var ref ls: Lines, d: i64) -> str {
     let text = row.3;
     let starts = lines_of(ls, u);
     let at = span_start(ls.s, d) - row.2;
-    var line = 0;
-    while line + 1 < starts.len() && starts[line + 1] <= at { line = line + 1; }
+    var lo = 0;
+    var hi = starts.len() - 1;
+    while lo < hi {
+        let mid = (lo + hi + 1) / 2;
+        if starts[mid] <= at { lo = mid; } else { hi = mid - 1; }
+    }
     var docs: List<str> = [];
-    var l = line - 1;
+    var l = lo - 1;
     while l >= 0 {
         let end = if l + 1 < starts.len() { starts[l + 1] - 1 } else { text.len() };
         let t = text.slice(starts[l], end).trim();
@@ -200,7 +204,7 @@ fn name_records(var ref inf: Infer, var ref ls: Lines, unit: i64) -> str {
 /// The `D` records of the checker's diagnostics, all in the user's files.
 fn diag_records(ref sink: DiagSink, var ref ls: Lines) -> str {
     let s = ls.s;
-    var out = "";
+    var out: List<str> = [];
     for row in sink.rows {
         // The row's offsets are in the linked program; find the file holding them.
         var u = -1;
@@ -213,9 +217,9 @@ fn diag_records(ref sink: DiagSink, var ref ls: Lines) -> str {
         if u < 0 { continue; }
         let starts = lines_of(ls, u);
         let base = s.files[u].2;
-        out = out + "D\t" + lsp_field(s.files[u].0) + "\t" + place(starts, row.2 - base) + "\t" + place(starts, row.3 - base) + f"\t{row.4}\t" + lsp_field(row.0) + "\t" + lsp_field(row.1) + "\n";
+        out.push("D\t" + lsp_field(s.files[u].0) + "\t" + place(starts, row.2 - base) + "\t" + place(starts, row.3 - base) + f"\t{row.4}\t" + lsp_field(row.0) + "\t" + lsp_field(row.1) + "\n");
     }
-    return out;
+    return joined(out);
 }
 
 /// What the language server knows about the file at `path` (spelled as the

@@ -1,0 +1,48 @@
+// `pilot lsp`: duplicate `didOpen` with unchanged text reuses cached state,
+// `didChange` immediately followed by `hover` checks the dirty buffer and
+// returns updated positions, and non-`file://` virtual URIs do not fail.
+use std.proc;
+
+fn frame(body: str) -> str => f"Content-Length: {body.len()}\r\n\r\n" + body;
+
+fn count_sub(haystack: str, needle: str) -> i64 {
+    var count = 0;
+    var at = haystack.find(needle, 0);
+    while at >= 0 {
+        count = count + 1;
+        at = haystack.find(needle, at + needle.len());
+    }
+    return count;
+}
+
+fn main() {
+    let dir = Env.get("PWD") + "/tests/conformance/tools/lsp_files/";
+    let path = dir + "dedupe.pilot";
+    let on_disk = File.read_text(path);
+    let quoted_disk = on_disk.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n");
+    let edited = "// note\n" + on_disk.replace("= 4;", "= \"bad\";");
+    let quoted_edit = edited.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n");
+    let uri = "file://" + path;
+    let git_uri = "git:" + path + "?1";
+
+    var input = frame("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}");
+    input = input + frame("{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"" + uri + "\",\"languageId\":\"pilot\",\"version\":1,\"text\":\"" + quoted_disk + "\"}}}");
+    input = input + frame("{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"" + uri + "\",\"languageId\":\"pilot\",\"version\":1,\"text\":\"" + quoted_disk + "\"}}}");
+    input = input + frame("{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{\"textDocument\":{\"uri\":\"" + uri + "\",\"version\":2},\"contentChanges\":[{\"text\":\"" + quoted_edit + "\"}]}}");
+    input = input + frame("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"" + uri + "\"},\"position\":{\"line\":3,\"character\":12}}}");
+    input = input + frame("{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"" + git_uri + "\",\"languageId\":\"pilot\",\"version\":1,\"text\":\"" + quoted_disk + "\"}}}");
+    input = input + frame("{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didClose\",\"params\":{\"textDocument\":{\"uri\":\"" + uri + "\"}}}");
+    input = input + frame("{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"shutdown\"}");
+    input = input + frame("{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}");
+
+    let out = proc.run(proc.pilot_cli_path(), ["lsp"], input);
+    let o = out.stdout;
+    print(out.exit_code);
+    print(count_sub(o, "\"method\":\"textDocument/publishDiagnostics\""));
+    print(o.find("\"diagnostics\":[{\"range\":{\"start\":{\"line\":2,\"character\":21},\"end\":{\"line\":2,\"character\":26}},\"severity\":1,\"code\":\"TYPE001\"", 0) >= 0);
+    let hover = o.find("\"id\":2,\"result\":{\"contents\":{\"kind\":\"markdown\",\"value\":", 0);
+    print(hover >= 0 && o.find("\"range\":{\"start\":{\"line\":3,\"character\":10},\"end\":{\"line\":3,\"character\":15}}", hover) >= 0);
+    print(o.find("\"id\":3,\"result\":null", 0) >= 0);
+    print(File.exists(dir + ".dedupe.lsp.pilot"));
+    print(File.read_text(path) == on_disk);
+}

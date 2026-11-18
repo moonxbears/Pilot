@@ -210,11 +210,26 @@ function resolvePilotExecutionPrefix(extensionPath: string, configuredPilotPath?
     return 'pilot';
 }
 
+function positionAtOffset(text: string, offset: number): vscode.Position {
+    let line = 0;
+    let lineStart = 0;
+    const limit = Math.min(offset, text.length);
+    for (let i = 0; i < limit; i++) {
+        if (text.charCodeAt(i) === 10) {
+            line++;
+            lineStart = i + 1;
+        }
+    }
+    return new vscode.Position(line, limit - lineStart);
+}
+
 class PilotLspClient implements vscode.Disposable {
     private process: cp.ChildProcessWithoutNullStreams | null = null;
     private nextId = 1;
     private pending = new Map<number, { resolve: (val: any) => void; reject: (err: any) => void }>();
     private buffer: Buffer<any> = Buffer.alloc(0);
+    private openedUris = new Set<string>();
+    private serverCapabilities: any | null = null;
     private diagnostics: vscode.DiagnosticCollection;
     private statusBar: vscode.StatusBarItem;
     private outputChannel: vscode.OutputChannel;
@@ -230,6 +245,18 @@ class PilotLspClient implements vscode.Disposable {
 
     public setSemanticTokensEmitter(emitter: vscode.EventEmitter<void>): void {
         this.semanticTokensEmitter = emitter;
+    }
+
+    public isManagedDocument(doc: vscode.TextDocument): boolean {
+        return doc.languageId === 'pilot' && (doc.uri.scheme === 'file' || doc.uri.scheme === 'untitled');
+    }
+
+    public supports(capability: string): boolean {
+        return Boolean(this.serverCapabilities && this.serverCapabilities[capability]);
+    }
+
+    public supportsOrUnknown(capability: string): boolean {
+        return this.serverCapabilities === null || Boolean(this.serverCapabilities[capability]);
     }
 
     public async start(): Promise<void> {
@@ -292,6 +319,9 @@ class PilotLspClient implements vscode.Disposable {
             this.pending.clear();
             if (this.process === spawnedProcess) {
                 this.process = null;
+                this.buffer = Buffer.alloc(0);
+                this.openedUris.clear();
+                this.serverCapabilities = null;
                 this.statusBar.text = '$(sync~spin) Pilot LSP (Restarting...)';
                 setTimeout(() => {
                     if (!this.process) {
@@ -309,6 +339,7 @@ class PilotLspClient implements vscode.Disposable {
             capabilities: {}
         });
         this.sendNotification('initialized', {});
+        this.serverCapabilities = initResult?.capabilities ?? null;
         const srvVersion: string = initResult?.serverInfo?.version || '';
         const srvCommit: string = initResult?.serverInfo?.commitSha || '';
         if (srvVersion) {
@@ -320,19 +351,27 @@ class PilotLspClient implements vscode.Disposable {
         }
 
         for (const doc of vscode.workspace.textDocuments) {
-            if (doc.languageId === 'pilot') {
+            if (this.isManagedDocument(doc)) {
                 this.notifyDidOpen(doc);
             }
         }
-        if (this.semanticTokensEmitter) {
+        if (this.semanticTokensEmitter && this.supports('semanticTokensProvider')) {
             this.semanticTokensEmitter.fire();
         }
     }
 
     public notifyDidOpen(doc: vscode.TextDocument): void {
+        if (!this.process || !this.isManagedDocument(doc)) {
+            return;
+        }
+        const uri = doc.uri.toString();
+        if (this.openedUris.has(uri)) {
+            return;
+        }
+        this.openedUris.add(uri);
         this.sendNotification('textDocument/didOpen', {
             textDocument: {
-                uri: doc.uri.toString(),
+                uri,
                 languageId: doc.languageId,
                 version: doc.version,
                 text: doc.getText()
@@ -341,9 +380,17 @@ class PilotLspClient implements vscode.Disposable {
     }
 
     public notifyDidChange(doc: vscode.TextDocument): void {
+        if (!this.process || !this.isManagedDocument(doc)) {
+            return;
+        }
+        const uri = doc.uri.toString();
+        if (!this.openedUris.has(uri)) {
+            this.notifyDidOpen(doc);
+            return;
+        }
         this.sendNotification('textDocument/didChange', {
             textDocument: {
-                uri: doc.uri.toString(),
+                uri,
                 version: doc.version
             },
             contentChanges: [{ text: doc.getText() }]
@@ -351,18 +398,31 @@ class PilotLspClient implements vscode.Disposable {
     }
 
     public notifyDidSave(doc: vscode.TextDocument): void {
+        if (!this.process || !this.isManagedDocument(doc)) {
+            return;
+        }
+        const uri = doc.uri.toString();
+        if (!this.openedUris.has(uri)) {
+            this.notifyDidOpen(doc);
+            return;
+        }
         this.sendNotification('textDocument/didSave', {
-            textDocument: { uri: doc.uri.toString() }
+            textDocument: { uri }
         });
     }
 
     public notifyDidClose(doc: vscode.TextDocument): void {
+        const uri = doc.uri.toString();
+        this.openedUris.delete(uri);
+        if (!this.process || !this.isManagedDocument(doc)) {
+            return;
+        }
         this.sendNotification('textDocument/didClose', {
-            textDocument: { uri: doc.uri.toString() }
+            textDocument: { uri }
         });
     }
 
-    public sendRequest(method: string, params: any): Promise<any> {
+    public sendRequest(method: string, params: any, timeoutMs = 15000): Promise<any> {
         if (!this.process) {
             return Promise.resolve(null);
         }
@@ -377,7 +437,7 @@ class PilotLspClient implements vscode.Disposable {
                     this.pending.delete(id);
                     resolve(null);
                 }
-            }, 3000);
+            }, timeoutMs);
             this.pending.set(id, {
                 resolve: (val) => {
                     clearTimeout(timer);
@@ -478,6 +538,9 @@ class PilotLspClient implements vscode.Disposable {
             }
             this.process = null;
         }
+        this.buffer = Buffer.alloc(0);
+        this.openedUris.clear();
+        this.serverCapabilities = null;
         this.pending.clear();
     }
 
@@ -508,35 +571,43 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         vscode.commands.registerCommand('pilot.restartLanguageServer', async () => {
             statusBar.text = '$(sync~spin) Pilot LSP';
             await client.start();
-            semanticTokensEmitter.fire();
+            if (client.supports('semanticTokensProvider')) {
+                semanticTokensEmitter.fire();
+            }
             vscode.window.showInformationMessage('Pilot Language Server restarted.');
         }),
         vscode.workspace.onDidOpenTextDocument((doc) => {
-            if (doc.languageId === 'pilot') {
+            if (client.isManagedDocument(doc)) {
                 client.notifyDidOpen(doc);
-                semanticTokensEmitter.fire();
+                if (client.supports('semanticTokensProvider')) {
+                    semanticTokensEmitter.fire();
+                }
             }
         }),
         vscode.workspace.onDidChangeTextDocument((e) => {
-            if (e.document.languageId === 'pilot') {
+            if (client.isManagedDocument(e.document)) {
                 client.notifyDidChange(e.document);
-                semanticTokensEmitter.fire();
+                if (client.supports('semanticTokensProvider')) {
+                    semanticTokensEmitter.fire();
+                }
             }
         }),
         vscode.workspace.onDidSaveTextDocument((doc) => {
-            if (doc.languageId === 'pilot') {
+            if (client.isManagedDocument(doc)) {
                 client.notifyDidSave(doc);
             }
         }),
         vscode.workspace.onDidCloseTextDocument((doc) => {
-            if (doc.languageId === 'pilot') {
+            if (client.isManagedDocument(doc)) {
                 client.notifyDidClose(doc);
             }
         }),
         vscode.window.onDidChangeActiveTextEditor((editor) => {
-            if (editor && editor.document.languageId === 'pilot') {
+            if (editor && client.isManagedDocument(editor.document)) {
                 client.notifyDidOpen(editor.document);
-                semanticTokensEmitter.fire();
+                if (client.supports('semanticTokensProvider')) {
+                    semanticTokensEmitter.fire();
+                }
             }
         })
     );
@@ -550,6 +621,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             {
                 onDidChangeSemanticTokens: semanticTokensEmitter.event,
                 async provideDocumentSemanticTokens(document: vscode.TextDocument): Promise<vscode.SemanticTokens | null> {
+                    if (!client.isManagedDocument(document) || !client.supports('semanticTokensProvider')) {
+                        return null;
+                    }
                     client.notifyDidOpen(document);
                     const res = await client.sendRequest('textDocument/semanticTokens/full', {
                         textDocument: { uri: document.uri.toString() }
@@ -565,6 +639,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         ),
         vscode.languages.registerHoverProvider(selector, {
             async provideHover(document: vscode.TextDocument, position: vscode.Position): Promise<vscode.Hover | null> {
+                if (!client.isManagedDocument(document) || !client.supportsOrUnknown('hoverProvider')) {
+                    return null;
+                }
                 client.notifyDidOpen(document);
                 const res = await client.sendRequest('textDocument/hover', {
                     textDocument: { uri: document.uri.toString() },
@@ -604,6 +681,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }),
         vscode.languages.registerDefinitionProvider(selector, {
             async provideDefinition(document: vscode.TextDocument, position: vscode.Position): Promise<vscode.Location | null> {
+                if (!client.isManagedDocument(document) || !client.supportsOrUnknown('definitionProvider')) {
+                    return null;
+                }
                 client.notifyDidOpen(document);
                 const res = await client.sendRequest('textDocument/definition', {
                     textDocument: { uri: document.uri.toString() },
@@ -627,7 +707,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 position: vscode.Position,
                 context: vscode.ReferenceContext
             ): Promise<vscode.Location[]> {
-                client.notifyDidOpen(document);
+                if (!client.isManagedDocument(document)) {
+                    return [];
+                }
                 const wordRange = document.getWordRangeAtPosition(position);
                 if (!wordRange) {
                     return [];
@@ -638,75 +720,82 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                 }
 
                 // 1. Try LSP textDocument/references
-                try {
-                    const lspRefs = await client.sendRequest('textDocument/references', {
-                        textDocument: { uri: document.uri.toString() },
-                        position: { line: position.line, character: position.character },
-                        context: { includeDeclaration: context.includeDeclaration }
-                    });
-                    if (Array.isArray(lspRefs) && lspRefs.length > 0) {
-                        return lspRefs.map((r: any) => new vscode.Location(
-                            vscode.Uri.parse(r.uri),
-                            new vscode.Range(r.range.start.line, r.range.start.character, r.range.end.line, r.range.end.character)
-                        ));
+                if (client.supports('referencesProvider')) {
+                    client.notifyDidOpen(document);
+                    try {
+                        const lspRefs = await client.sendRequest('textDocument/references', {
+                            textDocument: { uri: document.uri.toString() },
+                            position: { line: position.line, character: position.character },
+                            context: { includeDeclaration: context.includeDeclaration }
+                        });
+                        if (Array.isArray(lspRefs) && lspRefs.length > 0) {
+                            return lspRefs.map((r: any) => new vscode.Location(
+                                vscode.Uri.parse(r.uri),
+                                new vscode.Range(r.range.start.line, r.range.start.character, r.range.end.line, r.range.end.character)
+                            ));
+                        }
+                    } catch {
+                        // fallback to document & workspace search
                     }
-                } catch {
-                    // fallback to document & workspace search
                 }
 
                 // 2. Try LSP rename query which verifies identifier legality and returns all file ranges
-                try {
-                    const renameRes = await client.sendRequest('textDocument/rename', {
-                        textDocument: { uri: document.uri.toString() },
-                        position: { line: position.line, character: position.character },
-                        newName: word
-                    });
-                    if (renameRes && renameRes.changes) {
-                        const locations: vscode.Location[] = [];
-                        for (const fileUri of Object.keys(renameRes.changes)) {
-                            const edits = renameRes.changes[fileUri];
-                            if (Array.isArray(edits)) {
-                                for (const edit of edits) {
-                                    if (edit.range) {
-                                        locations.push(new vscode.Location(
-                                            vscode.Uri.parse(fileUri),
-                                            new vscode.Range(
-                                                edit.range.start.line,
-                                                edit.range.start.character,
-                                                edit.range.end.line,
-                                                edit.range.end.character
-                                            )
-                                        ));
+                if (client.supports('renameProvider')) {
+                    client.notifyDidOpen(document);
+                    try {
+                        const renameRes = await client.sendRequest('textDocument/rename', {
+                            textDocument: { uri: document.uri.toString() },
+                            position: { line: position.line, character: position.character },
+                            newName: word
+                        });
+                        if (renameRes && renameRes.changes) {
+                            const locations: vscode.Location[] = [];
+                            for (const fileUri of Object.keys(renameRes.changes)) {
+                                const edits = renameRes.changes[fileUri];
+                                if (Array.isArray(edits)) {
+                                    for (const edit of edits) {
+                                        if (edit.range) {
+                                            locations.push(new vscode.Location(
+                                                vscode.Uri.parse(fileUri),
+                                                new vscode.Range(
+                                                    edit.range.start.line,
+                                                    edit.range.start.character,
+                                                    edit.range.end.line,
+                                                    edit.range.end.character
+                                                )
+                                            ));
+                                        }
                                     }
                                 }
                             }
-                        }
-                        if (locations.length > 0) {
-                            const escWord = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                            const regex = new RegExp(`\\b${escWord}\\b`, 'g');
-                            const files = await vscode.workspace.findFiles('**/*.pilot', '**/node_modules/**');
-                            for (const file of files) {
-                                if (file.toString() === document.uri.toString()) {
-                                    continue;
-                                }
-                                try {
-                                    const otherDoc = await vscode.workspace.openTextDocument(file);
-                                    const otherText = otherDoc.getText();
-                                    let match: RegExpExecArray | null;
-                                    while ((match = regex.exec(otherText)) !== null) {
-                                        const startPos = otherDoc.positionAt(match.index);
-                                        const endPos = otherDoc.positionAt(match.index + word.length);
-                                        locations.push(new vscode.Location(otherDoc.uri, new vscode.Range(startPos, endPos)));
+                            if (locations.length > 0) {
+                                const escWord = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                                const regex = new RegExp(`\\b${escWord}\\b`, 'g');
+                                const openDocs = new Map(vscode.workspace.textDocuments.map(d => [d.uri.toString(), d]));
+                                const files = await vscode.workspace.findFiles('**/*.pilot', '**/node_modules/**');
+                                for (const file of files) {
+                                    const fileStr = file.toString();
+                                    if (fileStr === document.uri.toString()) {
+                                        continue;
                                     }
-                                } catch {
-                                    // ignore unreadable files
+                                    try {
+                                        const openDoc = openDocs.get(fileStr);
+                                        const otherText = openDoc ? openDoc.getText() : await fs.promises.readFile(file.fsPath, 'utf8');
+                                        const posAt = openDoc ? (off: number) => openDoc.positionAt(off) : (off: number) => positionAtOffset(otherText, off);
+                                        let match: RegExpExecArray | null;
+                                        while ((match = regex.exec(otherText)) !== null) {
+                                            locations.push(new vscode.Location(file, new vscode.Range(posAt(match.index), posAt(match.index + word.length))));
+                                        }
+                                    } catch {
+                                        // ignore unreadable files
+                                    }
                                 }
+                                return locations;
                             }
-                            return locations;
                         }
+                    } catch {
+                        // fallback
                     }
-                } catch {
-                    // fallback
                 }
 
                 // 3. Fallback: Direct whole-word document & workspace scan
@@ -722,19 +811,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                     locations.push(new vscode.Location(document.uri, new vscode.Range(startPos, endPos)));
                 }
 
+                const openDocs = new Map(vscode.workspace.textDocuments.map(d => [d.uri.toString(), d]));
                 const files = await vscode.workspace.findFiles('**/*.pilot', '**/node_modules/**');
                 for (const file of files) {
-                    if (file.toString() === document.uri.toString()) {
+                    const fileStr = file.toString();
+                    if (fileStr === document.uri.toString()) {
                         continue;
                     }
                     try {
-                        const otherDoc = await vscode.workspace.openTextDocument(file);
-                        const otherText = otherDoc.getText();
+                        const openDoc = openDocs.get(fileStr);
+                        const otherText = openDoc ? openDoc.getText() : await fs.promises.readFile(file.fsPath, 'utf8');
+                        const posAt = openDoc ? (off: number) => openDoc.positionAt(off) : (off: number) => positionAtOffset(otherText, off);
                         let otherMatch: RegExpExecArray | null;
                         while ((otherMatch = regex.exec(otherText)) !== null) {
-                            const startPos = otherDoc.positionAt(otherMatch.index);
-                            const endPos = otherDoc.positionAt(otherMatch.index + word.length);
-                            locations.push(new vscode.Location(otherDoc.uri, new vscode.Range(startPos, endPos)));
+                            locations.push(new vscode.Location(file, new vscode.Range(posAt(otherMatch.index), posAt(otherMatch.index + word.length))));
                         }
                     } catch {
                         // ignore unreadable files
@@ -746,6 +836,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }),
         vscode.languages.registerDocumentSymbolProvider(selector, {
             async provideDocumentSymbols(document: vscode.TextDocument): Promise<vscode.DocumentSymbol[]> {
+                if (!client.isManagedDocument(document) || !client.supports('documentSymbolProvider')) {
+                    return [];
+                }
                 client.notifyDidOpen(document);
                 const res = await client.sendRequest('textDocument/documentSymbol', {
                     textDocument: { uri: document.uri.toString() }
@@ -785,6 +878,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             selector,
             {
                 async provideCompletionItems(document: vscode.TextDocument, position: vscode.Position): Promise<vscode.CompletionItem[]> {
+                    if (!client.isManagedDocument(document) || !client.supports('completionProvider')) {
+                        return [];
+                    }
                     client.notifyDidOpen(document);
                     const res = await client.sendRequest('textDocument/completion', {
                         textDocument: { uri: document.uri.toString() },
@@ -811,6 +907,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             selector,
             {
                 async provideSignatureHelp(document: vscode.TextDocument, position: vscode.Position): Promise<vscode.SignatureHelp | null> {
+                    if (!client.isManagedDocument(document) || !client.supports('signatureHelpProvider')) {
+                        return null;
+                    }
                     client.notifyDidOpen(document);
                     const res = await client.sendRequest('textDocument/signatureHelp', {
                         textDocument: { uri: document.uri.toString() },
@@ -838,6 +937,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             selector,
             {
                 async provideInlayHints(document: vscode.TextDocument, range: vscode.Range): Promise<vscode.InlayHint[]> {
+                    if (!client.isManagedDocument(document) || !client.supports('inlayHintProvider')) {
+                        return [];
+                    }
                     client.notifyDidOpen(document);
                     const res = await client.sendRequest('textDocument/inlayHint', {
                         textDocument: { uri: document.uri.toString() },
@@ -871,6 +973,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
                     range: vscode.Range | vscode.Selection,
                     context: vscode.CodeActionContext
                 ): Promise<(vscode.Command | vscode.CodeAction)[]> {
+                    if (!client.isManagedDocument(document) || !client.supports('codeActionProvider')) {
+                        return [];
+                    }
                     client.notifyDidOpen(document);
                     const res = await client.sendRequest('textDocument/codeAction', {
                         textDocument: { uri: document.uri.toString() },

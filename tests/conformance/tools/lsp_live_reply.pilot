@@ -1,0 +1,61 @@
+// `pilot lsp` and `pilot debug --dap` answer while their standard input is
+// still open, the way an editor talks to them: a reply has to reach the
+// editor whole as soon as it is written, not when the next message is sent
+// or the server exits. (The other tools tests send all their input and close
+// it, so a reply held back until exit still passed them; the editor waited
+// on every hover.)
+//
+// `sh` keeps each server's input open for 4 seconds after the request
+// (`{ cat; sleep 4; }`). Every reply (its `Content-Length` header and that many
+// body bytes) must arrive within 3 seconds, before the input closes.
+//
+// Expected: the LSP `initialize` reply arrives (true); the DAP `initialize`
+// response and the `initialized` event after it both arrive (true; DAP
+// sends the event once the response is out).
+use std.proc;
+
+fn frame(body: str) -> str => f"Content-Length: {body.len()}\r\n\r\n" + body;
+
+/// How many whole framed messages (a `Content-Length` header and that many
+/// body bytes) `text` holds from its start.
+fn whole_frames(text: str) -> i64 {
+    var count = 0;
+    var at = 0;
+    while true {
+        let head = text.find("Content-Length: ", at);
+        if head < 0 { return count; }
+        let end = text.find("\r\n\r\n", head);
+        if end < 0 { return count; }
+        let digits = text.slice(head + 16, end);
+        var n = 0;
+        var i = 0;
+        while i < digits.len() {
+            n = n * 10 + digits.byte_at(i) - 48;
+            i = i + 1;
+        }
+        if text.len() - (end + 4) < n { return count; }
+        count = count + 1;
+        at = end + 4 + n;
+    }
+    return count;
+}
+
+/// Starts `pilot <args>` with `input` on a standard input that stays open
+/// 4 seconds longer, and says whether `want` whole messages came within
+/// 3 seconds.
+fn replies_while_open(args: str, input: str, want: i64) -> bool {
+    var h = proc.spawn("sh", ["-c", "{ cat; sleep 4; } | \"$0\" " + args, proc.pilot_cli_path()], input);
+    let until = Clock.now_ns(1) + 3000000000;
+    var whole = false;
+    while !whole && Clock.now_ns(1) < until {
+        let _ = h.drain(100);
+        whole = whole_frames(h.stdout_text) >= want;
+    }
+    let _ = h.wait();
+    return whole;
+}
+
+fn main() {
+    print(replies_while_open("lsp", frame("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}"), 1));
+    print(replies_while_open("debug --dap tests/tool_fixtures/dap/sample.pilot", frame("{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{\"adapterID\":\"pilot\"}}"), 2));
+}
