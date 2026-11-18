@@ -1,0 +1,30 @@
+// `pilot lsp` answers a message it cannot read with a JSON-RPC error and
+// keeps serving; it never hangs on it or stops.
+//
+// Expected, from the JSON-RPC 2.0 specification (error -32700, "Parse
+// error", with a null id when the id cannot be read):
+//   - a message whose body is not JSON (`{bad}`) gets error -32700 with id null;
+//   - a header with no `Content-Length` gets the same error;
+//   - a request the server does not handle gets error -32601 ("Method not
+//     found") with its own id, 7;
+//   - the requests after them are still answered: `shutdown` (id 9), and
+//     `exit` ends the server with exit code 0.
+use std.proc;
+
+fn frame(body: str) -> str => f"Content-Length: {body.len()}\r\n\r\n" + body;
+
+fn main() {
+    var input = "Content-Length: 5\r\n\r\n{bad}";
+    input = input + "X-Other: 1\r\n\r\n";
+    input = input + frame("{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"workspace/unknownThing\",\"params\":{}}");
+    input = input + frame("{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"shutdown\"}");
+    input = input + frame("{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}");
+    let out = proc.run(proc.pilot_cli_path(), ["lsp"], input);
+    let o = out.stdout;
+    let first = o.find("\"id\":null,\"error\":{\"code\":-32700", 0);
+    print(first >= 0);
+    print(first >= 0 && o.find("\"id\":null,\"error\":{\"code\":-32700", first + 1) >= 0);
+    print(o.find("\"id\":7,\"error\":{\"code\":-32601", 0) >= 0);
+    print(o.find("\"id\":9,\"result\":null", 0) >= 0);
+    print(out.exit_code);
+}

@@ -240,14 +240,14 @@ class PilotLspClient implements vscode.Disposable {
         const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
         const repoRoot = path.resolve(this.extensionPath, '..');
 
-        const nativeCandidates = getSearchDirectories(this.extensionPath).map(d => path.join(d, 'pilot-lsp'));
-
         let nativeLsp = '';
         let nativeLspArgs: string[] = [];
 
+        // An explicitly configured server wins; otherwise the server is
+        // `pilot lsp` from the newest `pilot` found (selfhost/lsp/server.pilot).
         if (customPath && customPath !== 'pilot-lsp') {
             const resolved = resolveExistingPath(customPath) || findExecutableOnPath(customPath);
-            if (resolved && !resolved.endsWith('.dll') && !resolved.endsWith('.csproj')) {
+            if (resolved) {
                 nativeLsp = resolved;
                 if (path.basename(resolved, path.extname(resolved)).toLowerCase() === 'pilot') {
                     nativeLspArgs = ['lsp'];
@@ -256,34 +256,11 @@ class PilotLspClient implements vscode.Disposable {
         }
 
         if (!nativeLsp) {
-            const newest = pickNewestExistingFile(nativeCandidates);
-            if (newest) {
-                nativeLsp = newest;
-                if (path.basename(newest, path.extname(newest)).toLowerCase() === 'pilot') {
-                    nativeLspArgs = ['lsp'];
-                }
-            }
-        }
-
-        if (!nativeLsp) {
-            const lspOnPath = findExecutableOnPath('pilot-lsp');
-            if (lspOnPath) {
-                nativeLsp = lspOnPath;
-            }
-        }
-
-        // Fallback to checking `pilot lsp` if standalone `pilot-lsp` binary isn't found
-        if (!nativeLsp) {
             const pilotBin = resolvePilotBinary(this.extensionPath);
-            if (pilotBin && pilotBin !== 'pilot') {
-                nativeLsp = pilotBin;
+            const found = pilotBin !== 'pilot' ? pilotBin : findExecutableOnPath('pilot');
+            if (found) {
+                nativeLsp = found;
                 nativeLspArgs = ['lsp'];
-            } else {
-                const pilotOnPath = findExecutableOnPath('pilot');
-                if (pilotOnPath) {
-                    nativeLsp = pilotOnPath;
-                    nativeLspArgs = ['lsp'];
-                }
             }
         }
 
@@ -293,11 +270,12 @@ class PilotLspClient implements vscode.Disposable {
             this.process = cp.spawn(nativeLsp, nativeLspArgs, {
                 cwd: workingDir,
                 stdio: ['pipe', 'pipe', 'pipe'],
-                env: getExecutionEnv()
+                // `pilot lsp` reads its working folder from PWD.
+                env: getExecutionEnv({ PWD: workingDir })
             });
         } else {
             this.statusBar.text = '$(error) Pilot LSP (Not Found)';
-            vscode.window.showErrorMessage(`Pilot Language Server (pilot-lsp) not found.`);
+            vscode.window.showErrorMessage(`Pilot language server not found: no \`pilot\` to run \`pilot lsp\` with.`);
             return;
         }
 

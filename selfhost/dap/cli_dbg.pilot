@@ -2,7 +2,7 @@
 // FILE: selfhost/dap/cli_dbg.pilot
 // Command-line debugger command parser: break, step, next, finish, continue,
 // print, bt. `pilot debug` has no handler (seam cli.command_handler).
-// Reached only by the milestone59 Rust test; no `pilot` command runs it.
+// No `pilot` command runs it yet; PROP-040 part B rebuilds the debugger.
 // =========================================================================
 pub pkg selfhost.dap;
 

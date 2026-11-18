@@ -29,6 +29,7 @@ pub(crate) const CLI: &[&str] = &[
     "selfhost/cli/comptime_attrs.pilot",
     "selfhost/cli/native_build.pilot",
     "selfhost/cli/bench_cmd.pilot",
+    "selfhost/lsp/server.pilot",
     "selfhost/cli/commands.pilot",
     "selfhost/cli/main.pilot",
 ];

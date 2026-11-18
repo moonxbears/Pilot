@@ -2,7 +2,7 @@
 // FILE: selfhost/db/engine.pilot
 // PilotDb query engine: memoized queries with revisions, durability and early
 // cutoff. No `pilot` command queries PilotDb.
-// Reached only by the milestone05 and milestone59 Rust tests (also through
+// Reached only by the milestone05 Rust test (also through
 // selfhost/lsp/ide_db.pilot).
 // ==============================================================================
 pub lvl(0) pkg selfhost.db;

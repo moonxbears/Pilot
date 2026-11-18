@@ -1,0 +1,29 @@
+// `pilot lsp` checks the text the editor has, not the file on disk. The
+// fixture lsp_files/clean.pilot has no errors on disk; it is opened with
+// line 1 edited to `    let total: i64 = "a";`, which only the editor has.
+//
+// Expected, worked out by hand:
+//   - one diagnostic, TYPE001 on the string literal: line 1, columns 21 to
+//     24 (four spaces, then `let total: i64 = ` is 17 bytes);
+//   - the hidden copy it checked (`lsp_files/.clean.lsp.pilot`) is gone
+//     afterwards, and the file on disk is unchanged;
+//   - the input ends without `shutdown`, so the server exits with 1.
+use std.proc;
+
+fn frame(body: str) -> str => f"Content-Length: {body.len()}\r\n\r\n" + body;
+
+fn main() {
+    let dir = Env.get("PWD") + "/tests/conformance/tools/lsp_files/";
+    let path = dir + "clean.pilot";
+    let on_disk = File.read_text(path);
+    let edited = on_disk.replace("= 4;", "= \"a\";");
+    let quoted = edited.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n");
+    let uri = "file://" + path;
+    var input = frame("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}");
+    input = input + frame("{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"" + uri + "\",\"languageId\":\"pilot\",\"version\":1,\"text\":\"" + quoted + "\"}}}");
+    let out = proc.run(proc.pilot_cli_path(), ["lsp"], input);
+    print(out.exit_code);
+    print(out.stdout.find("\"diagnostics\":[{\"range\":{\"start\":{\"line\":1,\"character\":21},\"end\":{\"line\":1,\"character\":24}},\"severity\":1,\"code\":\"TYPE001\"", 0) >= 0);
+    print(File.exists(dir + ".clean.lsp.pilot"));
+    print(File.read_text(path) == on_disk);
+}

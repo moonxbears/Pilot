@@ -482,12 +482,12 @@ pub fn build_file_ceiling_registry() -> Map<str, i64> {
     reg.set("crates/pilot-analysis/src/lib.rs", 60);
     reg.set("crates/pilot-cli/src/main.rs", 100);
     reg.set("selfhost/ide/vscode_gen.pilot", 1000);
-    reg.set("selfhost/lsp/handlers.pilot", 1000);
     return reg;
 }
 
 /// Retired files and scripts that must stay deleted.
 pub const RETIRED_FILES: List<str> = [
+    "selfhost/lsp/handlers.pilot",
     "crates/pilot-analysis/src/autodiff.rs",
     "crates/pilot-analysis/src/contracts.rs",
     "crates/pilot-analysis/src/dimensions.rs",
@@ -643,13 +643,15 @@ pub pure fn max_total_rust_loc() -> usize => 5900;
 //     ceiling going to 27,054; raised to `27,095` by the owner on
 //     2026-11-18 ("Raise it and push") for PROP-036's +41 (a literal
 //     `const` list read shares one value), which 5F deletes with the seed
-//     bytecode compiler);
+//     bytecode compiler; raised to `27,096` by the owner on 2026-11-18
+//     ("Yes, raise it by 1") for PROP-040 Amendment 040-A's one line,
+//     `selfhost/lsp/server.pilot` in the CLI list of `crates/pilot-cli/src/main.rs`);
 //   - each Rust source file must obey the `<= 1,500` LOC law (MOD001);
 //   - retired crates (`pilot-rt`, `pilot-codegen`, etc.) must stay absent.
 // To resume full per-crate contraction, set `seed_contraction_paused()` to
 // `false` at Stage-3 cutover and run `pilot gate --ratchet-update`.
 pub pure fn seed_contraction_paused() -> bool => true;
-pub pure fn paused_max_total_rust_loc() -> usize => 27095;
+pub pure fn paused_max_total_rust_loc() -> usize => 27096;
 pub pure fn paused_max_rust_file_loc() -> usize => 1500;
 pub pure fn max_pilot_file_loc() -> usize => 1500;
 
@@ -689,9 +691,7 @@ pub fn legacy_engine_ratchet() -> Map<str, i64> {
     m.set("selfhost/ide/vscode_gen.pilot", 29);
     m.set("selfhost/ir/fault.pilot", 1);
     m.set("selfhost/lexer.pilot", 64);
-    m.set("selfhost/lsp/handlers.pilot", 221);
     m.set("selfhost/lsp/ide_db.pilot", 3);
-    m.set("selfhost/lsp/server.pilot", 10);
     m.set("selfhost/perceus/escape.pilot", 79);
     m.set("selfhost/perceus/lattice.pilot", 40);
     m.set("selfhost/perceus/optimizer.pilot", 15);

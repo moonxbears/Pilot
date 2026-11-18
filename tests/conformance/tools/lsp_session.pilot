@@ -1,0 +1,42 @@
+// `pilot lsp` (selfhost/lsp/server.pilot): one session over standard input
+// and output, checked against the fixture lsp_files/one_error.pilot.
+//
+// Expected, worked out by hand from the fixture (lines and columns 0-based):
+//   - `initialize` answers with hover and definition support;
+//   - opening the file publishes one diagnostic, TYPE001 on the string
+//     literal of line 4 (`    let total: i64 = "a";`: columns 21 to 24);
+//   - hover on `twice` at line 5, column 12 (`    print(twice(total));`,
+//     the name spans columns 10 to 15) shows its signature and its doc
+//     comment "Twice its argument.";
+//   - definition of `twice` is line 1, column 0 of the fixture;
+//   - definition of `total` (line 5, column 17) is its `let` at line 4,
+//     column 4;
+//   - `shutdown` then `exit` ends the server with exit code 0.
+use std.proc;
+
+fn frame(body: str) -> str => f"Content-Length: {body.len()}\r\n\r\n" + body;
+
+fn main() {
+    let path = Env.get("PWD") + "/tests/conformance/tools/lsp_files/one_error.pilot";
+    let uri = "file://" + path;
+    let text = File.read_text(path);
+    let quoted = text.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n");
+    var input = frame("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}");
+    input = input + frame("{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"" + uri + "\",\"languageId\":\"pilot\",\"version\":1,\"text\":\"" + quoted + "\"}}}");
+    input = input + frame("{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"" + uri + "\"},\"position\":{\"line\":5,\"character\":12}}}");
+    input = input + frame("{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"" + uri + "\"},\"position\":{\"line\":5,\"character\":12}}}");
+    input = input + frame("{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"" + uri + "\"},\"position\":{\"line\":5,\"character\":17}}}");
+    input = input + frame("{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"shutdown\"}");
+    input = input + frame("{\"jsonrpc\":\"2.0\",\"method\":\"exit\"}");
+    let out = proc.run(proc.pilot_cli_path(), ["lsp"], input);
+    let o = out.stdout;
+    print(out.exit_code);
+    print(o.find("\"id\":1,\"result\":{\"capabilities\":", 0) >= 0 && o.find("\"hoverProvider\":true", 0) >= 0 && o.find("\"definitionProvider\":true", 0) >= 0);
+    print(o.find("\"diagnostics\":[{\"range\":{\"start\":{\"line\":4,\"character\":21},\"end\":{\"line\":4,\"character\":24}},\"severity\":1,\"code\":\"TYPE001\"", 0) >= 0);
+    let hover = o.find("\"id\":2,\"result\":{\"contents\":{\"kind\":\"markdown\",\"value\":", 0);
+    print(hover >= 0 && o.find("Twice its argument.", hover) >= 0);
+    print(o.find("\"range\":{\"start\":{\"line\":5,\"character\":10},\"end\":{\"line\":5,\"character\":15}}", 0) >= 0);
+    print(o.find("\"id\":3,\"result\":{\"uri\":\"" + uri + "\",\"range\":{\"start\":{\"line\":1,\"character\":0}", 0) >= 0);
+    print(o.find("\"id\":4,\"result\":{\"uri\":\"" + uri + "\",\"range\":{\"start\":{\"line\":4,\"character\":4}", 0) >= 0);
+    print(o.find("\"id\":5,\"result\":null", 0) >= 0);
+}

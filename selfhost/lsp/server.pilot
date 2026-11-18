@@ -1,536 +1,646 @@
 // =========================================================================
 // FILE: selfhost/lsp/server.pilot
-// LSP message loop and Content-Length framing. `pilot lsp` has no handler
-// (seam cli.command_handler).
-// Reached only by the milestone59 Rust test; no `pilot` command runs it.
+// `pilot lsp`: the Language Server Protocol over standard input and output.
 // =========================================================================
-pub pkg selfhost.lsp;
+// One process serves an editor session. It reads JSON-RPC messages framed
+// by `Content-Length` headers and answers:
+//   - diagnostics, published for an open file when typing has paused
+//     (`lsp_quiet_ms`) and on open and save;
+//   - hover and go-to-definition, from the last index of the file.
+// Everything it reports comes from the type checker: `lsp_index`
+// (selfhost/lsp/index.pilot) runs the checker's passes over the file in the
+// checker's VM and gives back its diagnostics and, for every name in the
+// file, where it is declared and what to show for it. A file whose text in
+// the editor differs from the file on disk is checked as a hidden copy
+// beside it (`.<name>.lsp.pilot`), so its `use` lines resolve from its own
+// folder; the copy is deleted right after.
+pub lvl(0) pkg selfhost.cli;
 
-use std.text;
+use std.proc;
 
-pure fn lsp_find_substr(haystack: str, needle: str, start_pos: i64) -> i64 {
-    let h_len = haystack.len();
-    let n_len = needle.len();
-    if n_len == 0 || start_pos < 0 || start_pos + n_len > h_len {
-        return -1;
+/// How long typing must pause, in milliseconds, before an edited file is
+/// checked again.
+pub pure fn lsp_quiet_ms() -> i64 => 300;
+
+/// JSON-RPC error code for a message that cannot be read.
+pub pure fn lsp_parse_error() -> i64 => -32700;
+
+// ----------------------------------------------------------------------------
+// JSON in: a message read into its leaves.
+// ----------------------------------------------------------------------------
+
+/// A JSON message read into its leaves: each string, number, boolean or
+/// null by its dotted path (`params.textDocument.uri`, `params.contentChanges.0.text`),
+/// strings decoded, everything else as written. `raw` holds each leaf as
+/// written in the message, so an `id` is answered exactly as it was sent.
+pub struct JsonLeaves {
+    pub values: Map<str, str>;
+    pub raw: Map<str, str>;
+    pub ok: bool;
+}
+
+struct JsonReader {
+    text: str;
+    at: i64;
+    ok: bool;
+}
+
+fn json_skip_space(var ref r: JsonReader) {
+    while r.at < r.text.len() {
+        let b = r.text.byte_at(r.at);
+        if b != 32 && b != 9 && b != 10 && b != 13 { return; }
+        r.at = r.at + 1;
     }
-    // An ASCII needle matches where the native search finds it; only a
-    // needle with other bytes keeps the slice walk below.
-    var ascii = true;
-    var k = 0;
-    while k < n_len && ascii {
-        if needle.byte_at(k) >= 128 { ascii = false; }
-        k = k + 1;
-    }
-    if ascii { return haystack.find(needle, start_pos); }
-    var i = start_pos;
-    while i + n_len <= h_len {
-        if haystack.slice(i, i + n_len) == needle {
-            return i;
-        }
-        i = i + 1;
-    }
+}
+
+fn hex_value(b: i64) -> i64 {
+    if b >= 48 && b <= 57 { return b - 48; }
+    if b >= 97 && b <= 102 { return b - 87; }
+    if b >= 65 && b <= 70 { return b - 55; }
     return -1;
 }
 
-fn lsp_parse_int_at(s: str, start_pos: i64) -> i64 {
-    let n = s.len();
-    var i = start_pos;
-    while i < n {
-        let b = s.byte_at(i);
-        if b == 32 || b == 9 || b == 58 {
-            i = i + 1;
-        } else {
-            break;
-        }
+/// Code point `cp` as text (its UTF-8 bytes).
+fn utf8_of(cp: i64) -> str {
+    var bytes: List<i64> = [];
+    if cp < 128 {
+        bytes.push(cp);
+    } else if cp < 2048 {
+        bytes.push(192 + cp / 64);
+        bytes.push(128 + cp % 64);
+    } else {
+        bytes.push(224 + cp / 4096);
+        bytes.push(128 + (cp / 64) % 64);
+        bytes.push(128 + cp % 64);
     }
-    var val = 0;
-    var found = false;
-    while i < n {
-        let b = s.byte_at(i);
-        if b >= 48 && b <= 57 {
-            val = val * 10 + (b - 48);
-            found = true;
-            i = i + 1;
-        } else {
-            break;
-        }
-    }
-    if !found {
-        return -1;
-    }
-    return val;
-}
-
-fn lsp_extract_json_str_field(json_str: str, key: str) -> str {
-    let pat = "\"" + key + "\":\"";
-    let idx = lsp_find_substr(json_str, pat, 0);
-    if idx < 0 {
-        return "";
-    }
-    let n = json_str.len();
-    var i = idx + pat.len();
-    // No escape before the closing quote (or the end): the value is a plain slice.
-    let close = json_str.find("\"", i);
-    let esc = json_str.find("\\", i);
-    if esc < 0 || (close >= 0 && close < esc) {
-        return json_str.slice(i, if close >= 0 { close } else { n });
-    }
-    var out: List<str> = [];
-    while i < n {
-        let b = json_str.byte_at(i);
-        if b == 92 && i + 1 < n {
-            let nb = json_str.byte_at(i + 1);
-            if nb == 110 {
-                out.push("\n");
-            } else if nb == 114 {
-                out.push("\r");
-            } else if nb == 116 {
-                out.push("\t");
-            } else if nb == 34 {
-                out.push("\"");
-            } else if nb == 92 {
-                out.push("\\");
-            } else {
-                out.push(json_str.slice(i + 1, i + 2));
-            }
-            i = i + 2;
-        } else if b == 34 {
-            return text.join_text(out, "");
-        } else {
-            out.push(json_str.slice(i, i + 1));
-            i = i + 1;
-        }
-    }
-    return text.join_text(out, "");
-}
-
-fn lsp_extract_json_int_field(json_str: str, key: str) -> i64 {
-    let pat = "\"" + key + "\":";
-    let idx = lsp_find_substr(json_str, pat, 0);
-    if idx < 0 {
-        return -1;
-    }
-    return lsp_parse_int_at(json_str, idx + pat.len());
-}
-
-pure fn lsp_escape_json_str(s: str) -> str {
-    let n = s.len();
-    var out: List<str> = [];
+    let buf = RawMem.alloc(bytes.len(), 1);
     var i = 0;
-    while i < n {
-        let b = s.byte_at(i);
+    while i < bytes.len() {
+        let _ = RawMem.store_int(buf + i, bytes[i], 8);
+        i = i + 1;
+    }
+    let out = str_from_ptr(buf, bytes.len());
+    let _ = RawMem.free(buf, bytes.len(), 1);
+    return out;
+}
+
+/// The pieces of `whole` between occurrences of `sep`.
+fn split_on(whole: str, sep: str) -> List<str> {
+    var out: List<str> = [];
+    var from = 0;
+    while true {
+        let at = whole.find(sep, from);
+        if at < 0 { break; }
+        out.push(whole.slice(from, at));
+        from = at + sep.len();
+    }
+    out.push(whole.slice(from, whole.len()));
+    return out;
+}
+
+/// The decimal integer `digits` (an optional `-`, then digits), or none.
+fn int_value(digits: str) -> i64? {
+    var i = 0;
+    var neg = false;
+    if digits.len() > 0 && digits.byte_at(0) == 45 { neg = true; i = 1; }
+    if i >= digits.len() { return none; }
+    var v = 0;
+    while i < digits.len() {
+        let b = digits.byte_at(i);
+        if b < 48 || b > 57 { return none; }
+        v = v * 10 + (b - 48);
+        i = i + 1;
+    }
+    return if neg { 0 - v } else { v };
+}
+
+/// A JSON string starting at the reader (on its opening quote), decoded.
+fn json_string(var ref r: JsonReader) -> str {
+    r.at = r.at + 1;
+    var out = "";
+    var run = r.at;
+    while r.at < r.text.len() {
+        let b = r.text.byte_at(r.at);
         if b == 34 {
-            out.push("\\\"");
-        } else if b == 92 {
-            out.push("\\\\");
-        } else if b == 10 {
-            out.push("\\n");
-        } else if b == 13 {
-            out.push("\\r");
-        } else if b == 9 {
-            out.push("\\t");
-        } else {
-            out.push(s.slice(i, i + 1));
+            out = out + r.text.slice(run, r.at);
+            r.at = r.at + 1;
+            return out;
         }
-        i = i + 1;
-    }
-    return text.join_text(out, "");
-}
-
-fn lsp_position_to_offset(doc: str, line: i64, character: i64) -> i64 {
-    let n = doc.len();
-    if n == 0 { return 0; }
-    if line <= 0 {
-        return if character < 0 { 0 } else { if character < n { character } else { n - 1 } };
-    }
-    var cur_line = 0;
-    var i = 0;
-    while i < n {
-        let b = doc.byte_at(i);
-        if b == 10 {
-            cur_line = cur_line + 1;
-            if cur_line == line {
-                let off = i + 1 + character;
-                return if off < n { off } else { n - 1 };
+        if b == 92 {
+            out = out + r.text.slice(run, r.at);
+            if r.at + 1 >= r.text.len() { r.ok = false; return out; }
+            let e = r.text.byte_at(r.at + 1);
+            r.at = r.at + 2;
+            if e == 110 { out = out + "\n"; }
+            else if e == 116 { out = out + "\t"; }
+            else if e == 114 { out = out + "\r"; }
+            else if e == 98 { out = out + utf8_of(8); }
+            else if e == 102 { out = out + utf8_of(12); }
+            else if e == 117 {
+                var cp = 0;
+                var k = 0;
+                while k < 4 {
+                    let h = if r.at < r.text.len() { hex_value(r.text.byte_at(r.at)) } else { -1 };
+                    if h < 0 { r.ok = false; return out; }
+                    cp = cp * 16 + h;
+                    r.at = r.at + 1;
+                    k = k + 1;
+                }
+                out = out + utf8_of(cp);
+            } else {
+                out = out + r.text.slice(r.at - 1, r.at);
             }
+            run = r.at;
+            continue;
+        }
+        r.at = r.at + 1;
+    }
+    r.ok = false;
+    return out;
+}
+
+fn json_value(var ref r: JsonReader, path: str, var ref out: JsonLeaves) {
+    json_skip_space(r);
+    if r.at >= r.text.len() { r.ok = false; return; }
+    let b = r.text.byte_at(r.at);
+    if b == 123 {
+        r.at = r.at + 1;
+        json_skip_space(r);
+        if r.at < r.text.len() && r.text.byte_at(r.at) == 125 { r.at = r.at + 1; return; }
+        while r.ok {
+            json_skip_space(r);
+            if r.at >= r.text.len() || r.text.byte_at(r.at) != 34 { r.ok = false; return; }
+            let key = json_string(r);
+            json_skip_space(r);
+            if r.at >= r.text.len() || r.text.byte_at(r.at) != 58 { r.ok = false; return; }
+            r.at = r.at + 1;
+            json_value(r, if path == "" { key } else { path + "." + key }, out);
+            json_skip_space(r);
+            if r.at < r.text.len() && r.text.byte_at(r.at) == 44 { r.at = r.at + 1; continue; }
+            if r.at < r.text.len() && r.text.byte_at(r.at) == 125 { r.at = r.at + 1; return; }
+            r.ok = false;
+        }
+        return;
+    }
+    if b == 91 {
+        r.at = r.at + 1;
+        json_skip_space(r);
+        if r.at < r.text.len() && r.text.byte_at(r.at) == 93 { r.at = r.at + 1; return; }
+        var i = 0;
+        while r.ok {
+            json_value(r, path + f".{i}", out);
+            i = i + 1;
+            json_skip_space(r);
+            if r.at < r.text.len() && r.text.byte_at(r.at) == 44 { r.at = r.at + 1; continue; }
+            if r.at < r.text.len() && r.text.byte_at(r.at) == 93 { r.at = r.at + 1; return; }
+            r.ok = false;
+        }
+        return;
+    }
+    let start = r.at;
+    if b == 34 {
+        let v = json_string(r);
+        out.values.set(path, v);
+        out.raw.set(path, r.text.slice(start, r.at));
+        return;
+    }
+    while r.at < r.text.len() {
+        let c = r.text.byte_at(r.at);
+        if c == 44 || c == 125 || c == 93 || c == 32 || c == 9 || c == 10 || c == 13 { break; }
+        r.at = r.at + 1;
+    }
+    if r.at == start { r.ok = false; return; }
+    let word = r.text.slice(start, r.at);
+    out.values.set(path, word);
+    out.raw.set(path, word);
+}
+
+/// The leaves of JSON message `text`; `ok` is false when it is not JSON.
+pub fn json_leaves(text: str) -> JsonLeaves {
+    var out = JsonLeaves { values: Map<str, str>(), raw: Map<str, str>(), ok: true };
+    var r = JsonReader { text: text, at: 0, ok: true };
+    json_value(r, "", out);
+    json_skip_space(r);
+    out.ok = r.ok && r.at == text.len();
+    return out;
+}
+
+fn leaf(ref m: JsonLeaves, path: str) -> str => m.values.get(path) ?? "";
+
+fn leaf_int(ref m: JsonLeaves, path: str) -> i64 => int_value(leaf(m, path)) ?? 0;
+
+// ----------------------------------------------------------------------------
+// JSON out.
+// ----------------------------------------------------------------------------
+
+/// `text` as a JSON string, quotes included.
+pub fn json_quote(text: str) -> str {
+    var out = "\"";
+    var run = 0;
+    var i = 0;
+    while i < text.len() {
+        let b = text.byte_at(i);
+        var esc = "";
+        if b == 34 { esc = "\\\""; }
+        else if b == 92 { esc = "\\\\"; }
+        else if b == 10 { esc = "\\n"; }
+        else if b == 13 { esc = "\\r"; }
+        else if b == 9 { esc = "\\t"; }
+        else if b < 32 { esc = "\\u00" + (if b < 16 { "0" } else { "1" }) + "0123456789abcdef".slice(b % 16, b % 16 + 1); }
+        if esc != "" {
+            out = out + text.slice(run, i) + esc;
+            run = i + 1;
         }
         i = i + 1;
     }
-    return if character < n { character } else { n - 1 };
+    return out + text.slice(run, text.len()) + "\"";
 }
 
-pure fn lsp_extract_hover_signature(doc: str, offset: i64) -> str {
-    let n = doc.len();
-    if n == 0 {
+fn json_range(line: i64, col: i64, end_line: i64, end_col: i64) -> str =>
+    f"{{\"start\":{{\"line\":{line},\"character\":{col}}},\"end\":{{\"line\":{end_line},\"character\":{end_col}}}}}";
+
+// ----------------------------------------------------------------------------
+// Framing over standard input and output.
+// ----------------------------------------------------------------------------
+
+/// The server's input not yet read as messages, and whether input has ended.
+pub struct LspInput {
+    pub pending: str;
+    pub ended: bool;
+}
+
+/// Waits up to `timeout_ms` (-1: no limit) for input and appends what came:
+/// 1 when something came, 0 when the time ran out, -1 when input ended.
+fn lsp_fill(var ref input: LspInput, timeout_ms: i64) -> i64 {
+    let fds = RawMem.alloc(16, 8);
+    let _ = RawMem.store_int(fds, 0, 64);
+    let _ = RawMem.store_int(fds + 8, 1, 32);
+    let _ = RawMem.store_int(fds + 12, 0, 32);
+    let ready = Fd.poll(fds, 1, timeout_ms);
+    let _ = RawMem.free(fds, 16, 8);
+    if ready == 0 { return 0; }
+    let cap = 65536;
+    let buf = RawMem.alloc(cap, 1);
+    let r = Fd.read(0, buf, cap);
+    let got = if r > 0 { str_from_ptr(buf, r) } else { "" };
+    let _ = RawMem.free(buf, cap, 1);
+    if r <= 0 {
+        input.ended = true;
+        return -1;
+    }
+    input.pending = input.pending + got;
+    return 1;
+}
+
+/// The next whole message body in `input`, or none when it has not all come.
+/// A header without a usable `Content-Length` gives "" (the message is
+/// skipped and answered with a parse error).
+fn lsp_take_frame(var ref input: LspInput) -> str? {
+    let text = input.pending;
+    let head_end = text.find("\r\n\r\n");
+    if head_end < 0 { return none; }
+    let head = text.slice(0, head_end);
+    var length = -1;
+    for line in split_on(head, "\r\n") {
+        if line.starts_with("Content-Length:") || line.starts_with("content-length:") {
+            length = int_value(line.slice(15, line.len()).trim()) ?? -1;
+        }
+    }
+    let body_start = head_end + 4;
+    if length < 0 {
+        input.pending = text.slice(body_start, text.len());
         return "";
     }
-    let cl_off = if offset < 0 { 0 } else { if offset >= n { n - 1 } else { offset } };
-    var line_start = cl_off;
-    while line_start > 0 {
-        let b = doc.byte_at(line_start - 1);
-        if b == 10 || b == 123 || b == 125 || b == 59 {
-            break;
-        }
-        line_start = line_start - 1;
-    }
-    while line_start < n {
-        let b = doc.byte_at(line_start);
-        if b == 32 || b == 9 || b == 13 || b == 10 {
-            line_start = line_start + 1;
-        } else {
-            break;
-        }
-    }
-    var sig_end = line_start;
-    while sig_end < n {
-        let b = doc.byte_at(sig_end);
-        if b == 123 || b == 59 || b == 10 {
-            break;
-        }
-        sig_end = sig_end + 1;
-    }
-    while sig_end > line_start {
-        let b = doc.byte_at(sig_end - 1);
-        if b == 32 || b == 9 || b == 13 {
-            sig_end = sig_end - 1;
-        } else {
-            break;
-        }
-    }
-    return doc.slice(line_start, sig_end);
+    if text.len() - body_start < length { return none; }
+    input.pending = text.slice(body_start + length, text.len());
+    return text.slice(body_start, body_start + length);
 }
 
-pub pure fn lsp_format_hover_params(sig: str) -> str {
-    let slen = sig.len();
-    var p_open = -1;
+/// Writes `body` as one framed message on standard output.
+fn lsp_send(body: str) {
+    let framed = f"Content-Length: {body.len()}\r\n\r\n" + body;
+    let n = framed.len();
+    let buf = RawMem.alloc(n, 1);
+    let _ = str_copy_to_ptr(framed, buf, n);
+    var off = 0;
+    while off < n {
+        let w = Fd.write(1, buf + off, n - off);
+        if w <= 0 { break; }
+        off = off + w;
+    }
+    let _ = RawMem.free(buf, n, 1);
+}
+
+fn lsp_reply(id_raw: str, result: str) {
+    lsp_send("{\"jsonrpc\":\"2.0\",\"id\":" + id_raw + ",\"result\":" + result + "}");
+}
+
+fn lsp_reply_error(id_raw: str, code: i64, message: str) {
+    lsp_send("{\"jsonrpc\":\"2.0\",\"id\":" + id_raw + f",\"error\":{{\"code\":{code},\"message\":" + json_quote(message) + "}}");
+}
+
+// ----------------------------------------------------------------------------
+// The index of a file, read back from `lsp_index`'s records.
+// ----------------------------------------------------------------------------
+
+/// A name written in the file: where it is, where it is declared, and what
+/// to show for it.
+pub struct LspName : IValue {
+    pub line: i64;
+    pub col: i64;
+    pub end_col: i64;
+    pub def_file: str;
+    pub def_line: i64;
+    pub def_col: i64;
+    pub hover: str;
+}
+
+/// What the server knows about one open file.
+pub struct LspFile {
+    pub text: str;
+    /// The text changed since the last check.
+    pub dirty: bool;
+    pub diagnostics: str;
+    pub names: List<LspName>;
+}
+
+/// `lsp_field` undone.
+fn unfield(text: str) -> str {
+    if text.find("\\") < 0 { return text; }
+    var out = "";
     var i = 0;
-    while i < slen && p_open == -1 {
-        if sig.slice(i, i + 1) == "(" {
-            p_open = i;
+    while i < text.len() {
+        let b = text.byte_at(i);
+        if b == 92 && i + 1 < text.len() {
+            let e = text.byte_at(i + 1);
+            out = out + if e == 110 { "\n" } else if e == 116 { "\t" } else { text.slice(i + 1, i + 2) };
+            i = i + 2;
+            continue;
         }
+        out = out + text.slice(i, i + 1);
         i = i + 1;
-    }
-    if p_open == -1 { return ""; }
-
-    var p_close = -1;
-    var depth = 1;
-    var j = p_open + 1;
-    while j < slen && p_close == -1 {
-        let ch = sig.slice(j, j + 1);
-        if ch == "(" {
-            depth = depth + 1;
-        } else if ch == ")" {
-            depth = depth - 1;
-            if depth == 0 {
-                p_close = j;
-            }
-        }
-        j = j + 1;
-    }
-    if p_close <= p_open + 1 { return ""; }
-
-    let inner = sig.slice(p_open + 1, p_close).trim();
-    if inner == "" { return ""; }
-
-    var out = "\\n\\n**Parameters:**";
-    var start_idx = 0;
-    let in_len = inner.len();
-    var k = 0;
-    var comma_depth = 0;
-    while k <= in_len {
-        let is_sep = if k == in_len { true } else {
-            let c = inner.slice(k, k + 1);
-            if c == "<" || c == "(" || c == "[" { comma_depth = comma_depth + 1; }
-            else if c == ">" || c == ")" || c == "]" { if comma_depth > 0 { comma_depth = comma_depth - 1; } }
-            comma_depth == 0 && c == ","
-        };
-        if is_sep {
-            let param_raw = inner.slice(start_idx, k).trim();
-            if param_raw != "" {
-                var colon_pos = -1;
-                var ci = 0;
-                let plen = param_raw.len();
-                while ci < plen && colon_pos == -1 {
-                    if param_raw.slice(ci, ci + 1) == ":" {
-                        colon_pos = ci;
-                    }
-                    ci = ci + 1;
-                }
-                if colon_pos >= 0 {
-                    let pname = param_raw.slice(0, colon_pos).trim();
-                    let ptype = param_raw.slice(colon_pos + 1, plen).trim();
-                    out = out + "\\n- `" + pname + "`: [`" + ptype + "`](#" + ptype + ")";
-                } else {
-                    out = out + "\\n- `" + param_raw + "`";
-                }
-            }
-            start_idx = k + 1;
-        }
-        k = k + 1;
     }
     return out;
 }
 
-pub pure fn lsp_format_hover_returns(sig: str) -> str {
-    let slen = sig.len();
-    var arrow_pos = -1;
+fn int_of(digits: str) -> i64 => int_value(digits) ?? 0;
+
+/// The file at `path` is `shown_as` to the editor (the hidden copy is the file).
+fn editor_path(path: str, checked: str, shown_as: str) -> str => if path == checked { shown_as } else { path };
+
+/// The diagnostics a seed check found (`host_check`: the program does not
+/// parse or link), as a JSON list.
+fn seed_diagnostics(ref diags: List<HostDiag>, text: str) -> str {
+    var out = "";
+    for d in diags {
+        let a = offset_place(text, d.start as i64);
+        let b = offset_place(text, d.end as i64);
+        let item = "{\"range\":" + json_range(a.0, a.1, b.0, b.1) + f",\"severity\":{d.severity},\"code\":" + json_quote(d.code) + ",\"source\":\"pilot\",\"message\":" + json_quote(d.message) + "}";
+        out = if out == "" { item } else { out + "," + item };
+    }
+    return "[" + out + "]";
+}
+
+/// The 0-based line and byte column of `offset` in `text`.
+fn offset_place(text: str, offset: i64) -> (i64, i64) {
+    var line = 0;
+    var start = 0;
     var i = 0;
-    while i + 2 <= slen && arrow_pos == -1 {
-        if sig.slice(i, i + 2) == "->" {
-            arrow_pos = i;
+    while i < offset && i < text.len() {
+        if text.byte_at(i) == 10 {
+            line = line + 1;
+            start = i + 1;
         }
         i = i + 1;
     }
-    if arrow_pos == -1 { return ""; }
-
-    var ret_part = sig.slice(arrow_pos + 2, slen).trim();
-    if ret_part == "" { return ""; }
-
-    return "\\n\\n**Returns:**\\n- [`" + ret_part + "`](#" + ret_part + ")";
+    return (line, offset - start);
 }
 
-pub pure fn lsp_is_ident_byte(b: i64) -> bool {
-    return (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || (b >= 48 && b <= 57) || b == 95;
+/// The path of a `file://` URI.
+fn uri_path(uri: str) -> str {
+    var p = if uri.starts_with("file://") { uri.slice(7, uri.len()) } else { uri };
+    return p.replace("%20", " ").replace("%3A", ":").replace("%40", "@");
 }
 
-pub pure fn lsp_ident_at_offset(doc: str, offset: i64) -> str {
-    let n = doc.len();
-    if n == 0 || offset < 0 || offset >= n { return ""; }
-    var s = offset;
-    while s > 0 && lsp_is_ident_byte(doc.byte_at(s - 1)) { s = s - 1; }
-    var e = offset;
-    while e < n && lsp_is_ident_byte(doc.byte_at(e)) { e = e + 1; }
-    if e <= s { return ""; }
-    return doc.slice(s, e);
+fn path_uri(path: str) -> str => "file://" + path.replace(" ", "%20");
+
+/// The folders a relative path `lsp_index` gives is relative to: the
+/// server's working folder (the editor's workspace, `PWD`) and the
+/// toolchain's folder (the one holding `stdlib/`, above the `pilot` running).
+pub struct LspRoots : IValue {
+    pub cwd: str;
+    pub toolchain: str;
 }
 
-pub pure fn lsp_format_hover_overloads(doc: str, ident: str, cur_sig: str) -> str {
-    if ident == "" { return ""; }
-    let pat = nameof(fn) + " " + ident + "(";
-    let plen = pat.len();
-    let dlen = doc.len();
-    var pos = 0;
-    var count = 0;
-    var list_md = "";
-    while pos + plen <= dlen {
-        let hit = lsp_find_substr(doc, pat, pos);
-        if hit < 0 { break; }
-        let ov_sig = lsp_extract_hover_signature(doc, hit);
-        if ov_sig != "" && ov_sig != cur_sig {
-            count = count + 1;
-            list_md = list_md + "\\n" + count + ". `" + lsp_escape_json_str(ov_sig) + "` *(offset " + hit + ")*";
-        }
-        pos = hit + plen;
+fn parent_dir(path: str) -> str {
+    var slash = -1;
+    var at = path.find("/");
+    while at >= 0 {
+        slash = at;
+        at = path.find("/", at + 1);
     }
-    if count == 0 { return ""; }
-    return "\\n\\n**Overloads (" + count + "):**" + list_md;
+    return if slash > 0 { path.slice(0, slash) } else { "" };
 }
 
-pub pure fn lsp_format_hover_type_refs(doc: str, ident: str, cur_sig: str) -> str {
-    if ident == "" { return ""; }
-    let pat = ": " + ident;
-    let plen = pat.len();
-    let dlen = doc.len();
-    var pos = 0;
-    var count = 0;
-    var list_md = "";
-    while pos + plen <= dlen && count < 8 {
-        let hit = lsp_find_substr(doc, pat, pos);
-        if hit < 0 { break; }
-        let after_idx = hit + plen;
-        let boundary_ok = if after_idx >= dlen { true } else { !lsp_is_ident_byte(doc.byte_at(after_idx)) };
-        if boundary_ok {
-            let ref_sig = lsp_extract_hover_signature(doc, hit);
-            if ref_sig != "" && ref_sig != cur_sig {
-                count = count + 1;
-                list_md = list_md + "\\n- [`" + lsp_escape_json_str(ref_sig) + "`](#offset-" + hit + ")";
-            }
+fn lsp_roots() -> LspRoots {
+    var toolchain = "";
+    if some exe = proc.current_exe() {
+        var dir = parent_dir(exe);
+        while dir != "" && toolchain == "" {
+            if File.exists(dir + "/stdlib") { toolchain = dir; }
+            dir = parent_dir(dir);
         }
-        pos = hit + plen;
     }
-    if count == 0 { return ""; }
-    return "\\n\\n**Type References (" + count + "):**" + list_md;
+    return LspRoots { cwd: Env.get("PWD"), toolchain: toolchain };
 }
 
-pub fn encode_lsp_frame(json_payload: str) -> str {
-    let byte_len = json_payload.len();
-    return "Content-Length: " + byte_len + "\r\n\r\n" + json_payload;
+/// An absolute form of a path `lsp_index` gives.
+fn absolute(path: str, ref roots: LspRoots) -> str {
+    if path.starts_with("/") { return path; }
+    if roots.cwd != "" && File.exists(roots.cwd + "/" + path) { return roots.cwd + "/" + path; }
+    if roots.toolchain != "" { return roots.toolchain + "/" + path; }
+    return path;
 }
 
-pub fn lsp_session_new() -> i64 {
-    let sess = __engine("map_new");
-    let _init = __engine("map_set", sess, "last_doc", "");
-    return sess;
+/// The folder and the hidden copy a changed text of `path` is checked as.
+fn hidden_copy(path: str) -> str {
+    let dir = parent_dir(path) + "/";
+    let base = path.slice(dir.len(), path.len());
+    let stem = if base.ends_with(".pilot") { base.slice(0, base.len() - 6) } else { base };
+    return dir + "." + stem + ".lsp.pilot";
 }
 
-pub fn lsp_session_feed_stream(sess: i64, framed_stream: str) -> str {
-    let total_len = framed_stream.len();
-    var pos = 0;
-    var out_frames: List<str> = [];
-    while pos < total_len {
-        let cl_idx = lsp_find_substr(framed_stream, "Content-Length:", pos);
-        if cl_idx < 0 {
-            break;
+/// Checks `file` (open at `uri`) and indexes it.
+fn lsp_check(var ref file: LspFile, uri: str, ref roots: LspRoots) {
+    let path = uri_path(uri);
+    let on_disk = if File.exists(path) { File.read_text(path) } else { "" };
+    var checked = path;
+    var copied = false;
+    if file.text != on_disk || !File.exists(path) {
+        checked = hidden_copy(path);
+        copied = File.write_text(checked, file.text);
+        if !copied { checked = path; }
+    }
+    file.dirty = false;
+    var seed: List<HostDiag> = [];
+    for d in host_check(checked) {
+        if d.file == checked { seed.push(d); }
+    }
+    if seed.len > 0 {
+        file.diagnostics = seed_diagnostics(seed, file.text);
+        if copied { let _ = File.delete(checked); }
+        return;
+    }
+    let records = lsp_records(checked) ?? "";
+    if copied { let _ = File.delete(checked); }
+    var diags = "";
+    var names: List<LspName> = [];
+    let here = absolute(checked, roots);
+    for rec in split_on(records, "\n") {
+        let f = split_on(rec, "\t");
+        if f.len() < 9 || absolute(unfield(f[1]), roots) != here { continue; }
+        if f[0] == "D" {
+            let item = "{\"range\":" + json_range(int_of(f[2]), int_of(f[3]), int_of(f[4]), int_of(f[5])) + ",\"severity\":" + f[6] + ",\"code\":" + json_quote(unfield(f[7])) + ",\"source\":\"pilot\",\"message\":" + json_quote(unfield(f[8])) + "}";
+            diags = if diags == "" { item } else { diags + "," + item };
+        } else if f[0] == "S" {
+            let def = absolute(unfield(f[5]), roots);
+            names.push(LspName {
+                line: int_of(f[2]), col: int_of(f[3]), end_col: int_of(f[4]),
+                def_file: editor_path(def, here, absolute(path, roots)),
+                def_line: int_of(f[6]), def_col: int_of(f[7]), hover: unfield(f[8]),
+            });
         }
-        let hdr_end = lsp_find_substr(framed_stream, "\r\n\r\n", cl_idx);
-        if hdr_end < 0 {
-            break;
-        }
-        let body_len = lsp_parse_int_at(framed_stream, cl_idx + 15);
-        let body_start = hdr_end + 4;
-        if body_len < 0 || body_start + body_len > total_len {
-            break;
-        }
-        let msg = framed_stream.slice(body_start, body_start + body_len);
-        pos = body_start + body_len;
+    }
+    file.diagnostics = "[" + diags + "]";
+    file.names = names;
+}
 
-        let method = lsp_extract_json_str_field(msg, "method");
-        let req_id = lsp_extract_json_int_field(msg, "id");
-        let uri = lsp_extract_json_str_field(msg, "uri");
+/// The file `lsp_index` lives in, linked after the type checker's files.
+pub fn lsp_index_file() -> str => "selfhost/lsp/index.pilot";
 
-        if method == "initialize" {
-            let init_json = "{\"jsonrpc\":\"2.0\",\"id\":" + req_id + ",\"result\":{\"capabilities\":{\"textDocumentSync\":1,\"hoverProvider\":true,\"completionProvider\":{\"triggerCharacters\":[\".\"]},\"definitionProvider\":true,\"referencesProvider\":true,\"renameProvider\":{\"prepareProvider\":true}}}}";
-            out_frames.push(encode_lsp_frame(init_json));
-        } else if method == "textDocument/didOpen" || method == "textDocument/didChange" {
-            var new_text = lsp_extract_json_str_field(msg, "text");
-            if uri != "" {
-                let _s1 = __engine("map_set", sess, "doc:" + uri, new_text);
+fn publish(uri: str, ref file: LspFile) {
+    lsp_send("{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":{\"uri\":" + json_quote(uri) + ",\"diagnostics\":" + file.diagnostics + "}}");
+}
+
+/// The name of `file` at `line`/`col`, if one is indexed there.
+fn name_at(ref file: LspFile, line: i64, col: i64) -> LspName? {
+    for n in file.names {
+        if n.line == line && n.col <= col && col <= n.end_col { return n; }
+    }
+    return none;
+}
+
+fn capabilities() -> str =>
+    "{\"capabilities\":{\"textDocumentSync\":{\"openClose\":true,\"change\":1,\"save\":{\"includeText\":false}},\"hoverProvider\":true,\"definitionProvider\":true},\"serverInfo\":{\"name\":\"pilot lsp\"}}";
+
+// ----------------------------------------------------------------------------
+// The session.
+// ----------------------------------------------------------------------------
+
+/// Serves one editor session until `exit` or the end of input; the exit code.
+pub fn lsp_serve() -> i64 {
+    var input = LspInput { pending: "", ended: false };
+    var files = Map<str, LspFile>();
+    var order: List<str> = [];
+    var shut = false;
+    let roots = lsp_roots();
+    while true {
+        if some body = lsp_take_frame(input) {
+            let m = json_leaves(body);
+            let id_raw = m.raw.get("id") ?? "null";
+            if !m.ok {
+                lsp_reply_error(id_raw, lsp_parse_error(), "the message is not JSON");
+                continue;
             }
-            let _s2 = __engine("map_set", sess, "last_doc", new_text);
-        } else if method == "textDocument/hover" {
-            var offset = lsp_extract_json_int_field(msg, "offset");
-            var doc = "";
-            if uri != "" {
-                doc = __engine("map_get", sess, "doc:" + uri);
-            }
-            if doc == "" {
-                doc = __engine("map_get", sess, "last_doc");
-            }
-            if offset < 0 {
-                let l = lsp_extract_json_int_field(msg, "line");
-                let c = lsp_extract_json_int_field(msg, "character");
-                if l >= 0 {
-                    offset = lsp_position_to_offset(doc, l, c);
-                } else {
-                    offset = 0;
+            let method = leaf(m, "method");
+            let uri = leaf(m, "params.textDocument.uri");
+            if method == "initialize" {
+                lsp_reply(id_raw, capabilities());
+            } else if method == "shutdown" {
+                shut = true;
+                lsp_reply(id_raw, "null");
+            } else if method == "exit" {
+                return if shut { 0 } else { 1 };
+            } else if method == "textDocument/didOpen" {
+                if !files.has(uri) { order.push(uri); }
+                var f = LspFile { text: leaf(m, "params.textDocument.text"), dirty: false, diagnostics: "[]", names: [] };
+                lsp_check(f, uri, roots);
+                publish(uri, f);
+                files.set(uri, f);
+            } else if method == "textDocument/didChange" {
+                if some f = files.get(uri) {
+                    var g = f;
+                    g.text = leaf(m, "params.contentChanges.0.text");
+                    g.dirty = true;
+                    files.set(uri, g);
                 }
-            }
-            let sig = lsp_extract_hover_signature(doc, offset);
-            let ident = lsp_ident_at_offset(doc, offset);
-            let esc_sig = lsp_escape_json_str(sig);
-            let p_md = lsp_format_hover_params(sig);
-            let r_md = lsp_format_hover_returns(sig);
-            let ov_md = lsp_format_hover_overloads(doc, ident, sig);
-            let tr_md = lsp_format_hover_type_refs(doc, ident, sig);
-            let hover_json = "{\"jsonrpc\":\"2.0\",\"id\":" + req_id + ",\"result\":{\"contents\":{\"kind\":\"markdown\",\"value\":\"```pilot\\n" + esc_sig + "\\n```" + p_md + r_md + ov_md + tr_md + "\"}}}";
-            out_frames.push(encode_lsp_frame(hover_json));
-        } else if method == "textDocument/completion" {
-            var doc = "";
-            if uri != "" { doc = __engine("map_get", sess, "doc:" + uri); }
-            if doc == "" { doc = __engine("map_get", sess, "last_doc"); }
-
-            var comp_json = "{\"jsonrpc\":\"2.0\",\"id\":" + req_id + ",\"result\":[" +
-                "{\"label\":\"" + nameof(fn) + "\",\"kind\":14}," +
-                "{\"label\":\"" + nameof(struct) + "\",\"kind\":14}," +
-                "{\"label\":\"" + nameof(interface) + "\",\"kind\":14}," +
-                "{\"label\":\"" + nameof(let) + "\",\"kind\":14}," +
-                "{\"label\":\"" + nameof(ref) + "\",\"kind\":14}," +
-                "{\"label\":\"" + nameof(if) + "\",\"kind\":14}," +
-                "{\"label\":\"" + nameof(loop) + "\",\"kind\":14}," +
-                "{\"label\":\"" + nameof(return) + "\",\"kind\":14}," +
-                "{\"label\":\"" + nameof(yield) + "\",\"kind\":14}," +
-                "{\"label\":\"" + nameof(defer) + "\",\"kind\":14}," +
-                "{\"label\":\"" + nameof(comptime) + "\",\"kind\":14}," +
-                "{\"label\":\"" + nameof(quote) + "\",\"kind\":14}," +
-                "{\"label\":\"" + nameof(asm) + "\",\"kind\":14}," +
-                "{\"label\":\"Pilot.Core.Reflect\",\"kind\":9}," +
-                "{\"label\":\"Pilot.Collections\",\"kind\":9}," +
-                "{\"label\":\"Pilot.Crypto\",\"kind\":9}";
-
-            let has_core = lsp_find_substr(doc, "Pilot.Core", 0) >= 0;
-            if has_core {
-                comp_json = comp_json +
-                    ",{\"label\":\"" + nameof(IAnyValue) + "\",\"kind\":8,\"detail\":\"(in Pilot.Core) interface\",\"labelDetails\":{\"description\":\"Pilot.Core\"}}" +
-                    ",{\"label\":\"" + nameof(IValue) + "\",\"kind\":8,\"detail\":\"(in Pilot.Core) interface\",\"labelDetails\":{\"description\":\"Pilot.Core\"}}" +
-                    ",{\"label\":\"" + nameof(IReference) + "\",\"kind\":8,\"detail\":\"(in Pilot.Core) interface\",\"labelDetails\":{\"description\":\"Pilot.Core\"}}" +
-                    ",{\"label\":\"" + nameof(IObject) + "\",\"kind\":8,\"detail\":\"(in Pilot.Core) interface\",\"labelDetails\":{\"description\":\"Pilot.Core\"}}" +
-                    ",{\"label\":\"" + nameof(IGuard) + "\",\"kind\":8,\"detail\":\"(in Pilot.Core) interface\",\"labelDetails\":{\"description\":\"Pilot.Core\"}}" +
-                    ",{\"label\":\"" + nameof(IEnumerable) + "\",\"kind\":8,\"detail\":\"(in Pilot.Core) interface\",\"labelDetails\":{\"description\":\"Pilot.Core\"}}" +
-                    ",{\"label\":\"" + nameof(IComparable) + "\",\"kind\":8,\"detail\":\"(in Pilot.Core) interface\",\"labelDetails\":{\"description\":\"Pilot.Core\"}}" +
-                    ",{\"label\":\"" + nameof(IEquatable) + "\",\"kind\":8,\"detail\":\"(in Pilot.Core) interface\",\"labelDetails\":{\"description\":\"Pilot.Core\"}}" +
-                    ",{\"label\":\"IDisposable\",\"kind\":8,\"detail\":\"(in Pilot.Core) interface\",\"labelDetails\":{\"description\":\"Pilot.Core\"}}";
-            }
-            if has_core && lsp_find_substr(doc, "Pilot.Core.Reflect", 0) >= 0 {
-                comp_json = comp_json +
-                    ",{\"label\":\"" + nameof(reflect_category_scope) + "\",\"kind\":3,\"detail\":\"" + nameof(pub) + " " + nameof(fn) + " " + nameof(reflect_category_scope) + "(cat_id: " + nameof(i64) + ") -> " + nameof(str) + "\"}" +
-                    ",{\"label\":\"" + nameof(reflect_category_badge) + "\",\"kind\":3,\"detail\":\"" + nameof(pub) + " " + nameof(fn) + " " + nameof(reflect_category_badge) + "(cat_id: " + nameof(i64) + ") -> " + nameof(str) + "\"}" +
-                    ",{\"label\":\"" + nameof(reflect_keyword_doc) + "\",\"kind\":3,\"detail\":\"" + nameof(pub) + " " + nameof(fn) + " " + nameof(reflect_keyword_doc) + "(cat_id: " + nameof(i64) + ", word: " + nameof(str) + ") -> " + nameof(str) + "\"}" +
-                    ",{\"label\":\"" + nameof(reflect_category_words) + "\",\"kind\":3,\"detail\":\"" + nameof(pub) + " " + nameof(fn) + " " + nameof(reflect_category_words) + "(cat_id: " + nameof(i64) + ") -> " + nameof(str) + "\"}" +
-                    ",{\"label\":\"" + nameof(reflect_type_layout) + "\",\"kind\":3,\"detail\":\"" + nameof(pub) + " " + nameof(fn) + " " + nameof(reflect_type_layout) + "(name: " + nameof(str) + ") -> " + nameof(ReflectTypeInfo) + "\"}";
-            }
-            if lsp_find_substr(doc, "Pilot.Collections", 0) >= 0 {
-                comp_json = comp_json +
-                    ",{\"label\":\"" + nameof(IList) + "\",\"kind\":8,\"detail\":\"(in Pilot.Collections) interface\",\"labelDetails\":{\"description\":\"Pilot.Collections\"}}" +
-                    ",{\"label\":\"IMap\",\"kind\":8,\"detail\":\"(in Pilot.Collections) interface\",\"labelDetails\":{\"description\":\"Pilot.Collections\"}}" +
-                    ",{\"label\":\"ISet\",\"kind\":8,\"detail\":\"(in Pilot.Collections) interface\",\"labelDetails\":{\"description\":\"Pilot.Collections\"}}" +
-                    ",{\"label\":\"" + nameof(List) + "\",\"kind\":7,\"detail\":\"" + nameof(struct) + " " + nameof(List) + "<T>\"}" +
-                    ",{\"label\":\"" + nameof(Map) + "\",\"kind\":7,\"detail\":\"" + nameof(struct) + " " + nameof(Map) + "<K, V>\"}" +
-                    ",{\"label\":\"Set\",\"kind\":7,\"detail\":\"struct Set<T>\"}" +
-                    ",{\"label\":\"Stack\",\"kind\":7,\"detail\":\"struct Stack<T>\"}" +
-                    ",{\"label\":\"Queue\",\"kind\":7,\"detail\":\"struct Queue<T>\"}" +
-                    ",{\"label\":\"Deque\",\"kind\":7,\"detail\":\"struct Deque<T>\"}" +
-                    ",{\"label\":\"LinkedList\",\"kind\":7,\"detail\":\"struct LinkedList<T>\"}" +
-                    ",{\"label\":\"BinaryTree\",\"kind\":7,\"detail\":\"struct BinaryTree<T>\"}" +
-                    ",{\"label\":\"Graph\",\"kind\":7,\"detail\":\"struct Graph<T>\"}";
-            }
-            if lsp_find_substr(doc, "Pilot.Crypto", 0) >= 0 {
-                comp_json = comp_json +
-                    ",{\"label\":\"" + nameof(sha256_hex) + "\",\"kind\":3,\"detail\":\"" + nameof(pub) + " " + nameof(fn) + " " + nameof(sha256_hex) + "(data: " + nameof(str) + ") -> " + nameof(str) + "\"}";
-            }
-            comp_json = comp_json + "]}";
-            out_frames.push(encode_lsp_frame(comp_json));
-        } else if method == "textDocument/definition" {
-            var offset = lsp_extract_json_int_field(msg, "offset");
-            var doc = "";
-            if uri != "" { doc = __engine("map_get", sess, "doc:" + uri); }
-            if doc == "" { doc = __engine("map_get", sess, "last_doc"); }
-            if offset < 0 {
-                let l = lsp_extract_json_int_field(msg, "line");
-                let c = lsp_extract_json_int_field(msg, "character");
-                if l >= 0 {
-                    offset = lsp_position_to_offset(doc, l, c);
-                } else {
-                    offset = 0;
+            } else if method == "textDocument/didSave" {
+                if some f = files.get(uri) {
+                    var g = f;
+                    g.dirty = true;
+                    files.set(uri, g);
                 }
+            } else if method == "textDocument/didClose" {
+                files.remove(uri);
+                lsp_send("{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/publishDiagnostics\",\"params\":{\"uri\":" + json_quote(uri) + ",\"diagnostics\":[]}}");
+            } else if method == "textDocument/hover" || method == "textDocument/definition" {
+                var result = "null";
+                if some f = files.get(uri) {
+                    if some n = name_at(f, leaf_int(m, "params.position.line"), leaf_int(m, "params.position.character")) {
+                        let range = json_range(n.line, n.col, n.line, n.end_col);
+                        result = if method == "textDocument/hover" {
+                            "{\"contents\":{\"kind\":\"markdown\",\"value\":" + json_quote(n.hover) + "},\"range\":" + range + "}"
+                        } else {
+                            "{\"uri\":" + json_quote(path_uri(n.def_file)) + ",\"range\":" + json_range(n.def_line, n.def_col, n.def_line, n.def_col) + "}"
+                        };
+                    }
+                }
+                lsp_reply(id_raw, result);
+            } else if m.raw.has("id") && method != "" {
+                lsp_reply_error(id_raw, -32601, "not handled: " + method);
             }
-            let ident = lsp_ident_at_offset(doc, offset);
-            var def_pos = -1;
-            if ident != "" {
-                let fn_pat = nameof(fn) + " " + ident;
-                let hit1 = lsp_find_substr(doc, fn_pat, 0);
-                if hit1 >= 0 { def_pos = hit1; }
-                else {
-                    let st_pat = nameof(struct) + " " + ident;
-                    let hit2 = lsp_find_substr(doc, st_pat, 0);
-                    if hit2 >= 0 { def_pos = hit2; }
-                    else {
-                        let if_pat = nameof(interface) + " " + ident;
-                        let hit3 = lsp_find_substr(doc, if_pat, 0);
-                        if hit3 >= 0 { def_pos = hit3; }
+            continue;
+        }
+        var waiting = false;
+        for u in order {
+            if some f = files.get(u) { if f.dirty { waiting = true; } }
+        }
+        let got = lsp_fill(input, if waiting { lsp_quiet_ms() } else { -1 });
+        if got < 0 { return if shut { 0 } else { 1 }; }
+        if got == 0 {
+            // Typing paused: check every file edited since its last check.
+            for u in order {
+                if some f = files.get(u) {
+                    if f.dirty {
+                        var g = f;
+                        lsp_check(g, u, roots);
+                        publish(u, g);
+                        files.set(u, g);
                     }
                 }
             }
-            let def_json = if def_pos >= 0 {
-                "{\"jsonrpc\":\"2.0\",\"id\":" + req_id + ",\"result\":{\"uri\":\"" + uri + "\",\"range\":{\"start\":{\"character\":" + def_pos + "},\"end\":{\"character\":" + (def_pos + ident.len()) + "}}}}"
-            } else {
-                "{\"jsonrpc\":\"2.0\",\"id\":" + req_id + ",\"result\":null}"
-            };
-            out_frames.push(encode_lsp_frame(def_json));
-        } else if method == "shutdown" {
-            let shut_json = "{\"jsonrpc\":\"2.0\",\"id\":" + req_id + ",\"result\":null}";
-            out_frames.push(encode_lsp_frame(shut_json));
         }
     }
-    return text.join_text(out_frames, "");
+    return 0;
+}
+
+/// The records `lsp_index` gives for the file at `path`, or none when the
+/// program does not link.
+fn lsp_records(path: str) -> str? {
+    var tool = cli_checker_files();
+    tool.push(lsp_index_file());
+    let quoted = path.replace("\\", "\\\\").replace("\"", "\\\"");
+    return host_program_text(path, tool, cli_checker_decls(), f"lsp_index(\"{quoted}\");");
+}
+
+/// `pilot lsp --index <file>`: what the server knows about a file, as text
+/// (for tests and for looking at it): the seed's diagnostics when the file
+/// does not parse or link, otherwise `lsp_index`'s records.
+pub fn lsp_index_text(path: str) -> str? {
+    var seed = "";
+    for d in host_check(path) {
+        if d.file == path { seed = seed + f"seed\t{d.code}\t{d.start}\t{d.end}\t" + d.message.replace("\t", " ").replace("\n", " ") + "\n"; }
+    }
+    if seed != "" { return seed; }
+    return lsp_records(path);
 }

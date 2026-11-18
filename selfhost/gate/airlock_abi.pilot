@@ -201,7 +201,9 @@ fn ab_check_native_owners(root: str, violations: i64) {
         let dot = gm_find(owner, ".", 0);
         let ty = owner.slice(0, dot);
         let meth = owner.slice(dot + 1, owner.len());
-        let head = gm_find(src, f"[{nameof(EngineOp)}]\n    {nameof(priv)} {nameof(static)} {nameof(fn)} {meth}_internal(", 0);
+        // The owner may take generic parameters (`program_eval_internal<T>(`).
+        var head = gm_find(src, f"[{nameof(EngineOp)}]\n    {nameof(priv)} {nameof(static)} {nameof(fn)} {meth}_internal(", 0);
+        if head < 0 { head = gm_find(src, f"[{nameof(EngineOp)}]\n    {nameof(priv)} {nameof(static)} {nameof(fn)} {meth}_internal<", 0); }
         let arrow = if head < 0 { -1 } else { gm_find(src, "=>", head) };
         let semi = if head < 0 { -1 } else { gm_find(src, ";", head) };
         let body = gm_find(src, f"=> {nameof(__engine)}(\"{nat}\", ", head);
@@ -212,7 +214,8 @@ fn ab_check_native_owners(root: str, violations: i64) {
         let calls = ab_count_calls(src, meth + "_internal");
         let public = gm_find(src, f"{nameof(pub)} {nameof(fn)} {meth}(", 0);
         let public_pure = gm_find(src, f"{nameof(pub)} {nameof(pure)} {nameof(fn)} {meth}(", 0);
-        let public_static = gm_find(src, f"{nameof(pub)} {nameof(static)} {nameof(fn)} {meth}(", 0);
+        var public_static = gm_find(src, f"{nameof(pub)} {nameof(static)} {nameof(fn)} {meth}(", 0);
+        if public_static < 0 { public_static = gm_find(src, f"{nameof(pub)} {nameof(static)} {nameof(fn)} {meth}<", 0); }
         let ppos = if public >= 0 { public } else if public_pure >= 0 { public_pure } else { public_static };
         let only = gm_find(src, f"{ty}.{meth}_internal(", 0);
         if calls != 1 || ppos < 0 || only < ppos || gm_find(src, ";", ppos) < only {

@@ -3,7 +3,7 @@
 // Debug Adapter Protocol message framing and handling helpers.
 // `pilot debug` has no handler (seam cli.command_handler), so nothing serves
 // DAP today; the crates/pilot-dap crate this was meant to replace is gone.
-// Reached only by the milestone59 Rust test; no `pilot` command runs it.
+// No `pilot` command runs it yet; PROP-040 part B rebuilds the debugger.
 // =========================================================================
 pub pkg selfhost.dap;
 

@@ -1,7 +1,7 @@
 // =========================================================================
 // FILE: selfhost/dap/repl_eval.pilot
 // Debugger watch-expression evaluator over a register environment map.
-// Reached only by the milestone59 Rust test; no `pilot` command runs it.
+// No `pilot` command runs it yet; PROP-040 part B rebuilds the debugger.
 // =========================================================================
 pub pkg selfhost.dap;
 

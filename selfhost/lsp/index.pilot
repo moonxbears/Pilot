@@ -1,0 +1,240 @@
+// =========================================================================
+// FILE: selfhost/lsp/index.pilot
+// What `pilot lsp` knows about one file, from one pass of the type checker.
+// =========================================================================
+// `lsp_index(path)` runs inside the type checker's VM over the program the
+// language server asks about (`host_program_text` in selfhost/cli/host.pilot,
+// linked after the checker's own files). It runs the same passes
+// `pilot check` runs and gives, as text:
+//   - every diagnostic in the user's file, and
+//   - for every name written in it (a local, a top-level function or type, a
+//     member after a dot), where that name is declared and what to show
+//     when the pointer rests on it.
+// Every answer is the checker's own: bindings from `resolve.pilot`, types
+// from `infer.pilot`, members from the method tables. Nothing here searches
+// text for names.
+//
+// The text is one record per line, fields separated by tabs, with `\`, tab
+// and line breaks escaped (`lsp_field`), read back by selfhost/lsp/server.pilot:
+//   D  file line col end_line end_col severity code message
+//   S  file line col end_col def_file def_line def_col hover
+// `file` is the file the record is about (a program can link several of the
+// user's files). Lines and columns are 0-based, columns in bytes.
+pub lvl(0) pkg selfhost.cli;
+
+use selfhost.check.*;
+
+/// `text` made safe for one tab-separated field on one line.
+pub fn lsp_field(text: str) -> str => text.replace("\\", "\\\\").replace("\t", "\\t").replace("\n", "\\n").replace("\r", "");
+
+/// The byte offsets where each line of `text` starts.
+fn line_starts(text: str) -> List<i64> {
+    var out: List<i64> = [0];
+    var i = 0;
+    while i < text.len() {
+        if text.byte_at(i) == 10 { out.push(i + 1); }
+        i = i + 1;
+    }
+    return out;
+}
+
+/// Line starts of each file, worked out once per file asked about.
+struct Lines {
+    ref s: Snap;
+    by_unit: Map<i64, List<i64>>;
+}
+
+fn lines_of(var ref ls: Lines, u: i64) -> List<i64> {
+    if some known = ls.by_unit.get(u) { return known; }
+    let made = line_starts(ls.s.files[u].3);
+    ls.by_unit.set(u, made);
+    return made;
+}
+
+/// `offset` (relative to its file) as `line\tcol`, both 0-based.
+fn place(ref starts: List<i64>, offset: i64) -> str {
+    var lo = 0;
+    var hi = starts.len() - 1;
+    while lo < hi {
+        let mid = (lo + hi + 1) / 2;
+        if starts[mid] <= offset { lo = mid; } else { hi = mid - 1; }
+    }
+    return f"{lo}\t{offset - starts[lo]}";
+}
+
+/// Where node `n` starts: `file\tline\tcol`.
+fn node_place(var ref ls: Lines, n: i64) -> str {
+    let u = unit_of(ls.s, n);
+    if u < 0 || u >= ls.s.files.len() { return "\t0\t0"; }
+    let row = ls.s.files[u];
+    return lsp_field(row.0) + "\t" + place(lines_of(ls, u), span_start(ls.s, n) - row.2);
+}
+
+/// The `///` comment lines right above the line that declaration `d` starts on.
+fn doc_above(var ref ls: Lines, d: i64) -> str {
+    let u = unit_of(ls.s, d);
+    if u < 0 || u >= ls.s.files.len() { return ""; }
+    let row = ls.s.files[u];
+    let text = row.3;
+    let starts = lines_of(ls, u);
+    let at = span_start(ls.s, d) - row.2;
+    var line = 0;
+    while line + 1 < starts.len() && starts[line + 1] <= at { line = line + 1; }
+    var docs: List<str> = [];
+    var l = line - 1;
+    while l >= 0 {
+        let end = if l + 1 < starts.len() { starts[l + 1] - 1 } else { text.len() };
+        let t = text.slice(starts[l], end).trim();
+        if t.starts_with("///") {
+            docs.push(t.slice(3, t.len()).trim());
+        } else if !(t.starts_with("[") && t.ends_with("]")) {
+            break;
+        }
+        l = l - 1;
+    }
+    var out = "";
+    var i = docs.len() - 1;
+    while i >= 0 {
+        out = out + docs[i] + if i > 0 { "\n" } else { "" };
+        i = i - 1;
+    }
+    return out;
+}
+
+/// The first line of declaration `d` as written, without its body.
+fn signature(ref s: Snap, d: i64) -> str {
+    var t = node_text(s, d);
+    let nl = t.find("\n");
+    if nl >= 0 { t = t.slice(0, nl); }
+    t = t.trim();
+    if t.ends_with("{") || t.ends_with(";") { t = t.slice(0, t.len() - 1).trim(); }
+    let arrow = t.find(" => ");
+    if arrow >= 0 { t = t.slice(0, arrow); }
+    return t;
+}
+
+/// A Markdown code block the editor colors as Pilot (`pilot` is the editor's
+/// language id, not a Pilot name).
+fn code_block(text: str) -> str => "```pilot\n" + text + "\n```";
+
+/// Hover text for a declaration: its signature, then its doc comment.
+fn decl_hover(var ref ls: Lines, d: i64) -> str {
+    let doc = doc_above(ls, d);
+    let sig = code_block(signature(ls.s, d));
+    return if doc == "" { sig } else { sig + "\n\n" + doc };
+}
+
+/// The `S` record for a name spanning `start .. end` (offsets in its file)
+/// in unit `u`, declared at `d`, with hover text `hover`.
+fn sym_record(var ref ls: Lines, u: i64, start: i64, end: i64, d: i64, hover: str) -> str {
+    let starts = lines_of(ls, u);
+    let base = ls.s.files[u].2;
+    let at = place(starts, start - base);
+    let end_place = place(starts, end - base);
+    let end_col = end_place.slice(end_place.find("\t") + 1, end_place.len());
+    return "S\t" + lsp_field(ls.s.files[u].0) + "\t" + at + "\t" + end_col + "\t" + node_place(ls, d) + "\t" + lsp_field(hover) + "\n";
+}
+
+/// The single top-level declaration `name` names (a function or a type), or -1.
+fn top_level(ref p: Program, name: str) -> i64 {
+    let fns = nl_get(p.fns, name);
+    if fns.len() > 0 { return fns[0]; }
+    let types = nl_get(p.type_decls, name);
+    if types.len() > 0 { return types[0]; }
+    return -1;
+}
+
+/// `parts` as one text, joined pairwise so each byte is copied about
+/// log2(parts) times rather than once per later part.
+fn joined(ref parts: List<str>) -> str {
+    if parts.len() == 0 { return ""; }
+    var level = parts;
+    while level.len() > 1 {
+        var next: List<str> = [];
+        var i = 0;
+        while i < level.len() {
+            next.push(if i + 1 < level.len() { level[i] + level[i + 1] } else { level[i] });
+            i = i + 2;
+        }
+        level = next;
+    }
+    return level[0];
+}
+
+/// The records for every identifier and member name in file `unit`.
+fn name_records(var ref inf: Infer, var ref ls: Lines, unit: i64) -> str {
+    let s = inf.p.s;
+    var out: List<str> = [];
+    for n in nodes_of(s, nk_ident()) {
+        if unit_of(s, n) != unit { continue; }
+        let u = unit_of(s, n);
+        let name = node_name(s, n);
+        let b = inf.r.ref_of[n];
+        if b >= 0 {
+            let t = binding_type(inf, b);
+            let shown = if ty_is_unknown(inf.p.tt, t) { name } else { name + ": " + ty_display(inf.p.tt, t) };
+            out.push(sym_record(ls, u, span_start(s, n), span_end(s, n), inf.r.site[b], code_block(shown)));
+            continue;
+        }
+        let d = top_level(inf.p, name);
+        if d >= 0 {
+            out.push(sym_record(ls, u, span_start(s, n), span_end(s, n), d, decl_hover(ls, d)));
+        }
+    }
+    for n in nodes_of(s, nk_member()) {
+        if unit_of(s, n) != unit { continue; }
+        let name = sym_text(s, rhs(s, n));
+        if name == "" { continue; }
+        let recv = lhs(s, n);
+        if recv < 0 { continue; }
+        var rt = type_of(inf, recv);
+        if ty_is_unknown(inf.p.tt, rt) { rt = type_receiver(inf, recv); }
+        if ty_is_unknown(inf.p.tt, rt) { continue; }
+        guard some m = prog_member(inf.p, rt, name) else { continue; };
+        let end = span_end(s, n);
+        out.push(sym_record(ls, unit_of(s, n), end - name.len(), end, m.decl, decl_hover(ls, m.decl)));
+    }
+    return joined(out);
+}
+
+/// The `D` records of the checker's diagnostics, all in the user's files.
+fn diag_records(ref sink: DiagSink, var ref ls: Lines) -> str {
+    let s = ls.s;
+    var out = "";
+    for row in sink.rows {
+        // The row's offsets are in the linked program; find the file holding them.
+        var u = -1;
+        var i = 0;
+        while i < s.files.len() {
+            let f = s.files[i];
+            if f.1 && row.2 >= f.2 && row.2 <= f.2 + f.3.len() { u = i; }
+            i = i + 1;
+        }
+        if u < 0 { continue; }
+        let starts = lines_of(ls, u);
+        let base = s.files[u].2;
+        out = out + "D\t" + lsp_field(s.files[u].0) + "\t" + place(starts, row.2 - base) + "\t" + place(starts, row.3 - base) + f"\t{row.4}\t" + lsp_field(row.0) + "\t" + lsp_field(row.1) + "\n";
+    }
+    return out;
+}
+
+/// What the language server knows about the file at `path` (spelled as the
+/// program was linked from it): the records described at the top of this
+/// file. Names are indexed in that file whether or not the host counts it as
+/// one of the user's (a file under `stdlib/` is not); diagnostics are those
+/// `pilot check` reports.
+pub fn lsp_index(path: str) -> str {
+    let s = snap_load();
+    let sink = sink_new(s);
+    let p = prog_new(s);
+    let inf = infer_new(p, resolve_program(p, sink));
+    check_all(inf, sink);
+    var ls = Lines { s: s, by_unit: Map<i64, List<i64>>() };
+    var unit = -1;
+    var i = 0;
+    while i < s.files.len() {
+        if s.files[i].0 == path { unit = i; }
+        i = i + 1;
+    }
+    return diag_records(sink, ls) + name_records(inf, ls, unit);
+}

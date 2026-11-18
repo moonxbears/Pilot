@@ -1,0 +1,7 @@
+/// Twice its argument.
+fn twice(n: i64) -> i64 => n * 2;
+
+fn main() {
+    let total: i64 = "a";
+    print(twice(total));
+}

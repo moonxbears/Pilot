@@ -83,6 +83,7 @@ Goal: Pilot (PilIR → `.pilc`) compiles everything, and the Rust `BytecodeCompi
 | A7 | **5E** — the VM boots `toolchain.pilc`; Gate 2 checks stage 2 == stage 3 | A6 | A8 | approve its itemized Rust list |
 | A8 | **5F** — delete the Rust `BytecodeCompiler`; ratchet `paused_max_total_rust_loc()` down; `must_be_absent` entries | A7 | Phase 4 | approve its Rust list (the big deletion) |
 | A9 | **`PROP-039`** — `.pilc` carries Pilot's Perceus `dup`/`drop`; the VM counts references and frees exactly where Pilot says; the tracing collector (`collect.rs`, 274) is deleted (AGENTS.md 12.4.5: Pilot decides, Rust acts) | A5 (Pilot part); A8 (deleting the collector) | — | draft 2026-11-18: opcodes or intrinsics; land the `+40` now or with A8 |
+| A10 | **`PROP-040`** — `pilot lsp` and `pilot debug --dap` in Pilot: diagnostics, hover and definition from the checker, run in one resident process; the debugger steps the PilIR interpreter, and every pause decision is Pilot. Ends the Python editor tools and the `cli.command_handler` seam for these two commands | — | `milestone59_*.rs` test (−486) | approved 2026-11-18 (interpreter; diagnostics after typing pauses; LSP first). Part A (`pilot lsp`) built 2026-11-18, with Amendment 040-A (+1 Rust line); `milestone59` test deleted. Part B (debugger) not started |
 
 `PROP-003` 3C (`op_checked` / `checked.rs`) was moved into this track and goes in A8.
 

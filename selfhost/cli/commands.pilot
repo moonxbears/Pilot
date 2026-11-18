@@ -600,6 +600,23 @@ pub fn cmd_fmt(ref p: ParsedArgs, ref reg: CommandRegistry) -> i64 {
     return host_program_tool(paths[0], files, decls, f"fmt_main({pilot_string_literal(paths[0])}, {style}, {check}, {write});");
 }
 
+/// `pilot lsp`: the language server over standard input and output
+/// (selfhost/lsp/server.pilot). `pilot lsp --index <file>` prints what the
+/// server knows about one file instead (selfhost/lsp/index.pilot).
+pub fn cmd_lsp(ref p: ParsedArgs, ref reg: CommandRegistry) -> i64 {
+    if parsed_has_flag(p, "index") {
+        let files = cli_positionals(p);
+        if files.len != 1 { return usage_error("`pilot lsp --index` needs one file"); }
+        guard some records = lsp_index_text(files[0]) else {
+            eprint(f"error: `{files[0]}` does not link");
+            return 1;
+        };
+        print(records);
+        return 0;
+    }
+    return lsp_serve();
+}
+
 /// The handler of every command that has one, by command name.
 pub fn cli_handlers() -> Map<str, (ParsedArgs, CommandRegistry) => i64> {
     let h = Map<str, (ParsedArgs, CommandRegistry) => i64>();
@@ -618,5 +635,6 @@ pub fn cli_handlers() -> Map<str, (ParsedArgs, CommandRegistry) => i64> {
     h.set("compile", cmd_compile);
     h.set("lex", cmd_lex);
     h.set("fmt", cmd_fmt);
+    h.set("lsp", cmd_lsp);
     return h;
 }

@@ -735,10 +735,12 @@ pub fn execute_adaptability_gate(workspace_root: str, ref _opts: GateRunOptions)
         i = i + 1;
     }
 
-    // Check banned hardcoded doc/keyword tables in `vscode_gen.pilot` & `handlers.pilot`
+    // Check banned hardcoded doc/keyword tables in `vscode_gen.pilot` and the
+    // language server (its answers come from the type checker, never from tables)
     let lsp_targets = glist_new();
     let _ = glist_push(lsp_targets, "selfhost/ide/vscode_gen.pilot");
-    let _ = glist_push(lsp_targets, "selfhost/lsp/handlers.pilot");
+    let _ = glist_push(lsp_targets, "selfhost/lsp/server.pilot");
+    let _ = glist_push(lsp_targets, "selfhost/lsp/index.pilot");
     let banned_lsp = BANNED_CLI_LSP_TOKENS;
     var li = 0;
     while li < glist_len(lsp_targets) {

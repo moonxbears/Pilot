@@ -77,6 +77,7 @@ The path to `PROP-022`, in order. Each item is built and verified on its own (th
 | **`PROP-035`** | Stop Running the Retired `selfhost/analyzer.pilot`: Delete `run::analyze`, `cli_analyze` and the Analyzer Loader | about `-140` (`crates/pilot-cli`, `crates/pilot-analysis`) | `APPROVED 2026-11-17; BUILT 2026-11-17; A1 APPROVED AND BUILT 2026-11-18; diagnostics.rs DELETED 2026-11-18` |
 | **`PROP-036`** | Seed: Indexing a Literal `const` List or Map Reads One Value Built Once, Not a Copy Rebuilt on Every Read | about `+30` in `crates/pilot-vm/src/{lower_expr,lower_global,lib}.rs`; built `+41`; deleted with the seed bytecode compiler by `PROP-005` | `APPROVED BY OWNER 2026-11-18 ("Approve PROP-036") AND BUILT` |
 | **`PROP-039`** | The VM Frees Memory Where Pilot Says: `.pilc` Carries Perceus `dup`/`drop`, the Seed VM Counts References, and the Tracing Collector Is Deleted | about `+40` in `crates/pilot-vm` (a count per heap slot, two actions), then about `-274` (`collect.rs`) once the Rust compiler is gone (`PROP-005`) | `DRAFT 2026-11-18 — DESIGN; NEEDS OWNER APPROVAL` |
+| **`PROP-040`** | `pilot lsp` and `pilot debug --dap` in Pilot: Diagnostics, Hover and Definition From the Checker, a Debugger That Steps the PilIR Interpreter | `+1` (Amendment 040-A: `selfhost/lsp/server.pilot` in the `CLI` list of `crates/pilot-cli/src/main.rs`); `-486` (`crates/pilot-analysis/tests/milestone59_persistent_pilvm_lsp_and_dap.rs`) once Pilot tests replace it | `APPROVED BY OWNER 2026-11-18 ("Approve as recommended": §6 1a, 2a, 3 LSP first)` |
 | **`PROP-003`** | Wave 3, itemized 2026-11-15: slices 3A–3F (struct `invariant` rule, dead f-string desugarer, `op_checked` to Pilot, contract rules, f-string scanner dedupe, small trims) | about `-270` now (most of the planned `-2,850` waits for `PROP-005`/`006`) | `3A + 3B BUILT 2026-11-15 (−29 RUST); 3C DEFERRED TO PROP-005; 3D–3F DRAFT` |
 | **`PROP-004`** | Retire Legacy `crates/pilot-analysis` Crate (`1,591` formatted `src` LOC; `647` packed) & Migrate Milestone Harnesses to `.pilot` | `-1,591` LOC (formatted) | `PLANNED (WAVE 4)` |
 | **`PROP-005`** | Replace Rust `BytecodeCompiler` (`24` `lower_*.rs` + `vm_gen.rs` + `codes.rs`) with `selfhost/vm/ir_to_pilc.pilot` | about `-7,950` LOC packed, about `-8,770` formatted (PROP-016) | `ITEMIZED 2026-11-15: 5A APPROVED AND BUILT (PILOT ONLY); 5B ITEMIZED (SLICES 5B.1–5B.6); D1/D2/D3/D5 DECIDED 2026-11-15, D4 DECIDED 2026-11-17; 5B.1 AND 5B.2 APPROVED AND BUILT (PILOT ONLY); 5B.3 APPROVED AND DONE 2026-11-17 (RUST AMENDMENTS 5B.3a AND 5B.3b BUILT); 5B.4–5B.6, 5C AND 5D APPROVED 2026-11-17 AND QUEUED (WORK QUEUE ITEMS 2–5; EACH RUST LIST STILL NEEDED); 5E–5F NOT APPROVED; BOOTSTRAP T1 DECIDED 2026-11-18 ("T1: toolchain.pilc")` |
@@ -3834,6 +3835,109 @@ Net: about `+40` now, about `-230` at the end. The `+40` needs a `SCORE_APPROVED
 1. Option (a), opcodes (recommended), or (b), intrinsics.
 2. Land the `+40` now under an allowance, or wait and land it with `PROP-005`'s deletion so the wave is net negative.
 3. Cycles. Reference counting cannot free a cycle (a list that holds itself through a record). The C path has the same limit today. Pilot's ownership rules (`0b10` move-by-default, `OWN001`) should prevent building one in safe code. If a case is found, the answer is a Pilot rule that rejects it, not a collector in Rust.
+
+## `PROP-040` — `pilot lsp` and `pilot debug --dap` in Pilot: Diagnostics, Hover and Definition From the Checker, a Debugger That Steps the PilIR Interpreter
+
+**Status: APPROVED BY OWNER 2026-11-18 ("Approve as recommended"): §6 choices 1a (the debugger runs on the PilIR interpreter), 2a (diagnostics after typing pauses) and 3 (the LSP first, then the DAP). Building.** Asked for by the owner on 2026-11-18 after the VS Code extension was found running stale tools. Follows AGENTS.md 12.4.5: Pilot decides, Rust acts. No Rust is added. The only Rust change is deleting one Rust test file (§4).
+
+### 1. What happens today (read 2026-11-18)
+
+- **`pilot lsp` and `pilot debug` do nothing.** Both are registered in `selfhost/cli/main.pilot` and stop at seam `cli.command_handler`.
+- **The editor runs Python, not Pilot.** The language server VS Code uses is `vscode-pilot/server/pilot-lsp`, a local Python script git does not track.
+  - Since 2026-11-18 its diagnostics come from `pilot check`, but it starts a new process for each check (about 1 s each).
+  - It only checks saved files.
+  - Its hover, completion and go-to-definition come from its own regex index of the text, so they can be wrong.
+  - The Python debugger was a separate interpreter of an earlier Pilot that printed nothing. It is gone. Debugging now only runs `pilot run` and shows the output: no breakpoints, no stepping.
+- **Pilot pieces exist, but nothing runs them.** They are reached only by the Rust test `milestone59_persistent_pilvm_lsp_and_dap.rs` (486 lines).
+  - `selfhost/lsp/server.pilot` (536): framing and JSON helpers.
+  - `handlers.pilot` (999): hover, completion, definition, references, rename, over text search. It makes 194 raw `__engine` calls (legacy ratchet: 221).
+  - `ide_db.pilot` (172): a document store over `PilotDb`.
+  - `selfhost/dap/*` (365): DAP framing, a breakpoint and step state machine over spans (`vm_controller.pilot`), a watch-expression evaluator (`repl_eval.pilot`) and a command-line debugger parser.
+- **What already makes this doable in Pilot:**
+  - `Fd.read` (fd 0) and `Fd.write` give the stdio JSON-RPC loop.
+  - The checker (`check_all`, `resolve.pilot`) knows every declaration, use and type, so hover and definition can come from it instead of text search.
+  - The PilIR interpreter (`selfhost/ir/interp*.pilot`, run by `pilot test --ir`) executes one PilIR instruction at a time. Each instruction carries a `span_id`, and the interpreter already counts a step budget. That is the hook a debugger needs, entirely in Pilot.
+
+### 2. Design
+
+**A. `pilot lsp` (Pilot only).**
+1. One resident process reads JSON-RPC from stdin and writes to stdout (`selfhost/lsp/server.pilot`, rewritten over `Fd` and `std.serde.json` instead of raw `__engine` calls).
+2. **Diagnostics.**
+   - On open, change (debounced) and save, it runs the same check pipeline `pilot check` runs, in process.
+   - It checks the unsaved buffer as if it were at the file's path, so `use` resolves from the file's own folder.
+   - The standard library is checked once and kept in `PilotDb` (`ide_db.pilot`), so a check after the first one costs about one file, not one process.
+3. **Hover, go-to-definition, references and rename** come from the checker's own tables: the resolved declaration of the name under the cursor, its type and its doc comment. They never come from searching text. Completion lists the members the checker resolves for the receiver's type. Litmus-safe: no Pilot name is written as a string.
+4. **Deletions.** The text-search handlers in `handlers.pilot` that the checker's tables replace are deleted, and with them the 194 raw `__engine` calls; the legacy count for the file drops to `0`. The untracked Python script is deleted, and the extension starts `pilot lsp`.
+
+**B. `pilot debug --dap` (Pilot only).**
+1. The program is lowered to PilIR and run on the Pilot PilIR interpreter, not the seed VM. Before each instruction the interpreter asks `vm_controller.pilot`, `should_pause_at_pc`, whether to stop:
+   - a breakpoint line (spans map to lines);
+   - step in, step over or step out (by frame depth);
+   - pause requested.
+   Every decision is Pilot code.
+2. When stopped, the debugger answers `stackTrace` from the interpreter's frames, and `scopes`/`variables` from the frame's values with their PilIR names and types (`inspector.pilot`). It answers `evaluate` by checking and running the expression in the stopped frame, replacing `repl_eval.pilot`'s separate mini-evaluator.
+3. **Cost.** The interpreter is slower than the seed VM. That is acceptable for a debug session, and `pilot run` and the engines' speed are untouched. A faster debug mode on the seed VM would need Rust (the VM stopping where Pilot says). That is not in this proposal and would be its own, only if the interpreter proves too slow.
+4. **A terminal debugger, `pilot debug <file>` without `--dap`,** uses the same controller and the `cli_dbg.pilot` command parser.
+
+### 3. Acceptance tests first (Pilot, `tests/conformance/tools/`)
+
+- **`lsp_session`:** a `.stdin` fixture of JSON-RPC frames (initialize, didOpen of a fixture file with one type error, hover on a name, definition of a name, shutdown). The `.stdout` holds the expected frames, worked out by hand from the fixture.
+- **`lsp_unsaved`:** the error is only in the didChange text, not on disk.
+- **`err_lsp_bad_frame`:** a frame with a wrong `Content-Length` gets a JSON-RPC error, not a hang.
+- **`dap_session`:** set a breakpoint on line N, launch, stop at line N, read locals, step over, continue, see the program's output, exit code.
+- **`err_dap_bad_breakpoint`:** a breakpoint on a line with no code is reported unverified with a reason.
+- All tests are litmus-safe: fixture files hold the Pilot source, and the expected output never prints Pilot names.
+- `pilot test`, `--ir` and `--emit c` are run as usual. The tools tests run on the seed engine; `pilot lsp` itself runs on whatever runs the CLI.
+
+### 4. Rust
+
+- **Added:** none.
+- **Deleted when §3 passes:** `crates/pilot-analysis/tests/milestone59_persistent_pilvm_lsp_and_dap.rs` (486). The Pilot tests replace it, and AGENTS.md 9.1.1 forbids Rust test harnesses for tool behavior.
+- `milestone05_shared_incremental_compiler_query_database.rs` (435) also reaches `ide_db.pilot`. It is left to `PROP-004`.
+
+### 5. Pilot files
+
+- **Rewritten:** `selfhost/lsp/{server,handlers,ide_db}.pilot`, `selfhost/dap/{server,vm_controller,inspector}.pilot`.
+- **Deleted:** `selfhost/dap/repl_eval.pilot`.
+- **Changed:**
+  - `selfhost/cli/main.pilot` and `commands.pilot`: the `lsp` and `debug` handlers, which end the `cli.command_handler` seam for these two commands.
+  - `selfhost/ir/interp.pilot`: a pause check before each instruction, which costs nothing when no debugger is attached.
+  - `vscode-pilot/src/extension.ts`: start `pilot lsp` and `pilot debug --dap`.
+- **Maps and ledgers updated:** `pilot.md`, `docs/concept_matrix.md` (LSP and DAP rows), `wiring.pilot` (the `M3` and `M5` rows), and the `selfhost/gate/manifest.pilot` legacy `__engine` counts.
+
+### 6. Open points for the owner
+
+1. **Where the debugger runs.**
+   - (a) **Recommended:** the PilIR interpreter. All Pilot, zero Rust, slower.
+   - (b) The seed VM with a Rust stop hook. Faster, but it needs Rust now and is removed again when the VM becomes C (`M46`).
+2. **Diagnostics while typing.**
+   - (a) **Recommended:** check the buffer after typing pauses (about 300 ms).
+   - (b) Only on save, like today's script.
+3. **Order of work.** The LSP first, since it is used all day, then the DAP. They share no files and could be two parallel sessions.
+
+### 7. Amendment 040-A: one Rust line (approved by owner 2026-11-18, "Add 1 line")
+
+Found while building: the files that make up the `pilot` CLI are listed in Rust, in the `CLI` constant of `crates/pilot-cli/src/main.rs`, so a new `selfhost/lsp/server.pilot` cannot be part of `pilot lsp` without changing that list. Approved: add the one line `"selfhost/lsp/server.pilot",` to `CLI` in `crates/pilot-cli/src/main.rs`, and no other Rust. Every `pilot` command then also parses that file at startup. Moving the list itself into Pilot (Rust would stop choosing what the CLI is made of, AGENTS.md 12.4.5) was offered as the larger alternative and not chosen; it remains a candidate for a later proposal.
+
+### 8. As built: part A, `pilot lsp` (2026-11-18)
+
+- **Built.**
+  - `selfhost/lsp/index.pilot` (240) runs in the checker's VM. It is linked after `cli_checker_files()` and runs `check_all`, then gives text records: the file's diagnostics, and for every identifier and member name its declaration and hover text. Locals come from `Resolution.ref_of` with their type from `binding_type`. Top-level names come from `prog.fns`/`type_decls`, members from `prog_member`; signatures and `///` docs come from the declaration's own text.
+  - `selfhost/lsp/server.pilot` (646, replaces the old 536-line text-search server) serves JSON-RPC over stdio with `Fd.read`/`Fd.write`, and uses `Fd.poll` for the 300 ms typing pause (choice 2a). It answers hover and go-to-definition. A buffer that differs from disk is checked as a hidden sibling copy `.<name>.lsp.pilot`, deleted right after.
+  - `pilot lsp --index <file>` prints the records.
+  - The extension starts `pilot lsp` and passes `PWD`; the Python server is deleted.
+- **Changes beyond §5.**
+  - **A host owner was made generic.** `ToolHost.program_eval` in `selfhost/cli/host.pilot` is now `program_eval<T>` (same op, same single owner; no new `__engine` site). That lets `host_program_text` get text back from the checker's VM. No other host op returns a value from a tool run over a program's snapshot.
+  - **The resident check is per file, not cached.** The standard library is not kept checked between requests: every check is one `cli_program_eval` run over the file. A host op rebuilds the checker program from source each time, so keeping it warm needs Rust (not proposed). Measured warm: 0.5 s for a test file, 5.9 s for `selfhost/check/resolve.pilot` (`pilot check` alone 5.2 s).
+  - **`handlers.pilot` deleted** (999 lines, 194 raw `__engine` calls) and added to `RETIRED_FILES`. The legacy `__engine` counts for `handlers.pilot` and `server.pilot` are removed from `manifest.pilot`. The `seed_audit` LSP token check now reads `server.pilot` and `index.pilot`.
+  - **`milestone59_persistent_pilvm_lsp_and_dap.rs` deleted now,** not after part B. It read the replaced `server.pilot` and the deleted `handlers.pilot`, so it could no longer pass. Its DAP half tested helpers that part B rewrites.
+  - **`ide_db.pilot` not rewritten.** `pilot lsp` does not use it; only `milestone05` (`PROP-004`) reaches it.
+- **Not done.**
+  - Completion, references and rename.
+  - Checker diagnostics for a file under `stdlib/`. The Rust snapshot never marks a stdlib file as the user's (`in_stdlib` in `crates/pilot-cli/src/check.rs`), so the checker reports nothing there, the same as `pilot check`. Hover and definition work there.
+  - Columns are bytes, not UTF-16 units.
+  - The tools tests run on the seed engine only. They drive the `pilot` binary, so `--ir` and `--emit c` add nothing.
+  - Part B (the debugger) is not started.
 
 ## `PROP-003` — Wave 3, Itemized: Parser Desugarings and VM Helpers That Can Leave Rust Now
 

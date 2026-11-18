@@ -336,8 +336,10 @@ pub fn wiring_ledger() -> List<Capability> {
         cap("M3", "GNU flag binding (--k=v, -k v, bool shorts) and -- passthrough", ::Wired,
             "milestone03 test_m3_2_posix_gnu_argument_parser_and_passthrough; tests/conformance/runtime/script_args.pilot", ""),
         cap("M3", "direct script invocation (pilot file.pilot)", ::Wired, "pilot tests/conformance/numbers/arith_int.pilot", ""),
-        cap("M3", "command handlers for compile, fmt, repl, pkg, deps, tree, venv, lsp, debug, perf, from, map, ide-sync", ::Spec,
+        cap("M3", "command handlers for compile, fmt, repl, pkg, deps, tree, venv, debug, perf, from, map, ide-sync", ::Spec,
             "dispatch goes through cli_handlers() (selfhost/cli/commands.pilot); these stop at seam cli.command_handler", "cli.command_handler F6"),
+        cap("M3", "pilot lsp: diagnostics (after typing pauses, on open and save), hover and go-to-definition, all from the type checker", ::Draft,
+            "selfhost/lsp/server.pilot + index.pilot (PROP-040 A, 2026-11-18): tests/conformance/tools/{lsp_session,lsp_unsaved,err_lsp_bad_frame} pass on the seed engine; no completion, references or rename yet; a file under stdlib/ gets no checker diagnostics (the host never counts it as the user's)", ""),
 
         // M4 dual syntax
         cap("M4", "readable and symbolic forms parse to one AST", ::Core,
