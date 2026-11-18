@@ -1,0 +1,1 @@
+error[GRAM003]: `[Infix]` declares the infix operator `<.>` at `Add` `Left`, but its first declaration gives it `Multiply` `Left`

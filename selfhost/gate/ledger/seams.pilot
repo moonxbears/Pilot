@@ -109,6 +109,7 @@ pub fn seam_registry() -> List<SeamEntry> {
         seam_entry("grammar.circumfix_shape", ::Entry, "parsing a use of a circumfix operator (`op |_|`: one operand between two symbols) and lowering it to its `op` call (selfhost/check/grammar_attrs.pilot stops the declaration)", "PROP-018"),
         seam_entry("grammar.matchfix_shape", ::Entry, "parsing a use of a matchfix operator (`op <|_, ..|>`: a comma list inside a matched pair) and lowering it to its `op` call (selfhost/check/grammar_attrs.pilot stops the declaration)", "PROP-018"),
         seam_entry("grammar.mixfix_shape", ::Entry, "parsing a use of a mixfix operator other than indexing (`op _ between _ and _`) and lowering it to its `op` call (selfhost/check/grammar_attrs.pilot stops the declaration)", "PROP-018"),
+        seam_entry("grammar.user_ops_seed", ::Entry, "a program's own operators on the seed: its lexer reading the program's declared symbols beside its table (one generic operator token, longest match) and its parser lowering an operator with no native code to the declaring `op`'s member call (selfhost/check/grammar_attrs.pilot stops the declaration; Rust list in proposals.md PROP-008 step 2)", "PROP-008"),
         seam_entry("http.invoke_handler", ::Exit, "calling the [Service] handler a matched route names, with bound params, decoded body and requires->422", "F4"),
         seam_entry("http.weave_service", ::Entry, "[Service]/[Get]/[Post]/.. weaving of a struct and its methods into an HttpServiceDef", "F4"),
         seam_entry("ir.interp_hook", ::Entry, "engine operations the IR interpreter runs by name (interp_engine_ops, selfhost/ir/interp_engine.pilot: print, faults, list, string and record operations, seam_open, the host operations); any other stops here, the seed-less stdin_read_line/stdin_read_all included (standard input is read through std.io host reads)", "F5"),
@@ -388,6 +389,14 @@ pub fn bug_registry() -> List<KnownBug> {
             "a `continue a..b` outside a `for` body (LOOP005, selfhost/check/lint_flow.pilot) is reported on the seed only as `continue` with new bounds not being lowered yet, so the checker's diagnostic never shows; `pilot test --ir` reports LOOP005",
             "error[LOOP005] at line 8, column 21", "error[SEED001]: `continue` with new bounds is not lowered by the seed yet",
             "tests/conformance/known_bugs/continue_bounds_in_while.pilot", "PROP-005"),
+        known_bug("seed.user_operator", "crates/pilot-lexer (the table holds only the standard library's operator symbols) and crates/pilot-parser expr.rs (an infix operator with no native `BinaryOp` code)",
+            "an operator a program declares with a new symbol (`[Infix(::Multiply, ::Left)] op <.>`) is not one token on the seed, so its use does not parse; the checker stops the declaration at seam grammar.user_ops_seed",
+            "the use groups by the declared level and calls the `op`; prints 24, 123, 45", "error[SYN001]: Expected RParen, found Ident",
+            "tests/conformance/known_bugs/user_infix_operator.pilot", "PROP-008"),
+        known_bug("seed.operator_hygiene", "crates/pilot-parser (a `syntax` rule of an imported package is not visible; the program's own operator symbols are not lexed)",
+            "operators in a quote or `syntax` rule must keep the grammar of their defining file; the expanding file here declares `+-`, which stops at seam grammar.user_ops_seed, and the library's rule `plus_neg` is not found in the importing file",
+            "the library's `5 +-3` is 5 + (-3) and its rule gives 2, the file's own `a +-b` calls its `op +-`; prints binary, unary, int, 2, -2 5", "error[DECL001]: no function named `plus_neg`",
+            "tests/conformance/known_bugs/operator_hygiene.pilot", "PROP-008"),
     ];
     return entries;
 }
