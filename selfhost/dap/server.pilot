@@ -1,13 +1,6 @@
 // =========================================================================
 // FILE: selfhost/dap/server.pilot
-<<<<<<< HEAD
-// Debug Adapter Protocol message framing and handling helpers.
-// `pilot debug` has no handler (seam cli.command_handler), so nothing serves
-// DAP today; the crates/pilot-dap crate this was meant to replace is gone.
-// No `pilot` command runs it yet; PROP-040 part B rebuilds the debugger.
-=======
 // PROP-040: `pilot debug --dap <file>`, a Debug Adapter Protocol server.
->>>>>>> 0c863b8a54407529e5aedb563a81fb851f1ea2ba
 // =========================================================================
 // It reads requests from standard input and writes responses and events to
 // standard output, each as a JSON body after a `Content-Length` header. The

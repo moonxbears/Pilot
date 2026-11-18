@@ -1,10 +1,5 @@
 // =========================================================================
 // FILE: selfhost/dap/cli_dbg.pilot
-<<<<<<< HEAD
-// Command-line debugger command parser: break, step, next, finish, continue,
-// print, bt. `pilot debug` has no handler (seam cli.command_handler).
-// No `pilot` command runs it yet; PROP-040 part B rebuilds the debugger.
-=======
 // PROP-040: `pilot debug <file>`, the terminal debugger. It reads one command
 // per line from standard input, runs the program on the PilIR interpreter
 // with the controller `pilot debug --dap` uses (vm_controller.pilot), and
@@ -23,7 +18,6 @@
 //   q, quit        stop the program and leave
 // When the input ends, the program runs to its end without stopping.
 // The program shares the debugger's standard input.
->>>>>>> 0c863b8a54407529e5aedb563a81fb851f1ea2ba
 // =========================================================================
 pub pkg selfhost.dap;
 

@@ -601,6 +601,58 @@ pub fn cmd_fmt(ref p: ParsedArgs, ref reg: CommandRegistry) -> i64 {
     return host_program_tool(paths[0], files, decls, f"fmt_main({pilot_string_literal(paths[0])}, {style}, {check}, {write});");
 }
 
+/// `pilot lsp`: the language server over standard input and output
+/// (selfhost/lsp/server.pilot). `pilot lsp --index <file>` prints what the
+/// server knows about one file instead (selfhost/lsp/index.pilot).
+pub fn cmd_lsp(ref p: ParsedArgs, ref reg: CommandRegistry) -> i64 {
+    if parsed_has_flag(p, "index") {
+        let files = cli_positionals(p);
+        if files.len != 1 { return usage_error("`pilot lsp --index` needs one file"); }
+        guard some records = lsp_index_text(files[0]) else {
+            eprint(f"error: `{files[0]}` does not link");
+            return 1;
+        };
+        print(records);
+        return 0;
+    }
+    return lsp_serve();
+}
+
+/// The files `pilot debug` links: the IR tool's, and the debugger's
+/// (selfhost/dap/, PROP-040).
+fn cli_debug_files() -> List<str> {
+    var files = cli_ir_files();
+    for f in [
+        "stdlib/std/polyglot/transport/json.pilot",
+        "selfhost/ir/interp_debug.pilot",
+        "selfhost/dap/vm_controller.pilot",
+        "selfhost/dap/inspector.pilot",
+        "selfhost/dap/target.pilot",
+        "selfhost/dap/server.pilot",
+        "selfhost/dap/cli_dbg.pilot",
+    ] { files.push(f); }
+    return files;
+}
+
+/// `pilot debug <file> [--dap] [-- args..]`: debugs the program on the PilIR
+/// interpreter, as a DAP server over stdin and stdout with `--dap`, else
+/// with commands read from stdin (selfhost/dap/, PROP-040).
+pub fn cmd_debug(ref p: ParsedArgs, ref reg: CommandRegistry) -> i64 {
+    let args = cli_positionals(p);
+    if args.len() != 1 { return usage_error("usage: pilot debug <file> [--dap] [-- args..]"); }
+    if !File.exists(args[0]) { return usage_error(f"no such file `{args[0]}`"); }
+    var script_args = "[";
+    var i: i64 = 0;
+    while i < p.passthrough_args.len() {
+        if i > 0 { script_args = script_args + ", "; }
+        script_args = script_args + pilot_string_literal(p.passthrough_args[i]);
+        i = i + 1;
+    }
+    script_args = script_args + "]";
+    let entry = if parsed_has_flag(p, "dap") { f"dap_main({script_args});" } else { f"debug_cli_main({pilot_string_literal(args[0])}, {script_args});" };
+    return host_program_tool(args[0], cli_debug_files(), cli_ir_decls(), entry);
+}
+
 /// The handler of every command that has one, by command name.
 pub fn cli_handlers() -> Map<str, (ParsedArgs, CommandRegistry) => i64> {
     let h = Map<str, (ParsedArgs, CommandRegistry) => i64>();
@@ -619,5 +671,7 @@ pub fn cli_handlers() -> Map<str, (ParsedArgs, CommandRegistry) => i64> {
     h.set("compile", cmd_compile);
     h.set("lex", cmd_lex);
     h.set("fmt", cmd_fmt);
+    h.set("lsp", cmd_lsp);
+    h.set("debug", cmd_debug);
     return h;
 }

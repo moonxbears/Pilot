@@ -1,16 +1,11 @@
 // =========================================================================
 // FILE: selfhost/dap/vm_controller.pilot
-<<<<<<< HEAD
-// Debugger breakpoint and step state machine over pc_spans.
-// No `pilot` command runs it yet; PROP-040 part B rebuilds the debugger.
-=======
 // PROP-040: when a debugged run stops. The PilIR interpreter tells the
 // debugger about each new source line of each frame
 // (selfhost/ir/interp_debug.pilot); `should_pause_at_pc` decides, from the
 // breakpoints, the step the client asked for and a pause request, whether
 // the run stops there. Both debuggers (`pilot debug --dap`,
 // selfhost/dap/server.pilot, and `pilot debug <file>`, cli_dbg.pilot) use it.
->>>>>>> 0c863b8a54407529e5aedb563a81fb851f1ea2ba
 // =========================================================================
 pub pkg selfhost.dap;
 

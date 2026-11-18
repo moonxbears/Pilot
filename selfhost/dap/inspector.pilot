@@ -1,16 +1,10 @@
 // =========================================================================
 // FILE: selfhost/dap/inspector.pilot
-<<<<<<< HEAD
-// Debugger variable inspector: JSON for register values and struct fields.
-// Reads register slots and layout field offsets without hardcoded type names.
-// No `pilot` command runs it yet; PROP-040 part B rebuilds the debugger.
-=======
 // PROP-040: what a stopped frame holds. The local names come from the
 // lowering (`IrFunction.locals`, selfhost/ir/lower_locals.pilot), their
 // values from the interpreter's frame, their types from the module's
 // layouts, and where each name can be seen from the checked program's
 // nodes. `evaluate` reads a local, a field or an element of a stopped frame.
->>>>>>> 0c863b8a54407529e5aedb563a81fb851f1ea2ba
 // =========================================================================
 pub pkg selfhost.dap;
 
