@@ -55,6 +55,7 @@ pub lvl(0) pkg selfhost.check;
 // by stdlib/core/lex/seed_kinds.pilot.
 use Pilot.Core.Lex.Words;
 use Pilot.Core.Lex.SeedKinds;
+use Pilot.Core.Lex.SeedForms;
 
 
 /// The operator attributes and, for each, the positions (after the target)
@@ -338,6 +339,9 @@ pub fn check_grammar_attrs(ref inf: Infer, var ref sink: DiagSink) {
     let p = inf.p;
     let s = p.s;
     var claims: List<GrammarClaim> = [];
+    // The library's spellings, read once and only when a declaration needs them.
+    var library = Map<str, bool>();
+    var have_library = false;
     var d = s.user_lo;
     while d < s.user_hi {
         if in_user_file(s, d) {
@@ -347,14 +351,23 @@ pub fn check_grammar_attrs(ref inf: Infer, var ref sink: DiagSink) {
                 if k == nk_operator() { check_holes(p, sink, d, shape_reported); }
                 if k == nk_operator() || is_syntax_rule(s, d) {
                     let mine = claims_of(p, d);
-                    if mine.len() == 0 && k == nk_operator() { check_unclaimed_op(s, sink, d); }
+                    if mine.len() == 0 && k == nk_operator() {
+                        let sym = unclaimed_symbol(s, d);
+                        if sym.len() > 0 && !seed_lexes(sym) {
+                            if !have_library { library = library_spellings(p); have_library = true; }
+                            if !library.has(sym) { report_user_op_seam(s, sink, d, sym, NOT_ONE_TOKEN); }
+                        }
+                    }
                     for c in mine { claims.push(c); }
                 }
             }
         }
         d = d + 1;
     }
-    if claims.len() > 0 { check_claims(p, sink, claims); }
+    if claims.len() > 0 {
+        if !have_library { library = library_spellings(p); }
+        check_claims(p, sink, claims, library);
+    }
 }
 
 /// One operator a grammar attribute declares: its symbol and readable word,
@@ -426,11 +439,16 @@ fn library_spellings(ref p: Program) -> Map<str, bool> {
     return out;
 }
 
-/// Whether the seed's lexer table has a token family spelled `sym`, so the
-/// seed reads `sym` as one token.
+/// Whether the seed lexes `sym` as one token without the user's files: a
+/// family seed_kinds.pilot names, or one of the seed's own forms
+/// (seed_forms.pilot). A spelling only the generic `SEED_OPERATOR_KIND`
+/// would take is not one: the table lexes only the declared symbols.
 fn seed_lexes(sym: str) -> bool {
+    for f in SEED_FORM_SPELLINGS {
+        if f == sym { return true; }
+    }
     guard some e = seed_kind_of(sym) else { return false; }
-    return e.emit == SeedEmit::Token;
+    return e.emit == SeedEmit::Token && e.kind != SEED_OPERATOR_KIND;
 }
 
 /// Whether `sym` is built in: declared outside the user's files, or a
@@ -459,25 +477,27 @@ fn report_user_op_seam(ref s: Snap, var ref sink: DiagSink, d: i64, sym: str, wh
 /// Why the seed cannot read a symbol it has no token for.
 const NOT_ONE_TOKEN: str = "the seed cannot read as one token: it lexes with the table built from the standard library's declarations (stdlib/core/lex/toolchain.lex)";
 
-/// The seam on an infix, prefix or postfix `op` with no grammar attribute
-/// whose symbol the seed's lexer table has no token for.
-fn check_unclaimed_op(ref s: Snap, var ref sink: DiagSink, d: i64) {
+/// The symbol of an infix, prefix or postfix `op` with no grammar
+/// attribute that the seed's table must lex as one token, or "" when it
+/// needs none (a structural symbol, a word, another shape). The table lexes
+/// it when `seed_lexes` or the library declares it; otherwise the
+/// declaration stops at the seam.
+fn unclaimed_symbol(ref s: Snap, d: i64) -> str {
     let pat = op_pattern(s, d);
     let holes = hole_positions(pat);
     if holes.len() > 0 {
         let fix = fixity_of(pat, holes);
-        if fix != Fixity::Infix && fix != Fixity::Prefix && fix != Fixity::Postfix { return; }
+        if fix != Fixity::Infix && fix != Fixity::Prefix && fix != Fixity::Postfix { return ""; }
     }
     let sym = strip_holes(pat);
-    if sym.len() == 0 || is_structural_symbol(sym) || is_word_text(sym) || seed_lexes(sym) { return; }
-    report_user_op_seam(s, sink, d, sym, NOT_ONE_TOKEN);
+    if sym.len() == 0 || is_structural_symbol(sym) || is_word_text(sym) { return ""; }
+    return sym;
 }
 
 /// GRAM001, GRAM003 and the seam on the operators the user's attributes
 /// declare, in declaration order.
-fn check_claims(ref p: Program, var ref sink: DiagSink, ref claims: List<GrammarClaim>) {
+fn check_claims(ref p: Program, var ref sink: DiagSink, ref claims: List<GrammarClaim>, ref library: Map<str, bool>) {
     let s = p.s;
-    let library = library_spellings(p);
     var seamed = Map<str, bool>();
     var i = 0;
     while i < claims.len() {
