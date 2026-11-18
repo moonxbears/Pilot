@@ -45,9 +45,10 @@
 //            has no token for). The seed lexes with the table built from the
 //            standard library's declarations and lowers only the operators
 //            the standard library declares, so such an operator cannot run.
-// GRAM002 (a new symbol changes how other text lexes) waits for the seed's
-// lexer to take the user's symbols, and GRAM004 (conflicting relative
-// placements) for `tighter_than` / `looser_than` placement (PROP-008 §5).
+//   GRAM002  a new symbol would end inside a token of its declaring file
+//            (selfhost/check/grammar_lex.pilot).
+// GRAM004 (conflicting relative placements) waits for `tighter_than` /
+// `looser_than` placement (PROP-008 §5).
 pub lvl(0) pkg selfhost.check;
 
 // The 13 structural tokens and the 14 seed words are declared once, by
@@ -339,6 +340,8 @@ pub fn check_grammar_attrs(ref inf: Infer, var ref sink: DiagSink) {
     let p = inf.p;
     let s = p.s;
     var claims: List<GrammarClaim> = [];
+    // The symbols the seed's table has no family for (GRAM002).
+    var news: List<NewSymbol> = [];
     // The library's spellings, read once and only when a declaration needs them.
     var library = Map<str, bool>();
     var have_library = false;
@@ -355,7 +358,10 @@ pub fn check_grammar_attrs(ref inf: Infer, var ref sink: DiagSink) {
                         let sym = unclaimed_symbol(s, d);
                         if sym.len() > 0 && !seed_lexes(sym) {
                             if !have_library { library = library_spellings(p); have_library = true; }
-                            if !library.has(sym) { report_user_op_seam(s, sink, d, sym, NOT_ONE_TOKEN); }
+                            if !library.has(sym) {
+                                report_user_op_seam(s, sink, d, sym, NOT_ONE_TOKEN);
+                                add_new_symbol(s, news, sym, d);
+                            }
                         }
                     }
                     for c in mine { claims.push(c); }
@@ -366,8 +372,9 @@ pub fn check_grammar_attrs(ref inf: Infer, var ref sink: DiagSink) {
     }
     if claims.len() > 0 {
         if !have_library { library = library_spellings(p); }
-        check_claims(p, sink, claims, library);
+        check_claims(p, sink, claims, library, news);
     }
+    if news.len() > 0 { check_new_symbols(s, sink, news); }
 }
 
 /// One operator a grammar attribute declares: its symbol and readable word,
@@ -496,7 +503,7 @@ fn unclaimed_symbol(ref s: Snap, d: i64) -> str {
 
 /// GRAM001, GRAM003 and the seam on the operators the user's attributes
 /// declare, in declaration order.
-fn check_claims(ref p: Program, var ref sink: DiagSink, ref claims: List<GrammarClaim>, ref library: Map<str, bool>) {
+fn check_claims(ref p: Program, var ref sink: DiagSink, ref claims: List<GrammarClaim>, ref library: Map<str, bool>, var ref news: List<NewSymbol>) {
     let s = p.s;
     var seamed = Map<str, bool>();
     var i = 0;
@@ -525,7 +532,9 @@ fn check_claims(ref p: Program, var ref sink: DiagSink, ref claims: List<Grammar
         let key = f"{c.decl}";
         if seamed.has(key) { continue; }
         seamed.set(key, true);
-        let why = if !is_word_text(c.symbol) && !seed_lexes(c.symbol) { NOT_ONE_TOKEN } else { "the seed cannot lower: it lowers only the operators the standard library declares" };
+        let new_symbol = !is_word_text(c.symbol) && !seed_lexes(c.symbol);
+        if new_symbol { add_new_symbol(s, news, c.symbol, c.decl); }
+        let why = if new_symbol { NOT_ONE_TOKEN } else { "the seed cannot lower: it lowers only the operators the standard library declares" };
         report_user_op_seam(s, sink, c.decl, c.symbol, why);
     }
 }

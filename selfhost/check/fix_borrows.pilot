@@ -188,22 +188,6 @@ pub fn report_kept(var ref f: Flow, ref cands: List<BorrowCandidate>) -> i64 {
     return count;
 }
 
-/// The 1-based line and column of byte `at` of `text`.
-fn line_col(text: str, at: i64) -> str {
-    var line = 1;
-    var col = 1;
-    var i = 0;
-    while i < at && i < text.len() {
-        if text.byte_at(i) == 10 {
-            line = line + 1;
-            col = 1;
-        } else {
-            col = col + 1;
-        }
-        i = i + 1;
-    }
-    return f"{line}:{col}";
-}
 
 /// Writes the planned parameter words into the user's files and reports
 /// each change; gives how many files it wrote.

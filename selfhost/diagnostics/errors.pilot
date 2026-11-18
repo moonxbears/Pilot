@@ -833,6 +833,13 @@ pub let ERRORS = [
         reference: "proposals.md PROP-008 §5, step 2",
     },
     ErrorDef {
+        code: "GRAM002",
+        title: "New Operator Symbol Changes How Text Lexes",
+        description: "A symbol the program declares would end inside a token the seed reads, or would join separate tokens in a file that does not declare it",
+        category: "Grammar",
+        reference: "proposals.md PROP-008 §5, step 2",
+    },
+    ErrorDef {
         code: "GRAM005",
         title: "Structural Operator Symbol",
         description: "An operator attribute declares a symbol or readable word that is one of the 13 structural tokens or a seed word",

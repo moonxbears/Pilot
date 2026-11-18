@@ -185,9 +185,10 @@ pub fn cmd_check(ref p: ParsedArgs, ref reg: CommandRegistry) -> i64 {
 /// only borrow their value become `ref` or `var ref`
 /// (selfhost/check/fix_borrows.pilot). Other diagnostics are not fixed yet.
 fn check_fix(ref files: List<str>) -> i64 {
-    // The checker, then the file owners the fix writes through.
+    // The checker (which links the file owners the fix writes through),
+    // then the fix.
     var tool = cli_checker_files();
-    for f in ["stdlib/core/os_abi.pilot", "stdlib/core/host_raw.pilot", "stdlib/core/file.pilot", "selfhost/check/fix_borrows.pilot"] { tool.push(f); }
+    tool.push("selfhost/check/fix_borrows.pilot");
     var failed = 0;
     for f in files {
         if host_program_tool(f, tool, cli_checker_decls(), "fix_borrows_main();") != 0 { failed = failed + 1; }
@@ -462,12 +463,11 @@ fn pilot_string_literal(text: str) -> str => "\"" + text.replace("\\", "\\\\").r
 fn cli_lex_files() -> List<str> {
     var files = cli_checker_files();
     for f in [
-        "stdlib/core/os_abi.pilot", "stdlib/core/host_raw.pilot", "stdlib/core/file.pilot", "stdlib/core/generator.pilot",
         "stdlib/core/lex/unicode_xid.pilot", "stdlib/core/lex/names.pilot",
-        "stdlib/core/lex/trivia.pilot", "stdlib/core/lex/strings.pilot", "stdlib/core/lex/delimiters.pilot",
-        "stdlib/core/lex/operators.pilot", "stdlib/core/lex/seed_forms.pilot", "stdlib/core/lex/lexicon.pilot", "stdlib/pilot/lex/modes.pilot",
+        "stdlib/core/lex/trivia.pilot", "stdlib/core/lex/delimiters.pilot",
+        "stdlib/core/lex/operators.pilot", "stdlib/core/lex/lexicon.pilot",
         "stdlib/core/packed.pilot", "stdlib/pilot/lex.pilot",
-        "stdlib/core/env.pilot", "stdlib/core/derive.pilot", "stdlib/std/text.pilot", "stdlib/pilot/lex/cache.pilot",
+        "stdlib/core/env.pilot", "stdlib/core/derive.pilot", "stdlib/std/text.pilot",
         "selfhost/lex/lex_tool.pilot",
     ] { files.push(f); }
     return files;

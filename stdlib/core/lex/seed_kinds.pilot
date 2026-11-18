@@ -203,7 +203,7 @@ pub struct SeedEntry : IValue {
 
 /// Whether `family` is named by an operator spelling: not empty, and no
 /// letter, digit, `_`, space or quote in it.
-fn is_spelling(family: str) -> bool {
+pub fn is_spelling(family: str) -> bool {
     if family.len() == 0 { return false; }
     var i = 0;
     while i < family.len() {
