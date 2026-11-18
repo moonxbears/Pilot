@@ -1,0 +1,202 @@
+// ==============================================================================
+// FILE: selfhost/check/lint_flow.pilot
+// Control-flow lints: NULL002, ERR005, LOOP001-LOOP003, LOOP005, MATCH002.
+// ==============================================================================
+//   NULL002   the `else` block of a `guard` must leave: one of its statements
+//             is a `return`, `break`, `continue` or `yield`, or a call of
+//             `panic` or `fail`.
+//   ERR005    (warning) a `try` statement: failures are values (`T ! E` with
+//             `?`, `catch`).
+//   LOOP001   a `for` whose body both yields to it and leaves it with a value
+//             (`break v;`).
+//   LOOP002   a `for` left both with and without a value.
+//   LOOP003   a `for .. then` that no `break v;` leaves: `then` is the value
+//             of a loop that ends without one, so without one it has no use.
+//   LOOP005   `continue a..b` (a continue with bounds) outside a `for` body.
+//   MATCH002  a switch arm after an unguarded `_` / `default` arm.
+// A `break` without a value leaves the innermost loop or switch; one with a
+// value leaves the innermost `for .. then`, else the innermost `for`
+// (selfhost/ir/lower.pilot lower_loop_exit, lower_break_value); a `yield`
+// in a loop body is the innermost `for`'s; a `continue` goes to the
+// innermost loop. None of them reaches past a function or closure.
+//
+// The program is walked from its roots, not up the parent links: a syntax
+// rule's expansion can share nodes with the code its holes read, which stays
+// in the tree unattached, and a shared node's parent link may name that copy.
+pub lvl(0) pkg selfhost.check;
+
+
+/// Where the walk is: the loops a `break`, `continue` or `yield` at this
+/// point reaches (-1 for none).
+pub struct FlowAt : IValue {
+    /// The innermost loop or switch, which a `break;` leaves.
+    pub plain: i64;
+    /// The innermost `for .. then`.
+    pub then_for: i64;
+    /// The innermost `for`.
+    pub any_for: i64;
+    /// Whether the innermost loop is a `for`, which `continue a..b` needs.
+    pub in_for: bool;
+}
+
+fn flow_top() -> FlowAt => FlowAt { plain: -1, then_for: -1, any_for: -1, in_for: false };
+
+/// What the walk keeps.
+pub struct FlowLints : IObject {
+    pub ref p: Program;
+    /// `for` node -> its exits: 1 a yield, 2 a break with a value, 4 one
+    /// without.
+    pub exits: Map<str, i64>;
+    /// The `for` nodes met, in the order met.
+    pub fors: List<i64>;
+}
+
+/// Whether node kind `k` is a function, closure or other body with its own
+/// `return`, which no `break`, `continue` or `yield` leaves.
+fn is_frame_kind(k: i64) -> bool {
+    return k == nk_fn() || k == nk_lambda() || k == nk_operator() || k == nk_ctor()
+        || k == nk_dtor() || k == nk_indexer();
+}
+
+fn loop_key(n: i64) -> str => f"{n}";
+
+/// Adds `bit` to the exits of loop `f`.
+fn mark_exit(var ref fl: FlowLints, f: i64, bit: i64) {
+    if f < 0 { return; }
+    let k = loop_key(f);
+    let had = if fl.exits.has(k) { fl.exits[k] } else { 0 };
+    if (had / bit) % 2 == 0 { fl.exits.set(k, had + bit); }
+}
+
+fn exits_of(ref fl: FlowLints, f: i64) -> i64 {
+    let k = loop_key(f);
+    return if fl.exits.has(k) { fl.exits[k] } else { 0 };
+}
+
+// --- NULL002 -----------------------------------------------------------------
+
+/// Whether statement `st` leaves the block it is in.
+fn leaves(ref s: Snap, st: i64) -> bool {
+    let k = kind(s, st);
+    if k == nk_return() || k == nk_break() || k == nk_continue() || k == nk_yield() { return true; }
+    if k != nk_expr_stmt() || lhs(s, st) < 0 || kind(s, lhs(s, st)) != nk_call() { return false; }
+    let ch = children(s, lhs(s, st));
+    if ch.len() == 0 || kind(s, ch[0]) != nk_ident() { return false; }
+    let callee = node_name(s, ch[0]);
+    return callee == nameof(panic) || callee == nameof(fail);
+}
+
+fn check_guard(ref s: Snap, var ref sink: DiagSink, g: i64) {
+    let otherwise = rhs(s, g);
+    if lhs(s, g) < 0 || otherwise < 0 { return; }
+    var stmts: List<i64> = [otherwise,];
+    if kind(s, otherwise) == nk_block() { stmts = children(s, otherwise); }
+    for st in stmts {
+        if leaves(s, st) { return; }
+    }
+    sink_error(sink, otherwise, "NULL002", "'guard' else block must diverge with 'return', 'break', 'continue', 'yield', or 'panic'");
+}
+
+// --- MATCH002 ----------------------------------------------------------------
+
+fn check_arms(ref s: Snap, var ref sink: DiagSink, m: i64) {
+    let ch = children(s, m);
+    var wildcard_seen = false;
+    var i = 1;
+    while i < ch.len() {
+        let arm = ch[i];
+        let pat = lhs(s, arm);
+        if kind(s, arm) == nk_arm() && pat >= 0 {
+            if wildcard_seen {
+                sink_error(sink, arm, "MATCH002", "Unreachable pattern in switch arm; previous wildcard arm subsumes this case");
+                return;
+            }
+            // A guarded `_` (`case _ if c:`) lets the values `c` refuses
+            // through to the arms after it.
+            if kind(s, pat) == nk_pat_wildcard() && arm_guard(s, arm) < 0 { wildcard_seen = true; }
+        }
+        i = i + 1;
+    }
+}
+
+// --- The walk ----------------------------------------------------------------
+
+fn walk_flow(var ref fl: FlowLints, var ref sink: DiagSink, n: i64, at: FlowAt) {
+    let s = fl.p.s;
+    let k = kind(s, n);
+    if is_frame_kind(k) {
+        for c in children(s, n) { walk_flow(fl, sink, c, flow_top()); }
+        return;
+    }
+    if k == nk_guard() { check_guard(s, sink, n); }
+    if k == nk_try() {
+        sink_warning(sink, n, "ERR005", "Error stratification lint: legacy 'try/catch' is restricted to polyglot FFI boundaries; use values-first 'T ! E' with '?' or 'catch'");
+    }
+    if k == nk_yield() { mark_exit(fl, at.any_for, 1); }
+    if k == nk_break() {
+        if lhs(s, n) >= 0 {
+            mark_exit(fl, if at.then_for >= 0 { at.then_for } else { at.any_for }, 2);
+        } else if at.plain >= 0 && kind(s, at.plain) == nk_for() {
+            mark_exit(fl, at.plain, 4);
+        }
+    }
+    if k == nk_continue() && lhs(s, n) >= 0 && !at.in_for {
+        sink_error(sink, n, "LOOP005", "Dynamic bounds continuation 'continue a..b' is only supported inside a 'for' loop");
+    }
+    if k == nk_for() {
+        fl.fors.push(n);
+        let body = rhs(s, n);
+        let inner = FlowAt {
+            plain: n,
+            then_for: if for_then(s, n) >= 0 { n } else { at.then_for },
+            any_for: n,
+            in_for: true,
+        };
+        for c in children(s, n) { walk_flow(fl, sink, c, if c == body { inner } else { at }); }
+        return;
+    }
+    if k == nk_while() {
+        let body = rhs(s, n);
+        let inner = FlowAt { plain: n, then_for: at.then_for, any_for: at.any_for, in_for: false };
+        for c in children(s, n) { walk_flow(fl, sink, c, if c == body { inner } else { at }); }
+        return;
+    }
+    if k == nk_match() {
+        check_arms(s, sink, n);
+        let ch = children(s, n);
+        let inner = FlowAt { plain: n, then_for: at.then_for, any_for: at.any_for, in_for: at.in_for };
+        var i = 0;
+        while i < ch.len() {
+            walk_flow(fl, sink, ch[i], if i == 0 { at } else { inner });
+            i = i + 1;
+        }
+        return;
+    }
+    for c in children(s, n) { walk_flow(fl, sink, c, at); }
+}
+
+fn check_loop(ref fl: FlowLints, var ref sink: DiagSink, f: i64) {
+    let bits = exits_of(fl, f);
+    let has_yield = bits % 2 == 1;
+    let valued = (bits / 2) % 2 == 1;
+    let plain = (bits / 4) % 2 == 1;
+    if valued && has_yield {
+        sink_error(sink, f, "LOOP001", "Cannot mix 'break <expr>' and 'yield <expr>' in the same 'for' loop");
+    } else if plain && valued {
+        sink_error(sink, f, "LOOP002", "Cannot mix valueless 'break;' and valued 'break <expr>;' in the same 'for' loop");
+    } else if for_then(fl.p.s, f) >= 0 && !valued {
+        sink_error(sink, f, "LOOP003", "Loop completion 'then' branch is only valid on a ScalarBreak 'for' loop containing 'break <expr>'");
+    }
+}
+
+/// The control-flow lints of the user's files.
+pub fn check_flow_lints(ref p: Program, var ref sink: DiagSink) {
+    let s = p.s;
+    var fl = FlowLints { p: p, exits: Map<str, i64>(), fors: [] };
+    for root in nodes_of(s, nk_program()) {
+        for item in children(s, root) {
+            if in_user_file(s, item) { walk_flow(fl, sink, item, flow_top()); }
+        }
+    }
+    for f in fl.fors { check_loop(fl, sink, f); }
+}

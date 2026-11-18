@@ -5,7 +5,7 @@
 // Each entry is `[code, message, span start, span end, severity]`, spans in
 // the linked program's offset space (crates/pilot-cli/src/check.rs maps them
 // to files). Severities follow selfhost/diagnostics/model.pilot: 1 error,
-// 2 warning.
+// 2 warning, 3 info.
 pub lvl(0) pkg selfhost.check;
 
 
@@ -36,4 +36,8 @@ pub fn sink_error(var ref sink: DiagSink, n: i64, code: str, message: str) {
 
 pub fn sink_warning(var ref sink: DiagSink, n: i64, code: str, message: str) {
     sink_add(sink, n, code, message, 2);
+}
+
+pub fn sink_info(var ref sink: DiagSink, n: i64, code: str, message: str) {
+    sink_add(sink, n, code, message, 3);
 }

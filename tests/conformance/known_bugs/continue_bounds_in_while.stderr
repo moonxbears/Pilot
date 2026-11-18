@@ -1,0 +1,2 @@
+error[LOOP005]: Dynamic bounds continuation 'continue a..b' is only supported inside a 'for' loop
+continue_bounds_in_while.pilot:8:21

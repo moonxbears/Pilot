@@ -1,0 +1,10 @@
+// A `~self()` destructor gives its struct the owned bit (0b10), so a value
+// type (`: IValue`, 0b00) cannot declare one (COMP005, the lattice check of
+// selfhost/types/bundle_splice.pilot; its layout plan starts at 0b10 when
+// the struct has a destructor). The struct starts at line 5, column 1.
+struct Handle : IValue {
+    pub id: i64;
+    ~self() { print(0); }
+}
+
+fn main() { print(1); }

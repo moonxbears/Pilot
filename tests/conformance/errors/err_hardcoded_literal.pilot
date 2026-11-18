@@ -1,0 +1,16 @@
+// Under `[NoHardcoding]` an integer above 1, a float other than 0.0 and 1.0,
+// or a non-empty string written in the code of a function is an error
+// (HARD001); it belongs in a `const`. 0, 1 and "" are allowed.
+[NoHardcoding]
+fn fee(amount: i64) -> i64 {
+    var zero = 0;
+    var one = 1;
+    let note = "";
+    let rate = 2.5;
+    print("charging");
+    return amount + 50 + zero * one;
+}
+
+fn main() {
+    print(fee(10));
+}

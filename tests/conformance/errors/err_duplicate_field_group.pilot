@@ -1,0 +1,13 @@
+// DECL002 also covers fields declared in a distributive group
+// (`pub { .. }`): `y` at line 8, column 9 repeats the `y` of the group.
+struct Point {
+    pub {
+        x: i64;
+        y: i64;
+    }
+    pub y: i64;
+}
+
+fn main() {
+    print(1);
+}

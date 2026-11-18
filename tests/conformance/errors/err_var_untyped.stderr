@@ -1,0 +1,2 @@
+error[VAR001]: Variable 'later' requires an explicit type annotation or initial value
+err_var_untyped.pilot:4:9

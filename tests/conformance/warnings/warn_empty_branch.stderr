@@ -1,0 +1,2 @@
+warning[COND002]: Empty branch in 'if' statement; branch has no effect
+warn_empty_branch.pilot:6:14

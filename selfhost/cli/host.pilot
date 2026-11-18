@@ -176,6 +176,7 @@ pub fn cli_checker_files() -> List<str> => [
     "selfhost/check/type_tests.pilot",
     "selfhost/check/view_cast.pilot",
     "selfhost/check/quote_value.pilot",
+    "selfhost/check/lint_flow.pilot",
     "selfhost/check/attr_text.pilot",
     "selfhost/check/attr_inherit.pilot",
     "selfhost/check/probes.pilot",
@@ -193,6 +194,9 @@ pub fn cli_checker_files() -> List<str> => [
     "selfhost/check/grammar_attrs.pilot",
     "selfhost/check/stack.pilot",
     "selfhost/check/clearance.pilot",
+    "selfhost/check/lint_decls.pilot",
+    "selfhost/check/suppress.pilot",
+    "selfhost/check/lint_hints.pilot",
     "selfhost/check/main.pilot",
     "selfhost/cli/comptime_tool.pilot",
 ];

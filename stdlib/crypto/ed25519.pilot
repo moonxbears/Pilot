@@ -5,8 +5,11 @@
 // (X : Y : Z : T), scalar reduction mod L, deterministic signing, and strict
 // canonical S < L verification in pure Pilot.
 // ============================================================================
+pub pkg std.crypto.ed25519;
 
-// Arena layout inside `st` map:
+use std.crypto.hash;
+
+// Arena layout inside the scratch list `st`:
 // Field elements occupy 10 limb slots (base + 0..9), where limbs 0..8 are 26-bit
 // and limb 9 is 21-bit (9 * 26 + 21 = 255 bits; 2^255 == 19 mod p, 2^260 == 608 mod p).
 // Extended curve points occupy 40 slots: X (0..9), Y (10..19), Z (20..29), T (30..39).
@@ -35,107 +38,109 @@ pub pure fn ed_byte_to_hex(b: i64) -> str {
     return ed_hex_nib_str(u >> 4) + ed_hex_nib_str(u);
 }
 
+/// Words of the scratch memory every entry point works in: field elements,
+/// points and byte strings at fixed offsets, the highest near 2,700.
+const ED_SCRATCH_WORDS: i64 = 3072;
+
+/// The scratch word set to 1 once the curve constants are in place.
+const ED_INITED_SLOT: i64 = 3071;
+
 // ============================================================================
 // 1. GF(2^255 - 19) Field Operations (9 x 26-bit + 1 x 21-bit limbs)
 // ============================================================================
 
-pub fn ed_fe_zero(st: i64, off: i64) -> i64 {
+pub fn ed_fe_zero(var ref st: List<i64>, off: i64) {
     var i = 0;
     while i < 10 {
-        __engine("map_set", st, off + i, 0);
+        st[off + i] = 0;
         i = i + 1;
     }
-    return st;
 }
 
-pub fn ed_fe_one(st: i64, off: i64) -> i64 {
-    __engine("map_set", st, off, 1);
+pub fn ed_fe_one(var ref st: List<i64>, off: i64) {
+    st[off] = 1;
     var i = 1;
     while i < 10 {
-        __engine("map_set", st, off + i, 0);
+        st[off + i] = 0;
         i = i + 1;
     }
-    return st;
 }
 
-pub fn ed_fe_copy(st: i64, dst: i64, src: i64) -> i64 {
+pub fn ed_fe_copy(var ref st: List<i64>, dst: i64, src: i64) {
     var i = 0;
     while i < 10 {
-        __engine("map_set", st, dst + i, (__engine("map_get", st, src + i) ?? 0));
+        st[dst + i] = st[src + i];
         i = i + 1;
     }
-    return st;
 }
 
-pub fn ed_fe_add(st: i64, out: i64, a: i64, b: i64) -> i64 {
+pub fn ed_fe_add(var ref st: List<i64>, out: i64, a: i64, b: i64) {
     var c = 0;
     var i = 0;
     while i < 9 {
-        let s = ((__engine("map_get", st, a + i) ?? 0)) + ((__engine("map_get", st, b + i) ?? 0)) + c;
-        __engine("map_set", st, out + i, s & 67108863);
+        let s = st[a + i] + st[b + i] + c;
+        st[out + i] = s & 67108863;
         c = s >> 26;
         i = i + 1;
     }
-    let s9 = ((__engine("map_get", st, a + 9) ?? 0)) + ((__engine("map_get", st, b + 9) ?? 0)) + c;
-    __engine("map_set", st, out + 9, s9 & 2097151);
+    let s9 = st[a + 9] + st[b + 9] + c;
+    st[out + 9] = s9 & 2097151;
     let c9 = s9 >> 21;
     if c9 != 0 {
-        let s0 = ((__engine("map_get", st, out) ?? 0)) + (c9 * 19);
-        __engine("map_set", st, out, s0 & 67108863);
+        let s0 = st[out] + (c9 * 19);
+        st[out] = s0 & 67108863;
         let c0 = s0 >> 26;
         if c0 != 0 {
-            __engine("map_set", st, out + 1, ((__engine("map_get", st, out + 1) ?? 0)) + c0);
+            st[out + 1] = st[out + 1] + c0;
         }
     }
-    return st;
 }
 
-pub fn ed_fe_sub(st: i64, out: i64, a: i64, b: i64) -> i64 {
+pub fn ed_fe_sub(var ref st: List<i64>, out: i64, a: i64, b: i64) {
     // Add 2*p to avoid negative limbs: 2p = [134217690, 134217726 x 8, 4194302]
-    var s0 = ((__engine("map_get", st, a) ?? 0)) + 134217690 - ((__engine("map_get", st, b) ?? 0));
-    __engine("map_set", st, out, s0 & 67108863);
+    var s0 = st[a] + 134217690 - st[b];
+    st[out] = s0 & 67108863;
     var c = s0 >> 26;
     var i = 1;
     while i < 9 {
-        let si = ((__engine("map_get", st, a + i) ?? 0)) + 134217726 - ((__engine("map_get", st, b + i) ?? 0)) + c;
-        __engine("map_set", st, out + i, si & 67108863);
+        let si = st[a + i] + 134217726 - st[b + i] + c;
+        st[out + i] = si & 67108863;
         c = si >> 26;
         i = i + 1;
     }
-    let s9 = ((__engine("map_get", st, a + 9) ?? 0)) + 4194302 - ((__engine("map_get", st, b + 9) ?? 0)) + c;
-    __engine("map_set", st, out + 9, s9 & 2097151);
+    let s9 = st[a + 9] + 4194302 - st[b + 9] + c;
+    st[out + 9] = s9 & 2097151;
     let c9 = s9 >> 21;
-    let f0 = ((__engine("map_get", st, out) ?? 0)) + (c9 * 19);
-    __engine("map_set", st, out, f0 & 67108863);
+    let f0 = st[out] + (c9 * 19);
+    st[out] = f0 & 67108863;
     let fc0 = f0 >> 26;
     if fc0 != 0 {
-        __engine("map_set", st, out + 1, ((__engine("map_get", st, out + 1) ?? 0)) + fc0);
+        st[out + 1] = st[out + 1] + fc0;
     }
-    return st;
 }
 
-pub fn ed_fe_mul(st: i64, out: i64, a: i64, b: i64) -> i64 {
-    let a0 = (__engine("map_get", st, a) ?? 0);
-    let a1 = (__engine("map_get", st, a + 1) ?? 0);
-    let a2 = (__engine("map_get", st, a + 2) ?? 0);
-    let a3 = (__engine("map_get", st, a + 3) ?? 0);
-    let a4 = (__engine("map_get", st, a + 4) ?? 0);
-    let a5 = (__engine("map_get", st, a + 5) ?? 0);
-    let a6 = (__engine("map_get", st, a + 6) ?? 0);
-    let a7 = (__engine("map_get", st, a + 7) ?? 0);
-    let a8 = (__engine("map_get", st, a + 8) ?? 0);
-    let a9 = (__engine("map_get", st, a + 9) ?? 0);
+pub fn ed_fe_mul(var ref st: List<i64>, out: i64, a: i64, b: i64) {
+    let a0 = st[a];
+    let a1 = st[a + 1];
+    let a2 = st[a + 2];
+    let a3 = st[a + 3];
+    let a4 = st[a + 4];
+    let a5 = st[a + 5];
+    let a6 = st[a + 6];
+    let a7 = st[a + 7];
+    let a8 = st[a + 8];
+    let a9 = st[a + 9];
 
-    let b0 = (__engine("map_get", st, b) ?? 0);
-    let b1 = (__engine("map_get", st, b + 1) ?? 0);
-    let b2 = (__engine("map_get", st, b + 2) ?? 0);
-    let b3 = (__engine("map_get", st, b + 3) ?? 0);
-    let b4 = (__engine("map_get", st, b + 4) ?? 0);
-    let b5 = (__engine("map_get", st, b + 5) ?? 0);
-    let b6 = (__engine("map_get", st, b + 6) ?? 0);
-    let b7 = (__engine("map_get", st, b + 7) ?? 0);
-    let b8 = (__engine("map_get", st, b + 8) ?? 0);
-    let b9 = (__engine("map_get", st, b + 9) ?? 0);
+    let b0 = st[b];
+    let b1 = st[b + 1];
+    let b2 = st[b + 2];
+    let b3 = st[b + 3];
+    let b4 = st[b + 4];
+    let b5 = st[b + 5];
+    let b6 = st[b + 6];
+    let b7 = st[b + 7];
+    let b8 = st[b + 8];
+    let b9 = st[b + 9];
 
     var t0 = a0*b0;
     var t1 = a0*b1 + a1*b0;
@@ -206,74 +211,72 @@ pub fn ed_fe_mul(st: i64, out: i64, a: i64, b: i64) -> i64 {
     t9 = t9 + (t8 >> 26); t8 = t8 & 67108863;
     t0 = t0 + ((t9 >> 21) * 19); t9 = t9 & 2097151;
 
-    __engine("map_set", st, out, t0);
-    __engine("map_set", st, out + 1, t1);
-    __engine("map_set", st, out + 2, t2);
-    __engine("map_set", st, out + 3, t3);
-    __engine("map_set", st, out + 4, t4);
-    __engine("map_set", st, out + 5, t5);
-    __engine("map_set", st, out + 6, t6);
-    __engine("map_set", st, out + 7, t7);
-    __engine("map_set", st, out + 8, t8);
-    __engine("map_set", st, out + 9, t9);
-    return st;
+    st[out] = t0;
+    st[out + 1] = t1;
+    st[out + 2] = t2;
+    st[out + 3] = t3;
+    st[out + 4] = t4;
+    st[out + 5] = t5;
+    st[out + 6] = t6;
+    st[out + 7] = t7;
+    st[out + 8] = t8;
+    st[out + 9] = t9;
 }
 
-pub fn ed_fe_sq(st: i64, out: i64, a: i64) -> i64 {
-    return ed_fe_mul(st, out, a, a);
+pub fn ed_fe_sq(var ref st: List<i64>, out: i64, a: i64) {
+    ed_fe_mul(st, out, a, a);
 }
 
-pub fn ed_fe_canon(st: i64, off: i64) -> i64 {
+pub fn ed_fe_canon(var ref st: List<i64>, off: i64) {
     var c = 0;
     var i = 0;
     while i < 9 {
-        let v = ((__engine("map_get", st, off + i) ?? 0)) + c;
-        __engine("map_set", st, off + i, v & 67108863);
+        let v = st[off + i] + c;
+        st[off + i] = v & 67108863;
         c = v >> 26;
         i = i + 1;
     }
-    let v9 = ((__engine("map_get", st, off + 9) ?? 0)) + c;
-    __engine("map_set", st, off + 9, v9 & 2097151);
+    let v9 = st[off + 9] + c;
+    st[off + 9] = v9 & 2097151;
     let c9 = v9 >> 21;
     if c9 != 0 {
         var d = c9 * 19;
         i = 0;
         while i < 9 {
-            let vi = ((__engine("map_get", st, off + i) ?? 0)) + d;
-            __engine("map_set", st, off + i, vi & 67108863);
+            let vi = st[off + i] + d;
+            st[off + i] = vi & 67108863;
             d = vi >> 26;
             i = i + 1;
         }
-        __engine("map_set", st, off + 9, ((__engine("map_get", st, off + 9) ?? 0)) + d);
+        st[off + 9] = st[off + 9] + d;
     }
 
     // Test if value >= p by adding 19 and checking if carry reaches bit 21 of limb 9
     var q = 19;
     i = 0;
     while i < 9 {
-        let u = ((__engine("map_get", st, off + i) ?? 0)) + q;
+        let u = st[off + i] + q;
         q = u >> 26;
         i = i + 1;
     }
-    let u9 = ((__engine("map_get", st, off + 9) ?? 0)) + q;
+    let u9 = st[off + 9] + q;
     if (u9 >> 21) > 0 {
         var r = 19;
         i = 0;
         while i < 9 {
-            let wi = ((__engine("map_get", st, off + i) ?? 0)) + r;
-            __engine("map_set", st, off + i, wi & 67108863);
+            let wi = st[off + i] + r;
+            st[off + i] = wi & 67108863;
             r = wi >> 26;
             i = i + 1;
         }
-        let w9 = ((__engine("map_get", st, off + 9) ?? 0)) + r;
-        __engine("map_set", st, off + 9, w9 & 2097151);
+        let w9 = st[off + 9] + r;
+        st[off + 9] = w9 & 2097151;
     }
-    return st;
 }
 
 // Unpacks 32 little-endian bytes from `hex_s` (64 hex chars), clearing bit 255, into `off`.
 // Returns 1 if the 255-bit value is strictly < p, or 0 if >= p.
-pub fn ed_fe_from_hex(st: i64, off: i64, hex_s: str) -> i64 {
+pub fn ed_fe_from_hex(var ref st: List<i64>, off: i64, hex_s: str) -> i64 {
     ed_fe_zero(st, off);
     var bit_idx = 0;
     while bit_idx < 255 {
@@ -284,8 +287,8 @@ pub fn ed_fe_from_hex(st: i64, off: i64, hex_s: str) -> i64 {
         if bit_v != 0 {
             let limb_i = bit_idx / 26;
             let bit_in_l = bit_idx - (limb_i * 26);
-            let cur = (__engine("map_get", st, off + limb_i) ?? 0);
-            __engine("map_set", st, off + limb_i, cur | (1 << bit_in_l));
+            let cur = st[off + limb_i];
+            st[off + limb_i] = cur | (1 << bit_in_l);
         }
         bit_idx = bit_idx + 1;
     }
@@ -293,53 +296,51 @@ pub fn ed_fe_from_hex(st: i64, off: i64, hex_s: str) -> i64 {
     var q = 19;
     var i = 0;
     while i < 9 {
-        let u = ((__engine("map_get", st, off + i) ?? 0)) + q;
+        let u = st[off + i] + q;
         q = u >> 26;
         i = i + 1;
     }
-    let u9 = ((__engine("map_get", st, off + 9) ?? 0)) + q;
+    let u9 = st[off + 9] + q;
     if (u9 >> 21) > 0 {
         return 0;
     }
     return 1;
 }
 
-pub fn ed_fe_to_bytes_map(st: i64, off: i64, bmap_off: i64) -> i64 {
+pub fn ed_fe_to_bytes_map(var ref st: List<i64>, off: i64, bmap_off: i64) {
     ed_fe_canon(st, off);
     var bi = 0;
     while bi < 32 {
-        __engine("map_set", st, bmap_off + bi, 0);
+        st[bmap_off + bi] = 0;
         bi = bi + 1;
     }
     var bit_idx = 0;
     while bit_idx < 255 {
         let limb_i = bit_idx / 26;
         let bit_in_l = bit_idx - (limb_i * 26);
-        let lv = (__engine("map_get", st, off + limb_i) ?? 0);
+        let lv = st[off + limb_i];
         if ((lv >> bit_in_l) & 1) != 0 {
             let byte_i = bit_idx >> 3;
             let bit_in_b = bit_idx & 7;
-            let cur = (__engine("map_get", st, bmap_off + byte_i) ?? 0);
-            __engine("map_set", st, bmap_off + byte_i, cur | (1 << bit_in_b));
+            let cur = st[bmap_off + byte_i];
+            st[bmap_off + byte_i] = cur | (1 << bit_in_b);
         }
         bit_idx = bit_idx + 1;
     }
-    return st;
 }
 
 // Computes `out = base^(2^k)` via `k` squarings
-pub fn ed_fe_sq_n(st: i64, out: i64, base: i64, k: i64) -> i64 {
+pub fn ed_fe_sq_n(var ref st: List<i64>, out: i64, base: i64, k: i64) {
     ed_fe_sq(st, out, base);
     var i = 1;
     while i < k {
         ed_fe_sq(st, out, out);
         i = i + 1;
     }
-    return st;
 }
 
 // Computes `out = z^(p - 2) = z^(2^255 - 21)` using temp slots `tmp .. tmp + 40`
-pub fn ed_fe_inv(st: i64, out: i64, z: i64, tmp: i64) -> i64 {
+pub fn ed_fe_inv(var ref st: List<i64>, out: i64, z: i64, tmp: i64) {
     let t0 = tmp;
     let t1 = tmp + 10;
     let t2 = tmp + 20;
@@ -367,11 +368,10 @@ pub fn ed_fe_inv(st: i64, out: i64, z: i64, tmp: i64) -> i64 {
     ed_fe_mul(st, t1, t2, t1);    // 2^250 - 1
     ed_fe_sq_n(st, t1, t1, 5);    // 2^255 - 32
     ed_fe_mul(st, out, t1, t0);   // 2^255 - 21
-    return st;
 }
 
 // Computes `out = z^((p - 5) / 8) = z^(2^252 - 3)` using temp slots `tmp .. tmp + 40`
-pub fn ed_fe_pow22523(st: i64, out: i64, z: i64, tmp: i64) -> i64 {
+pub fn ed_fe_pow22523(var ref st: List<i64>, out: i64, z: i64, tmp: i64) {
     let t0 = tmp;
     let t1 = tmp + 10;
     let t2 = tmp + 20;
@@ -398,7 +398,6 @@ pub fn ed_fe_pow22523(st: i64, out: i64, z: i64, tmp: i64) -> i64 {
     ed_fe_mul(st, t0, t1, t0);    // 2^250 - 1
     ed_fe_sq_n(st, t0, t0, 2);    // 2^252 - 4
     ed_fe_mul(st, out, t0, z);    // 2^252 - 3
-    return st;
 }
 
 // ============================================================================
@@ -411,9 +410,9 @@ pub fn ed_fe_pow22523(st: i64, out: i64, z: i64, tmp: i64) -> i64 {
 //   1040..1079: Base point B = (Bx, By, 1, Bx*By)
 //   1100..1199: ge_add scratch slots
 
-pub fn ed_init_curve_consts(st: i64) -> i64 {
-    if ((__engine("map_get", st, "inited") ?? 0)) == 1 {
-        return st;
+pub fn ed_init_curve_consts(var ref st: List<i64>) {
+    if st[ED_INITED_SLOT] == 1 {
+        return;
     }
     ed_fe_from_hex(st, 1000, "a3785913ca4deb75abd841414d0a700098e879777940c78c73fe6f2bee6c0352");
     ed_fe_add(st, 1010, 1000, 1000);
@@ -422,29 +421,26 @@ pub fn ed_init_curve_consts(st: i64) -> i64 {
     ed_fe_from_hex(st, 1050, "5866666666666666666666666666666666666666666666666666666666666666");
     ed_fe_one(st, 1060);
     ed_fe_mul(st, 1070, 1040, 1050);
-    __engine("map_set", st, "inited", 1);
-    return st;
+    st[ED_INITED_SLOT] = 1;
 }
 
-pub fn ed_ge_neutral(st: i64, pt: i64) -> i64 {
+pub fn ed_ge_neutral(var ref st: List<i64>, pt: i64) {
     ed_fe_zero(st, pt);
     ed_fe_one(st, pt + 10);
     ed_fe_one(st, pt + 20);
     ed_fe_zero(st, pt + 30);
-    return st;
 }
 
-pub fn ed_ge_copy(st: i64, dst: i64, src: i64) -> i64 {
+pub fn ed_ge_copy(var ref st: List<i64>, dst: i64, src: i64) {
     var i = 0;
     while i < 40 {
-        __engine("map_set", st, dst + i, (__engine("map_get", st, src + i) ?? 0));
+        st[dst + i] = st[src + i];
         i = i + 1;
     }
-    return st;
 }
 
 // Unified complete twisted Edwards addition (`RFC 8032 §5.1.4`)
-pub fn ed_ge_add(st: i64, out_pt: i64, p_pt: i64, q_pt: i64) -> i64 {
+pub fn ed_ge_add(var ref st: List<i64>, out_pt: i64, p_pt: i64, q_pt: i64) {
     let t_ymx1 = 1100;
     let t_ymx2 = 1110;
     let t_a    = 1120;
@@ -485,11 +481,10 @@ pub fn ed_ge_add(st: i64, out_pt: i64, p_pt: i64, q_pt: i64) -> i64 {
     ed_fe_mul(st, out_pt + 10, t_g, t_h);
     ed_fe_mul(st, out_pt + 20, t_f, t_g);
     ed_fe_mul(st, out_pt + 30, t_e, t_h);
-    return st;
 }
 
 // Fast dedicated point doubling (`RFC 8032 §5.1.4` doubling: 4 sq + 3 mul instead of 8 mul)
-pub fn ed_ge_double(st: i64, out_pt: i64, p_pt: i64) -> i64 {
+pub fn ed_ge_double(var ref st: List<i64>, out_pt: i64, p_pt: i64) {
     let t_a = 1100;
     let t_b = 1110;
     let t_c = 1120;
@@ -517,19 +512,18 @@ pub fn ed_ge_double(st: i64, out_pt: i64, p_pt: i64) -> i64 {
     ed_fe_mul(st, out_pt + 10, t_g, t_h);
     ed_fe_mul(st, out_pt + 20, t_f, t_g);
     ed_fe_mul(st, out_pt + 30, t_e, t_h);
-    return st;
 }
 
 // Scalar multiplication `out_pt = [scalar_32_bytes] * base_pt`
 // `scalar_b_off` holds 32 little-endian bytes (`0..31`).
-pub fn ed_ge_scalarmult(st: i64, out_pt: i64, scalar_b_off: i64, base_pt: i64, tmp_pt: i64) -> i64 {
+pub fn ed_ge_scalarmult(var ref st: List<i64>, out_pt: i64, scalar_b_off: i64, base_pt: i64, tmp_pt: i64) {
     ed_ge_neutral(st, out_pt);
     ed_ge_copy(st, tmp_pt, base_pt);
 
     var bit_i = 255;
     var started = 0;
     while bit_i >= 0 {
-        let byte_v = (__engine("map_get", st, scalar_b_off + (bit_i >> 3)) ?? 0);
+        let byte_v = st[scalar_b_off + (bit_i >> 3)];
         let bit_v = (byte_v >> (bit_i & 7)) & 1;
         if started == 1 {
             ed_ge_double(st, out_pt, out_pt);
@@ -544,10 +538,9 @@ pub fn ed_ge_scalarmult(st: i64, out_pt: i64, scalar_b_off: i64, base_pt: i64, t
         }
         bit_i = bit_i - 1;
     }
-    return st;
 }
 
-pub fn ed_ge_to_hex(st: i64, pt: i64, scratch: i64) -> str {
+pub fn ed_ge_to_hex(var ref st: List<i64>, pt: i64, scratch: i64) -> str {
     let zinv = scratch;
     let x_fe = scratch + 10;
     let y_fe = scratch + 20;
@@ -561,21 +554,21 @@ pub fn ed_ge_to_hex(st: i64, pt: i64, scratch: i64) -> str {
     ed_fe_to_bytes_map(st, x_fe, x_bytes);
     ed_fe_to_bytes_map(st, y_fe, y_bytes);
 
-    let x_lsb = ((__engine("map_get", st, x_bytes) ?? 0)) & 1;
-    let y31 = ((__engine("map_get", st, y_bytes + 31) ?? 0)) | (x_lsb << 7);
-    __engine("map_set", st, y_bytes + 31, y31);
+    let x_lsb = st[x_bytes] & 1;
+    let y31 = st[y_bytes + 31] | (x_lsb << 7);
+    st[y_bytes + 31] = y31;
 
     var hex_s = "";
     var i = 0;
     while i < 32 {
-        hex_s = hex_s + ed_byte_to_hex((__engine("map_get", st, y_bytes + i) ?? 0));
+        hex_s = hex_s + ed_byte_to_hex(st[y_bytes + i]);
         i = i + 1;
     }
     return hex_s;
 }
 
 // Decodes a 32-byte point from `hex_s` into `pt`. Returns 1 if valid, 0 if invalid.
-pub fn ed_ge_from_hex(st: i64, pt: i64, hex_s: str, scratch: i64) -> i64 {
+pub fn ed_ge_from_hex(var ref st: List<i64>, pt: i64, hex_s: str, scratch: i64) -> i64 {
     if hex_s.len() != 64 {
         return 0;
     }
@@ -624,7 +617,7 @@ pub fn ed_ge_from_hex(st: i64, pt: i64, hex_s: str, scratch: i64) -> i64 {
     var is_zero_diff = 1;
     var bi = 0;
     while bi < 32 {
-        if ((__engine("map_get", st, x_bytes + bi) ?? 0)) != 0 {
+        if st[x_bytes + bi] != 0 {
             is_zero_diff = 0;
         }
         bi = bi + 1;
@@ -636,7 +629,7 @@ pub fn ed_ge_from_hex(st: i64, pt: i64, hex_s: str, scratch: i64) -> i64 {
         var is_neg_diff = 1;
         bi = 0;
         while bi < 32 {
-            if ((__engine("map_get", st, x_bytes + bi) ?? 0)) != 0 {
+            if st[x_bytes + bi] != 0 {
                 is_neg_diff = 0;
             }
             bi = bi + 1;
@@ -651,7 +644,7 @@ pub fn ed_ge_from_hex(st: i64, pt: i64, hex_s: str, scratch: i64) -> i64 {
     var x_is_zero = 1;
     bi = 0;
     while bi < 32 {
-        if ((__engine("map_get", st, x_bytes + bi) ?? 0)) != 0 {
+        if st[x_bytes + bi] != 0 {
             x_is_zero = 0;
         }
         bi = bi + 1;
@@ -659,7 +652,7 @@ pub fn ed_ge_from_hex(st: i64, pt: i64, hex_s: str, scratch: i64) -> i64 {
     if x_is_zero == 1 && x_sign == 1 {
         return 0;
     }
-    let cur_sign = ((__engine("map_get", st, x_bytes) ?? 0)) & 1;
+    let cur_sign = st[x_bytes] & 1;
     if cur_sign != x_sign {
         ed_fe_zero(st, one_fe);
         ed_fe_sub(st, x_fe, one_fe, x_fe);
@@ -734,7 +727,7 @@ pub pure fn ed_scalar_is_canonical_hex(s_hex: str) -> bool {
 
 // Reduces 32 16-bit limbs at `w_off` (representing up to 512 bits) modulo L,
 // writing 32 canonical little-endian bytes to `out_b_off`.
-pub fn ed_reduce_limbs16_mod_l(st: i64, w_off: i64, out_b_off: i64) -> i64 {
+pub fn ed_reduce_limbs16_mod_l(var ref st: List<i64>, w_off: i64, out_b_off: i64) {
     var top = 31;
     while top >= 15 {
         var pass = 0;
@@ -742,22 +735,22 @@ pub fn ed_reduce_limbs16_mod_l(st: i64, w_off: i64, out_b_off: i64) -> i64 {
             var c = 0;
             var k = 0;
             while k < top {
-                let vk = ((__engine("map_get", st, w_off + k) ?? 0)) + c;
-                __engine("map_set", st, w_off + k, vk & 65535);
+                let vk = st[w_off + k] + c;
+                st[w_off + k] = vk & 65535;
                 c = vk >> 16;
                 k = k + 1;
             }
-            let vtop = ((__engine("map_get", st, w_off + top) ?? 0)) + c;
-            __engine("map_set", st, w_off + top, vtop);
+            let vtop = st[w_off + top] + c;
+            st[w_off + top] = vtop;
 
             let q = vtop >> 12;
             if q != 0 {
-                __engine("map_set", st, w_off + top, vtop - (q << 12));
+                st[w_off + top] = vtop - (q << 12);
                 var j = 0;
                 while j < 8 {
                     let pos = (top - 15) + j;
-                    let cur = (__engine("map_get", st, w_off + pos) ?? 0);
-                    __engine("map_set", st, w_off + pos, cur - (q * ed_order_l_limb16(j)));
+                    let cur = st[w_off + pos];
+                    st[w_off + pos] = cur - (q * ed_order_l_limb16(j));
                     j = j + 1;
                 }
             }
@@ -767,18 +760,18 @@ pub fn ed_reduce_limbs16_mod_l(st: i64, w_off: i64, out_b_off: i64) -> i64 {
         var c2 = 0;
         var k2 = 0;
         while k2 < top {
-            let vk2 = ((__engine("map_get", st, w_off + k2) ?? 0)) + c2;
-            __engine("map_set", st, w_off + k2, vk2 & 65535);
+            let vk2 = st[w_off + k2] + c2;
+            st[w_off + k2] = vk2 & 65535;
             c2 = vk2 >> 16;
             k2 = k2 + 1;
         }
-        let rem_top = ((__engine("map_get", st, w_off + top) ?? 0)) + c2;
+        let rem_top = st[w_off + top] + c2;
         if top > 15 {
-            __engine("map_set", st, w_off + top, 0);
-            let prev = (__engine("map_get", st, w_off + top - 1) ?? 0);
-            __engine("map_set", st, w_off + top - 1, prev + (rem_top << 16));
+            st[w_off + top] = 0;
+            let prev = st[w_off + top - 1];
+            st[w_off + top - 1] = prev + (rem_top << 16);
         } else {
-            __engine("map_set", st, w_off + 15, rem_top);
+            st[w_off + 15] = rem_top;
         }
         top = top - 1;
     }
@@ -787,7 +780,7 @@ pub fn ed_reduce_limbs16_mod_l(st: i64, w_off: i64, out_b_off: i64) -> i64 {
     var ge_l = 1;
     var idx = 15;
     while idx >= 0 {
-        let wi = (__engine("map_get", st, w_off + idx) ?? 0);
+        let wi = st[w_off + idx];
         let li = ed_order_l_limb16(idx);
         if wi < li {
             ge_l = 0;
@@ -803,12 +796,12 @@ pub fn ed_reduce_limbs16_mod_l(st: i64, w_off: i64, out_b_off: i64) -> i64 {
         var borrow = 0;
         var m = 0;
         while m < 16 {
-            let d = ((__engine("map_get", st, w_off + m) ?? 0)) - ed_order_l_limb16(m) - borrow;
+            let d = st[w_off + m] - ed_order_l_limb16(m) - borrow;
             if d < 0 {
-                __engine("map_set", st, w_off + m, d + 65536);
+                st[w_off + m] = d + 65536;
                 borrow = 1;
             } else {
-                __engine("map_set", st, w_off + m, d);
+                st[w_off + m] = d;
                 borrow = 0;
             }
             m = m + 1;
@@ -817,100 +810,104 @@ pub fn ed_reduce_limbs16_mod_l(st: i64, w_off: i64, out_b_off: i64) -> i64 {
 
     var bi = 0;
     while bi < 16 {
-        let w = (__engine("map_get", st, w_off + bi) ?? 0);
-        __engine("map_set", st, out_b_off + (bi * 2), w & 255);
-        __engine("map_set", st, out_b_off + (bi * 2) + 1, (w >> 8) & 255);
+        let w = st[w_off + bi];
+        st[out_b_off + (bi * 2)] = w & 255;
+        st[out_b_off + (bi * 2) + 1] = (w >> 8) & 255;
         bi = bi + 1;
     }
-    return st;
 }
 
 // Reduces 64 little-endian bytes (`in_b_off + 0..63`) modulo L -> 32 bytes at `out_b_off`
-pub fn ed_reduce_64bytes_mod_l(st: i64, in_b_off: i64, w_off: i64, out_b_off: i64) -> i64 {
+pub fn ed_reduce_64bytes_mod_l(var ref st: List<i64>, in_b_off: i64, w_off: i64, out_b_off: i64) {
     var i = 0;
     while i < 32 {
-        let b0 = (__engine("map_get", st, in_b_off + (i * 2)) ?? 0);
-        let b1 = (__engine("map_get", st, in_b_off + (i * 2) + 1) ?? 0);
-        __engine("map_set", st, w_off + i, b0 | (b1 << 8));
+        let b0 = st[in_b_off + (i * 2)];
+        let b1 = st[in_b_off + (i * 2) + 1];
+        st[w_off + i] = b0 | (b1 << 8);
         i = i + 1;
     }
-    return ed_reduce_limbs16_mod_l(st, w_off, out_b_off);
+    ed_reduce_limbs16_mod_l(st, w_off, out_b_off);
 }
 
 // Computes `out_b = (r_b + k_b * a_b) mod L` where `r_b, k_b, a_b` are 32-byte little-endian scalars
-pub fn ed_scalar_muladd_mod_l(st: i64, r_b: i64, k_b: i64, a_b: i64, w_off: i64, out_b: i64) -> i64 {
+pub fn ed_scalar_muladd_mod_l(var ref st: List<i64>, r_b: i64, k_b: i64, a_b: i64, w_off: i64, out_b: i64) {
     var i = 0;
     while i < 16 {
-        let rb = ((__engine("map_get", st, r_b + (i * 2)) ?? 0)) | (((__engine("map_get", st, r_b + (i * 2) + 1) ?? 0)) << 8);
-        __engine("map_set", st, w_off + i, rb);
-        __engine("map_set", st, w_off + 16 + i, 0);
+        let rb = st[r_b + (i * 2)] | (st[r_b + (i * 2) + 1] << 8);
+        st[w_off + i] = rb;
+        st[w_off + 16 + i] = 0;
         i = i + 1;
     }
     var ki = 0;
     while ki < 16 {
-        let kw = ((__engine("map_get", st, k_b + (ki * 2)) ?? 0)) | (((__engine("map_get", st, k_b + (ki * 2) + 1) ?? 0)) << 8);
+        let kw = st[k_b + (ki * 2)] | (st[k_b + (ki * 2) + 1] << 8);
         var ai = 0;
         while ai < 16 {
-            let aw = ((__engine("map_get", st, a_b + (ai * 2)) ?? 0)) | (((__engine("map_get", st, a_b + (ai * 2) + 1) ?? 0)) << 8);
-            let cur = (__engine("map_get", st, w_off + ki + ai) ?? 0);
-            __engine("map_set", st, w_off + ki + ai, cur + (kw * aw));
+            let aw = st[a_b + (ai * 2)] | (st[a_b + (ai * 2) + 1] << 8);
+            let cur = st[w_off + ki + ai];
+            st[w_off + ki + ai] = cur + (kw * aw);
             ai = ai + 1;
         }
         ki = ki + 1;
     }
-    return ed_reduce_limbs16_mod_l(st, w_off, out_b);
+    ed_reduce_limbs16_mod_l(st, w_off, out_b);
 }
 
 // ============================================================================
 // 4. Public RFC 8032 Ed25519 Entrypoints
 // ============================================================================
 
+/// SHA-512 of the first `n` bytes of `bytes`: the 64 digest bytes.
+fn ed_sha512(ref bytes: List<i64>, n: i64) -> List<i64> => hash_words_be_bytes(sha512_words(bytes, n));
+
+[Workaround("check.escape_through_ref_arg", "the key text is copied into a new string before it is returned")]
 pub fn ed25519_public_key_hex(seed32_hex: str) -> str {
-    let seed_b = __engine("map_new");
+    var seed_b = hash_zero_words(32);
     var i = 0;
     while i < 32 {
-        __engine("map_set", seed_b, i, ed_hex_byte_at(seed32_hex, i));
+        seed_b[i] = ed_hex_byte_at(seed32_hex, i);
         i = i + 1;
     }
-    let h = sha512_hash_byte_map(seed_b, 32);
+    let h = ed_sha512(seed_b, 32);
 
-    let st = __engine("map_new");
+    var st = hash_zero_words(ED_SCRATCH_WORDS);
     ed_init_curve_consts(st);
     i = 0;
     while i < 32 {
-        __engine("map_set", st, 2000 + i, (__engine("map_get", h, i) ?? 0));
+        st[2000 + i] = h[i];
         i = i + 1;
     }
-    let b0 = ((__engine("map_get", st, 2000) ?? 0)) & 248;
-    let b31 = (((__engine("map_get", st, 2031) ?? 0)) & 127) | 64;
-    __engine("map_set", st, 2000, b0);
-    __engine("map_set", st, 2031, b31);
+    let b0 = st[2000] & 248;
+    let b31 = (st[2031] & 127) | 64;
+    st[2000] = b0;
+    st[2031] = b31;
 
     ed_ge_scalarmult(st, 2100, 2000, 1040, 2140);
-    return ed_ge_to_hex(st, 2100, 2200);
+    let pk_hex = ed_ge_to_hex(st, 2100, 2200);
+    return "" + pk_hex;
 }
 
 pub fn ed25519_sign_hex(seed32_hex: str, msg_hex: str) -> str {
-    let seed_b = __engine("map_new");
+    var seed_b = hash_zero_words(32);
     var i = 0;
     while i < 32 {
-        __engine("map_set", seed_b, i, ed_hex_byte_at(seed32_hex, i));
+        seed_b[i] = ed_hex_byte_at(seed32_hex, i);
         i = i + 1;
     }
-    let h_seed = sha512_hash_byte_map(seed_b, 32);
+    let h_seed = ed_sha512(seed_b, 32);
 
-    let st = __engine("map_new");
+    var st = hash_zero_words(ED_SCRATCH_WORDS);
     ed_init_curve_consts(st);
 
     // 1. Clamped secret scalar `a` at 2000..2031, prefix at 2032..2063
     i = 0;
     while i < 32 {
-        __engine("map_set", st, 2000 + i, (__engine("map_get", h_seed, i) ?? 0));
-        __engine("map_set", st, 2032 + i, (__engine("map_get", h_seed, 32 + i) ?? 0));
+        st[2000 + i] = h_seed[i];
+        st[2032 + i] = h_seed[32 + i];
         i = i + 1;
     }
-    __engine("map_set", st, 2000, ((__engine("map_get", st, 2000) ?? 0)) & 248);
-    __engine("map_set", st, 2031, (((__engine("map_get", st, 2031) ?? 0)) & 127) | 64);
+    st[2000] = st[2000] & 248;
+    st[2031] = (st[2031] & 127) | 64;
 
     // 2. Public key `A = [a]B`
     ed_ge_scalarmult(st, 2100, 2000, 1040, 2140);
@@ -918,21 +915,21 @@ pub fn ed25519_sign_hex(seed32_hex: str, msg_hex: str) -> str {
 
     // 3. `r = SHA512(prefix || msg) mod L`
     let mlen = msg_hex.len() / 2;
-    let r_in = __engine("map_new");
+    var r_in = hash_zero_words(32 + mlen);
     i = 0;
     while i < 32 {
-        __engine("map_set", r_in, i, (__engine("map_get", st, 2032 + i) ?? 0));
+        r_in[i] = st[2032 + i];
         i = i + 1;
     }
     i = 0;
     while i < mlen {
-        __engine("map_set", r_in, 32 + i, ed_hex_byte_at(msg_hex, i));
+        r_in[32 + i] = ed_hex_byte_at(msg_hex, i);
         i = i + 1;
     }
-    let h_r = sha512_hash_byte_map(r_in, 32 + mlen);
+    let h_r = ed_sha512(r_in, 32 + mlen);
     i = 0;
     while i < 64 {
-        __engine("map_set", st, 2400 + i, (__engine("map_get", h_r, i) ?? 0));
+        st[2400 + i] = h_r[i];
         i = i + 1;
     }
     ed_reduce_64bytes_mod_l(st, 2400, 2500, 2064);
@@ -942,22 +939,22 @@ pub fn ed25519_sign_hex(seed32_hex: str, msg_hex: str) -> str {
     let r_hex = ed_ge_to_hex(st, 2100, 2200);
 
     // 5. `k = SHA512(R || A || msg) mod L`
-    let k_in = __engine("map_new");
+    var k_in = hash_zero_words(64 + mlen);
     i = 0;
     while i < 32 {
-        __engine("map_set", k_in, i, ed_hex_byte_at(r_hex, i));
-        __engine("map_set", k_in, 32 + i, ed_hex_byte_at(pk_hex, i));
+        k_in[i] = ed_hex_byte_at(r_hex, i);
+        k_in[32 + i] = ed_hex_byte_at(pk_hex, i);
         i = i + 1;
     }
     i = 0;
     while i < mlen {
-        __engine("map_set", k_in, 64 + i, ed_hex_byte_at(msg_hex, i));
+        k_in[64 + i] = ed_hex_byte_at(msg_hex, i);
         i = i + 1;
     }
-    let h_k = sha512_hash_byte_map(k_in, 64 + mlen);
+    let h_k = ed_sha512(k_in, 64 + mlen);
     i = 0;
     while i < 64 {
-        __engine("map_set", st, 2400 + i, (__engine("map_get", h_k, i) ?? 0));
+        st[2400 + i] = h_k[i];
         i = i + 1;
     }
     ed_reduce_64bytes_mod_l(st, 2400, 2500, 2600);
@@ -967,7 +964,7 @@ pub fn ed25519_sign_hex(seed32_hex: str, msg_hex: str) -> str {
     var s_hex = "";
     i = 0;
     while i < 32 {
-        s_hex = s_hex + ed_byte_to_hex((__engine("map_get", st, 2640 + i) ?? 0));
+        s_hex = s_hex + ed_byte_to_hex(st[2640 + i]);
         i = i + 1;
     }
     return r_hex + s_hex;
@@ -985,7 +982,7 @@ pub fn ed25519_verify_hex(pk32_hex: str, msg_hex: str, sig64_hex: str) -> bool {
         return false;
     }
 
-    let st = __engine("map_new");
+    var st = hash_zero_words(ED_SCRATCH_WORDS);
     ed_init_curve_consts(st);
 
     // Decode A (at 2100) and R (at 2140)
@@ -1000,23 +997,23 @@ pub fn ed25519_verify_hex(pk32_hex: str, msg_hex: str, sig64_hex: str) -> bool {
 
     // Compute k = SHA512(R || A || msg) mod L
     let mlen = msg_hex.len() / 2;
-    let k_in = __engine("map_new");
+    var k_in = hash_zero_words(64 + mlen);
     var i = 0;
     while i < 32 {
-        __engine("map_set", k_in, i, ed_hex_byte_at(r_hex, i));
-        __engine("map_set", k_in, 32 + i, ed_hex_byte_at(pk32_hex, i));
-        __engine("map_set", st, 2000 + i, ed_hex_byte_at(s_hex, i));
+        k_in[i] = ed_hex_byte_at(r_hex, i);
+        k_in[32 + i] = ed_hex_byte_at(pk32_hex, i);
+        st[2000 + i] = ed_hex_byte_at(s_hex, i);
         i = i + 1;
     }
     i = 0;
     while i < mlen {
-        __engine("map_set", k_in, 64 + i, ed_hex_byte_at(msg_hex, i));
+        k_in[64 + i] = ed_hex_byte_at(msg_hex, i);
         i = i + 1;
     }
-    let h_k = sha512_hash_byte_map(k_in, 64 + mlen);
+    let h_k = ed_sha512(k_in, 64 + mlen);
     i = 0;
     while i < 64 {
-        __engine("map_set", st, 2400 + i, (__engine("map_get", h_k, i) ?? 0));
+        st[2400 + i] = h_k[i];
         i = i + 1;
     }
     ed_reduce_64bytes_mod_l(st, 2400, 2500, 2064);

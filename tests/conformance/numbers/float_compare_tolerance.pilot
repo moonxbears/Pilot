@@ -1,0 +1,15 @@
+// Comparing floats against a tolerance, or ordering them, is no FLOAT001;
+// the program runs without a warning.
+//
+// Expected output, worked by hand: q = 0.1 + 0.2, which in binary64 is
+// 0.30000000000000004 (not 0.3), so |q - 0.3| is about 5.6e-17 < 1e-9:
+// "true"; q < 0.5: "true"; q > 0.5: "false".
+fn main() {
+    let a = 0.1;
+    let q = a + 0.2;
+    let d = q - 0.3;
+    let close = d < 0.000000001 && d > -0.000000001;
+    print(close);
+    print(q < 0.5);
+    print(q > 0.5);
+}

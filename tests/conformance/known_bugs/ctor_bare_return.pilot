@@ -1,0 +1,15 @@
+// Known bug seed.ctor_bare_return: a bare `return;` leaves a constructor
+// early, so the value keeps what it had so far (here the field default 0).
+// The seed hands back no value at all instead, and reading `n` stops; PilIR
+// and the emitted C print 0.
+struct Counter {
+    pub n: i64 = 0;
+    self(start: i64) {
+        if start < 0 { return; }
+        .n = start;
+    }
+}
+
+fn main() {
+    print(Counter(-1).n);
+}

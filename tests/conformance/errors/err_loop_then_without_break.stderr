@@ -1,0 +1,2 @@
+error[LOOP003]: Loop completion 'then' branch is only valid on a ScalarBreak 'for' loop containing 'break <expr>'
+err_loop_then_without_break.pilot:5:12

@@ -1,0 +1,14 @@
+// FLOW002: a constructor fills in its value in place, so it cannot return
+// one. The `return` starts at line 7, column 9.
+struct Counter {
+    pub n: i64;
+    self(start: i64) {
+        .n = start;
+        return 5;
+    }
+}
+
+fn main() {
+    let c = Counter(1);
+    print(c.n);
+}

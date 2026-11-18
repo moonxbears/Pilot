@@ -1,0 +1,2 @@
+error[FLOW002]: Constructor 'self()' cannot return a value; constructors initialize state in-place
+err_ctor_return_value.pilot:7:9

@@ -1,0 +1,4 @@
+error[KW001]: Identifier 'call' is a keyword and cannot be used as an identifier name
+err_keyword_name.pilot:9:5
+error[KW001]: Identifier 'res' is a keyword and cannot be used as an identifier name
+err_keyword_name.pilot:13:10

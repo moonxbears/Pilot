@@ -1,0 +1,15 @@
+// ERR005: a `try` statement is a warning; failures are values (`T ! E`
+// handled with `?` and `catch`). The program still runs.
+fn risky(n: i64) -> i64 ! str {
+    if n > 1 { return fail("big"); }
+    return n;
+}
+
+fn main() {
+    // The `try` starts at line 10, column 5.
+    try {
+        print(risky(1)?);
+    } catch e {
+        print(e);
+    }
+}

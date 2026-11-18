@@ -1,0 +1,2 @@
+error[LOOP001]: Cannot mix 'break <expr>' and 'yield <expr>' in the same 'for' loop
+err_loop_break_and_yield.pilot:5:13

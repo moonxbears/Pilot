@@ -1,0 +1,14 @@
+// A word the grammar reads as a keyword in one place and as a name in
+// others (`value`, `state`, `order`) may name a binding even where the
+// keyword registry (stdlib/core/keywords.pilot) is linked; any other
+// registered word may not (errors/err_keyword_name). KW001 is not reported
+// here, so the program runs: 3 + 4 * 5 = 23.
+use Pilot.Core.Keywords;
+
+fn main() {
+    let value = 3;
+    let state = 4;
+    print(value + scaled(state, 5));
+}
+
+fn scaled(order: i64, by: i64) -> i64 => order * by;

@@ -1,0 +1,2 @@
+error[NULL002]: 'guard' else block must diverge with 'return', 'break', 'continue', 'yield', or 'panic'
+err_guard_else_falls_through.pilot:5:27

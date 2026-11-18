@@ -1,0 +1,12 @@
+// An `if` on a computed condition whose first branch does something is
+// neither COND001 nor COND002; an empty `else` is no COND002 either (only
+// the first branch is looked at). The program runs without a warning.
+//
+// Expected output, worked by hand: x = 4; 4 > 3 prints "1"; 4 == 5 is
+// false and its empty `else` prints nothing; 4 % 2 == 0 prints "2".
+fn main() {
+    let x = 4;
+    if x > 3 { print(1); }
+    if x == 5 { print(0); } else { }
+    if x % 2 == 0 { print(2); }
+}

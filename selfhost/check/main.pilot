@@ -50,6 +50,7 @@ fn report_to_host(ref rows: List<DiagRow>) -> i64 => __engine("chk_report", rows
 /// Applies every rule of the checker to the inferred program.
 pub fn check_all(var ref inf: Infer, var ref sink: DiagSink) {
     let p = inf.p;
+    check_decl_lints(inf, sink);
     check_rules(inf, sink);
     check_generics(inf, sink);
     check_ownership(inf, sink);
@@ -75,6 +76,8 @@ pub fn check_all(var ref inf: Infer, var ref sink: DiagSink) {
     check_type_tests(inf, sink);
     check_view_casts(inf, sink);
     check_quotes(inf, sink);
+    check_flow_lints(p, sink);
+    check_lint_hints(p, sink);
 }
 
 /// Everything the seed carries out around the program's nodes, as rows for

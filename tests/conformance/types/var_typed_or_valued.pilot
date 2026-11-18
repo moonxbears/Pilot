@@ -1,0 +1,13 @@
+// A `var` with a type and no value, or with a value and no type, is no
+// VAR001: either one says what it holds.
+//
+// Expected output, worked by hand: total starts unset and is given 5, then
+// 5 + 2 = 7; step = 2.
+fn main() {
+    var total: i64;
+    var step = 2;
+    total = 5;
+    total = total + step;
+    print(total);
+    print(step);
+}

@@ -4,17 +4,7 @@
 // =========================================================================
 pub pkg selfhost.pkg;
 
-pub enum ManifestField {
-    Name,
-    Version,
-    License,
-    Entry,
-    Dependencies,
-}
-
-pub pure fn manifest_field_name(field: ManifestField) -> str {
-    return "name";
-}
+use std.crypto.hash;
 
 fn mf_find(haystack: str, needle: str, start: i64) -> i64 {
     let hl = haystack.len();
@@ -46,106 +36,71 @@ pub pure fn scaffold_canonical_main_pilot(pkg_name: str) -> str {
            "}\n";
 }
 
-pub fn parse_manifest_json(json_src: str) -> i64 {
-    let mf = __engine("map_new");
-    let nl = json_src.len();
-    
-    // Extract "name"
-    let n_idx = mf_find(json_src, "\"name\":", 0);
-    if n_idx >= 0 {
-        let q1 = mf_find(json_src, "\"", n_idx + 7);
-        if q1 >= 0 {
-            let q2 = mf_find(json_src, "\"", q1 + 1);
-            if q2 >= 0 {
-                let name = json_src.slice(q1 + 1, q2);
-                let _s = __engine("map_set", mf, "name", name);
-            }
-        }
-    }
-    
-    // Extract "version"
-    let v_idx = mf_find(json_src, "\"version\":", 0);
-    if v_idx >= 0 {
-        let q1 = mf_find(json_src, "\"", v_idx + 10);
-        if q1 >= 0 {
-            let q2 = mf_find(json_src, "\"", q1 + 1);
-            if q2 >= 0 {
-                let ver = json_src.slice(q1 + 1, q2);
-                let _s = __engine("map_set", mf, "version", ver);
-            }
-        }
-    }
+/// One dependency entry: the package name and its version requirement.
+pub struct ManifestDep {
+    pub name: str;
+    pub version: str;
+}
 
-    // Extract dependencies
-    var dep_count = 0;
-    let d_idx = mf_find(json_src, "\"dependencies\":", 0);
-    if d_idx >= 0 {
-        let b_open = mf_find(json_src, "{", d_idx + 15);
-        if b_open >= 0 {
-            let b_close = mf_find(json_src, "}", b_open + 1);
-            if b_close >= 0 {
-                var p = b_open + 1;
-                while p < b_close {
-                    let k_q1 = mf_find(json_src, "\"", p);
-                    if k_q1 < 0 || k_q1 >= b_close { break; }
-                    let k_q2 = mf_find(json_src, "\"", k_q1 + 1);
-                    if k_q2 < 0 || k_q2 >= b_close { break; }
-                    let d_name = json_src.slice(k_q1 + 1, k_q2);
-                    
-                    let col = mf_find(json_src, ":", k_q2 + 1);
-                    if col < 0 || col >= b_close { break; }
-                    let v_q1 = mf_find(json_src, "\"", col + 1);
-                    if v_q1 < 0 || v_q1 >= b_close { break; }
-                    let v_q2 = mf_find(json_src, "\"", v_q1 + 1);
-                    if v_q2 < 0 || v_q2 >= b_close { break; }
-                    let d_ver = json_src.slice(v_q1 + 1, v_q2);
-                    
-                    let _sd = __engine("map_set", mf, "dep:" + d_name, d_ver);
-                    let _sdn = __engine("map_set", mf, "dep_name_" + dep_count, d_name);
-                    dep_count = dep_count + 1;
-                    p = v_q2 + 1;
-                }
-            }
-        }
-    }
-    let _sc = __engine("map_set", mf, "dep_count", dep_count);
+/// The fields of a `pilot.json` the package tools read.
+pub struct PkgManifest : IObject {
+    pub name: str;
+    pub version: str;
+    pub deps: List<ManifestDep>;
+    pub dev_deps: List<ManifestDep>;
+    pub excludes: List<str>;
+}
 
-    // Extract devDependencies
-    var dev_count = 0;
-    let dev_idx = mf_find(json_src, "\"devDependencies\":", 0);
-    if dev_idx >= 0 {
-        let db_open = mf_find(json_src, "{", dev_idx + 18);
-        if db_open >= 0 {
-            let db_close = mf_find(json_src, "}", db_open + 1);
-            if db_close >= 0 {
-                var dp = db_open + 1;
-                while dp < db_close {
-                    let k_q1 = mf_find(json_src, "\"", dp);
-                    if k_q1 < 0 || k_q1 >= db_close { break; }
-                    let k_q2 = mf_find(json_src, "\"", k_q1 + 1);
-                    if k_q2 < 0 || k_q2 >= db_close { break; }
-                    let d_name = json_src.slice(k_q1 + 1, k_q2);
-                    
-                    let col = mf_find(json_src, ":", k_q2 + 1);
-                    if col < 0 || col >= db_close { break; }
-                    let v_q1 = mf_find(json_src, "\"", col + 1);
-                    if v_q1 < 0 || v_q1 >= db_close { break; }
-                    let v_q2 = mf_find(json_src, "\"", v_q1 + 1);
-                    if v_q2 < 0 || v_q2 >= db_close { break; }
-                    let d_ver = json_src.slice(v_q1 + 1, v_q2);
-                    
-                    let _sdd = __engine("map_set", mf, "dev_dep:" + d_name, d_ver);
-                    let _sddn = __engine("map_set", mf, "dev_dep_name_" + dev_count, d_name);
-                    dev_count = dev_count + 1;
-                    dp = v_q2 + 1;
-                }
-            }
-        }
+/// The `"key": "value"` string pairs of the flat JSON object under `key_tag`.
+fn mf_parse_dep_object(json_src: str, key_tag: str, var ref out: List<ManifestDep>) {
+    let d_idx = mf_find(json_src, key_tag, 0);
+    if d_idx < 0 { return; }
+    let b_open = mf_find(json_src, "{", d_idx + key_tag.len());
+    if b_open < 0 { return; }
+    let b_close = mf_find(json_src, "}", b_open + 1);
+    if b_close < 0 { return; }
+    var p = b_open + 1;
+    while p < b_close {
+        let k_q1 = mf_find(json_src, "\"", p);
+        if k_q1 < 0 || k_q1 >= b_close { break; }
+        let k_q2 = mf_find(json_src, "\"", k_q1 + 1);
+        if k_q2 < 0 || k_q2 >= b_close { break; }
+        let d_name = json_src.slice(k_q1 + 1, k_q2);
+
+        let col = mf_find(json_src, ":", k_q2 + 1);
+        if col < 0 || col >= b_close { break; }
+        let v_q1 = mf_find(json_src, "\"", col + 1);
+        if v_q1 < 0 || v_q1 >= b_close { break; }
+        let v_q2 = mf_find(json_src, "\"", v_q1 + 1);
+        if v_q2 < 0 || v_q2 >= b_close { break; }
+        out.push(ManifestDep { name: d_name, version: json_src.slice(v_q1 + 1, v_q2) });
+        p = v_q2 + 1;
     }
-    let _scd = __engine("map_set", mf, "dev_dep_count", dev_count);
+}
+
+/// The string value of the top-level `key_tag` (`"name":`), or `""`.
+fn mf_string_field(json_src: str, key_tag: str) -> str {
+    let idx = mf_find(json_src, key_tag, 0);
+    if idx < 0 { return ""; }
+    let q1 = mf_find(json_src, "\"", idx + key_tag.len());
+    if q1 < 0 { return ""; }
+    let q2 = mf_find(json_src, "\"", q1 + 1);
+    if q2 < 0 { return ""; }
+    return json_src.slice(q1 + 1, q2);
+}
+
+pub fn parse_manifest_json(json_src: str) -> PkgManifest {
+    var mf = PkgManifest {
+        name: mf_string_field(json_src, "\"name\":"),
+        version: mf_string_field(json_src, "\"version\":"),
+        deps: [],
+        dev_deps: [],
+        excludes: [],
+    };
+    mf_parse_dep_object(json_src, "\"dependencies\":", mf.deps);
+    mf_parse_dep_object(json_src, "\"devDependencies\":", mf.dev_deps);
 
     // Extract exclusions ("exclude": ["..."])
-    var ex_count = 0;
     let ex_idx = mf_find(json_src, "\"exclude\":", 0);
     if ex_idx >= 0 {
         let eb_open = mf_find(json_src, "[", ex_idx + 10);
@@ -158,84 +113,60 @@ pub fn parse_manifest_json(json_src: str) -> i64 {
                     if q1 < 0 || q1 >= eb_close { break; }
                     let q2 = mf_find(json_src, "\"", q1 + 1);
                     if q2 < 0 || q2 >= eb_close { break; }
-                    let ex_val = json_src.slice(q1 + 1, q2);
-                    let _sex = __engine("map_set", mf, "exclude_" + ex_count, ex_val);
-                    ex_count = ex_count + 1;
+                    mf.excludes.push(json_src.slice(q1 + 1, q2));
                     ep = q2 + 1;
                 }
             }
         }
     }
-    let _scex = __engine("map_set", mf, "exclude_count", ex_count);
     return mf;
 }
 
-pub fn manifest_get_name(mf: i64) -> str {
-    let raw = __engine("map_get", mf, "name");
-    return if raw != none { raw } else { "" };
+/// The requirement given for `dep_name` in `deps` (the last one when it is
+/// listed twice), or `""`.
+fn mf_dep_requirement(ref deps: List<ManifestDep>, dep_name: str) -> str {
+    var i = deps.len() - 1;
+    while i >= 0 {
+        if deps[i].name == dep_name { return deps[i].version; }
+        i = i - 1;
+    }
+    return "";
 }
 
-pub fn manifest_get_field(mf: i64, field: ManifestField) -> str {
-    return manifest_get_name(mf);
+/// The name of entry `idx` in `deps`, or `""` past the end.
+fn mf_dep_name_at(ref deps: List<ManifestDep>, idx: i64) -> str {
+    if idx < 0 || idx >= deps.len() { return ""; }
+    return deps[idx].name;
 }
 
-pub fn manifest_get_version(mf: i64) -> str {
-    let raw = __engine("map_get", mf, "version");
-    return if raw != none { raw } else { "" };
+pub fn manifest_get_name(ref mf: PkgManifest) -> str => mf.name;
+
+pub fn manifest_get_version(ref mf: PkgManifest) -> str => mf.version;
+
+pub fn manifest_dep_count(ref mf: PkgManifest) -> i64 => mf.deps.len();
+
+pub fn manifest_dep_version(ref mf: PkgManifest, dep_name: str) -> str => mf_dep_requirement(mf.deps, dep_name);
+
+pub fn manifest_dep_name(ref mf: PkgManifest, idx: i64) -> str => mf_dep_name_at(mf.deps, idx);
+
+pub fn manifest_dev_dep_count(ref mf: PkgManifest) -> i64 => mf.dev_deps.len();
+
+pub fn manifest_dev_dep_name(ref mf: PkgManifest, idx: i64) -> str => mf_dep_name_at(mf.dev_deps, idx);
+
+pub fn manifest_dev_dep_version(ref mf: PkgManifest, dep_name: str) -> str => mf_dep_requirement(mf.dev_deps, dep_name);
+
+pub fn manifest_exclude_count(ref mf: PkgManifest) -> i64 => mf.excludes.len();
+
+pub fn manifest_exclude_item(ref mf: PkgManifest, idx: i64) -> str {
+    if idx < 0 || idx >= mf.excludes.len() { return ""; }
+    return mf.excludes[idx];
 }
 
-pub fn manifest_dep_count(mf: i64) -> i64 {
-    let raw = __engine("map_get", mf, "dep_count");
-    return if raw != none { raw } else { 0 };
-}
-
-pub fn manifest_dep_version(mf: i64, dep_name: str) -> str {
-    let raw = __engine("map_get", mf, "dep:" + dep_name);
-    return if raw != none { raw } else { "" };
-}
-
-pub fn manifest_dep_name(mf: i64, idx: i64) -> str {
-    let raw = __engine("map_get", mf, "dep_name_" + idx);
-    return if raw != none { raw } else { "" };
-}
-
-pub fn manifest_dev_dep_count(mf: i64) -> i64 {
-    let raw = __engine("map_get", mf, "dev_dep_count");
-    return if raw != none { raw } else { 0 };
-}
-
-pub fn manifest_dev_dep_name(mf: i64, idx: i64) -> str {
-    let raw = __engine("map_get", mf, "dev_dep_name_" + idx);
-    return if raw != none { raw } else { "" };
-}
-
-pub fn manifest_dev_dep_version(mf: i64, dep_name: str) -> str {
-    let raw = __engine("map_get", mf, "dev_dep:" + dep_name);
-    return if raw != none { raw } else { "" };
-}
-
-pub fn manifest_exclude_count(mf: i64) -> i64 {
-    let raw = __engine("map_get", mf, "exclude_count");
-    return if raw != none { raw } else { 0 };
-}
-
-pub fn manifest_exclude_item(mf: i64, idx: i64) -> str {
-    let raw = __engine("map_get", mf, "exclude_" + idx);
-    return if raw != none { raw } else { "" };
-}
-
-pub fn is_import_excluded(mf: i64, import_spec: str) -> bool {
-    let count = manifest_exclude_count(mf);
-    if count <= 0 { return false; }
-    var i = 0;
-    while i < count {
-        let pattern = manifest_exclude_item(mf, i);
-        if pattern.len() > 0 {
-            if import_spec == pattern || mf_find(import_spec, pattern, 0) >= 0 {
-                return true;
-            }
+pub fn is_import_excluded(ref mf: PkgManifest, import_spec: str) -> bool {
+    for pattern in mf.excludes {
+        if pattern.len() > 0 && (import_spec == pattern || mf_find(import_spec, pattern, 0) >= 0) {
+            return true;
         }
-        i = i + 1;
     }
     return false;
 }
@@ -310,9 +241,9 @@ pub fn mount_import_unit(import_spec: str) -> i64 {
     // 1. Try standard library direct resolution:
     let stdlib_p = resolve_package_import_path(import_spec);
     if stdlib_p != "" {
-        let res = try_mount_candidate_paths(stdlib_p);
-        if res >= 0 {
-            return res;
+        let unit = try_mount_candidate_paths(stdlib_p);
+        if unit >= 0 {
+            return unit;
         }
     }
 
@@ -374,8 +305,8 @@ pub fn mount_all_ast_imports() -> i64 {
             if sym != none && sym != 0 {
                 let spec = __engine("sym_str", sym);
                 if spec != none && spec != "" {
-                    let res = mount_import_unit(spec);
-                    if res != none && res >= 0 {
+                    let unit = mount_import_unit(spec);
+                    if unit >= 0 {
                         mounted = mounted + 1;
                     }
                 }

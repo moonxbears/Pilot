@@ -1,0 +1,14 @@
+error[EnforceCoreNaming]: [InterfacePrefix] Interface 'Shape' must begin with 'I' + PascalCase
+err_core_naming.pilot:9:5
+error[EnforceCoreNaming]: [StructPascalCase] Core struct 'point' must be PascalCase
+err_core_naming.pilot:13:5
+error[EnforceCoreNaming]: [ReservedInterfacePrefix] Struct 'IThing' cannot begin with reserved interface prefix 'I' + uppercase
+err_core_naming.pilot:17:5
+error[EnforceCoreNaming]: [ReferenceViewSuffix] IReference struct 'Window' must end with 'View', 'Lens', 'Cursor', or 'Enumerator'
+err_core_naming.pilot:21:5
+error[EnforceCoreNaming]: [ScopedGuardSuffix] IGuard struct 'Holder' must end with 'Guard', 'Scope', or 'Lease'
+err_core_naming.pilot:25:5
+error[EnforceCoreNaming]: [AttributeSuffix] Attribute struct 'Marker' must end with 'Attr'
+err_core_naming.pilot:29:5
+error[EnforceCoreNaming]: [LangPrimitiveLowercase] [Lang] primitive struct 'Prim_Thing' must be lowercase
+err_core_naming.pilot:34:5

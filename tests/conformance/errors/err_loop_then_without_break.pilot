@@ -1,0 +1,10 @@
+// LOOP003: `then` is the value of a `for` that ends without a
+// `break value`; a loop with no `break value` always ends that way.
+fn last(xs: List<i64>) -> i64 {
+    // The `for` starts at line 5, column 12.
+    return for x in xs { print(x); } then -1;
+}
+
+fn main() {
+    print(last([1, 2]));
+}

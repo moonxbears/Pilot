@@ -1,0 +1,2 @@
+warning[ERR005]: Error stratification lint: legacy 'try/catch' is restricted to polyglot FFI boundaries; use values-first 'T ! E' with '?' or 'catch'
+warn_try_statement.pilot:10:5

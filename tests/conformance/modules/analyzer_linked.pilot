@@ -1,7 +1,7 @@
-// F3: the analyzer (selfhost/analyzer.pilot) reads the whole linked program.
-// `IGreeter` is declared in lib/greeters.pilot; a struct here that leaves out
-// one of its methods is reported by the analyzer (UNIMP003), which needs the
-// interface from the other file, as well as by the type checker (TYPE006).
+// F3: the checker reads the whole linked program. `IGreeter` is declared in
+// lib/greeters.pilot; a struct here that leaves out one of its methods is
+// reported by the type checker (TYPE006), which needs the interface from the
+// other file.
 use lib.greeters;
 
 struct Polite : IGreeter {

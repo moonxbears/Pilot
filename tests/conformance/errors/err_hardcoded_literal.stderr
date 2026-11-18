@@ -1,0 +1,6 @@
+error[HARD001]: Hardcoded numeric literal '2.5' is prohibited in '[NoHardcoding]' scope; extract to a 'const' declaration or configuration
+err_hardcoded_literal.pilot:9:16
+error[HARD001]: Hardcoded string literal '"charging"' is prohibited in '[NoHardcoding]' scope; extract to a 'const' declaration or configuration
+err_hardcoded_literal.pilot:10:11
+error[HARD001]: Hardcoded numeric literal '50' is prohibited in '[NoHardcoding]' scope; extract to a 'const' declaration or configuration
+err_hardcoded_literal.pilot:11:21

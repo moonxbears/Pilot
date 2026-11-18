@@ -1,0 +1,13 @@
+// LOOP002: a `for .. then` gives the value its `break value` leaves with;
+// a bare `break;` out of the same loop would leave it with none.
+fn pick(xs: List<i64>) -> i64 {
+    // The `for` starts at line 5, column 12.
+    return for x in xs {
+        if x == 0 { break; }
+        if x > 5 { break x; }
+    } then -1;
+}
+
+fn main() {
+    print(pick([1, 7]));
+}

@@ -1,0 +1,36 @@
+// A `while` on an always-true condition is no LOOP005 when its body can
+// leave it: a `break` of that loop at any depth (here inside two `if`s), or
+// a `return` (here inside a nested `for`). The program runs without a
+// warning.
+//
+// Expected output, worked by hand:
+//   first_over(10): i = 1, 2, 4, 8, 16 doubles each turn; 16 > 10 breaks and
+//     prints 16.
+//   find_pair(7): i = 0, 1, 2, ..; for each i, j runs over 0 .. i; the first
+//     i * 10 + j with i + j == 7 and j < i is i = 4, j = 3: prints 43.
+fn first_over(limit: i64) -> i64 {
+    var i = 1;
+    while true {
+        i = i * 2;
+        if i > 1 {
+            if i > limit { break; }
+        }
+    }
+    return i;
+}
+
+fn find_pair(sum: i64) -> i64 {
+    var i = 0;
+    while true {
+        for j in 0 .. i {
+            if i + j == sum { return i * 10 + j; }
+        }
+        i = i + 1;
+    }
+    return -1;
+}
+
+fn main() {
+    print(first_over(10));
+    print(find_pair(7));
+}

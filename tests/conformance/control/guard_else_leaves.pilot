@@ -1,0 +1,55 @@
+// A `guard`'s `else` block leaves by `return`, `continue` or `break`
+// (NULL002 accepts each), and a guarded `_` arm lets the values its guard
+// refuses through to the arms after it (MATCH002 accepts them).
+//
+// Expected output, worked by hand:
+//   half(8) = 8 / 2 = 4; half(none) takes the `else`: -1.
+//   sum_some([1, 0, 5, 2]): nonzero(0) is none, skipped by `continue`, so
+//   1 + 5 + 2 = 8. until_none([3, 4, 0, 9]): `break` at 0, so 3 + 4 = 7.
+//   sign(-3): the guard n < 0 holds, "negative"; sign(0): the guard fails,
+//   so `case 0`, "zero"; sign(5): "positive".
+fn half(v: i64?) -> i64 {
+    guard some x = v else { return -1; }
+    return x / 2;
+}
+
+fn nonzero(x: i64) -> i64? {
+    if x == 0 { return none; }
+    return x;
+}
+
+fn sum_some(xs: List<i64>) -> i64 {
+    var total = 0;
+    for v in xs {
+        guard some x = nonzero(v) else { continue; }
+        total = total + x;
+    }
+    return total;
+}
+
+fn until_none(xs: List<i64>) -> i64 {
+    var total = 0;
+    for v in xs {
+        guard some x = nonzero(v) else { break; }
+        total = total + x;
+    }
+    return total;
+}
+
+fn sign(n: i64) -> str {
+    switch n {
+        case _ if n < 0: return "negative";
+        case 0: return "zero";
+        default: return "positive";
+    }
+}
+
+fn main() {
+    print(half(8));
+    print(half(none));
+    print(sum_some([1, 0, 5, 2]));
+    print(until_none([3, 4, 0, 9]));
+    print(sign(-3));
+    print(sign(0));
+    print(sign(5));
+}

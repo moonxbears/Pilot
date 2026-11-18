@@ -1,0 +1,38 @@
+// [EnforceCoreNaming] holds the declarations of its file to the names of
+// AGENTS.md §3 (selfhost/check/lint_decls.pilot). Each declaration below
+// breaks one rule; the diagnostic points at its `struct`/`interface` word,
+// column 5 after `pub `.
+[EnforceCoreNaming]
+pub pkg Demo.Naming;
+
+// Line 9: an interface is `I` + PascalCase.
+pub interface Shape {
+    fn area() -> i64;
+}
+// Line 13: a struct starts uppercase.
+pub struct point : IValue {
+    pub x: i64;
+}
+// Line 17: `I` + uppercase is the interface prefix.
+pub struct IThing : IValue {
+    pub x: i64;
+}
+// Line 21: a reference view ends in View, Lens, Cursor or Enumerator.
+pub struct Window : IReference {
+    pub x: i64;
+}
+// Line 25: a scoped guard ends in Guard, Scope or Lease.
+pub struct Holder : IGuard {
+    pub x: i64;
+}
+// Line 29: an attribute ends in Attr.
+pub struct Marker : IAttribute, IValue {
+    pub x: i64;
+}
+// Line 34 (the line after its attribute): a [Lang] primitive is lowercase.
+[Lang(demo_slot)]
+pub struct Prim_Thing : IValue {
+    pub x: i64;
+}
+
+fn main() { print(1); }

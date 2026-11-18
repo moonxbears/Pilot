@@ -627,19 +627,19 @@ pub pure fn verify_rust_source_name_blind(
 
     if is_analysis_rs {
         let _ = sa_check_word_list_in_code(
-            rs_path, code_only, rs_source, build_banned_analysis_idents(),
+            rs_path, code_only, rs_source, BANNED_ANALYSIS_IDENTS,
             "GATE001", "Banned legacy analysis symbol: ", violations
         );
     }
     if is_stdlib_rs {
         let _ = sa_check_word_list_in_code(
-            rs_path, rs_source, rs_source, build_banned_stdlib_rs_tokens(),
+            rs_path, rs_source, rs_source, BANNED_STDLIB_RS_TOKENS,
             "GATE001", "Banned stdlib.rs token: ", violations
         );
     }
     if is_cli_rs {
         let _ = sa_check_word_list_in_code(
-            rs_path, rs_source, rs_source, build_banned_cli_lsp_tokens(),
+            rs_path, rs_source, rs_source, BANNED_CLI_LSP_TOKENS,
             "GATE001", "Banned CLI/LSP hardcoded token: ", violations
         );
     }
@@ -688,7 +688,7 @@ pub fn execute_adaptability_gate(workspace_root: str, ref _opts: GateRunOptions)
     let lsp_targets = glist_new();
     let _ = glist_push(lsp_targets, "selfhost/ide/vscode_gen.pilot");
     let _ = glist_push(lsp_targets, "selfhost/lsp/handlers.pilot");
-    let banned_lsp = build_banned_cli_lsp_tokens();
+    let banned_lsp = BANNED_CLI_LSP_TOKENS;
     var li = 0;
     while li < glist_len(lsp_targets) {
         let lrel = glist_get(lsp_targets, li);
@@ -766,7 +766,7 @@ pub fn execute_hygiene_and_ratchet_gate(workspace_root: str, ref _opts: GateRunO
     var scanned = 0;
 
     let crate_reg = build_crate_ceiling_registry();
-    let crate_keys = __engine("map_get", crate_reg, "__keys__");
+    let crate_keys = crate_reg.keys();
     let n_crates = glist_len(crate_keys);
 
     // 1. Check all registered crate rules (retired crates must be absent)
@@ -812,7 +812,7 @@ pub fn execute_hygiene_and_ratchet_gate(workspace_root: str, ref _opts: GateRunO
     }
 
     // 3. Check retired legacy files & retired Python gate scripts
-    let retired_files = build_retired_files_registry();
+    let retired_files = RETIRED_FILES;
     var ri = 0;
     while ri < glist_len(retired_files) {
         let rpath = glist_get(retired_files, ri);

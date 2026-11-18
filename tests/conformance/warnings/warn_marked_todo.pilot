@@ -1,0 +1,14 @@
+// A `struct`, `interface` or `fn` marked `[Unimplemented]` or `[Todo]` is a
+// warning (UNIMP004) at its declaration. The program still runs:
+// Draft { size: 2 }.size * 3 = 6 and later(4) = 4 + 1 = 5.
+[Unimplemented]
+struct Draft { pub size: i64; }
+
+[Todo]
+fn later(x: i64) -> i64 => x + 1;
+
+fn main() {
+    let d = Draft { size: 2 };
+    print(d.size * 3);
+    print(later(4));
+}

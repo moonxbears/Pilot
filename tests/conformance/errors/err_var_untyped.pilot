@@ -1,0 +1,6 @@
+// A `var` with neither a type nor a value is an error (VAR001): nothing
+// says what it holds.
+fn main() {
+    var later;
+    print(1);
+}

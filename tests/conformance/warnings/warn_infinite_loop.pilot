@@ -1,0 +1,18 @@
+// A `while` on a condition that is always true, whose body neither returns
+// nor breaks out of it, is a warning (LOOP005). Here it is the body of an
+// endless generator, which is fine to run: the caller takes the first three
+// values and stops, so the program prints 0, 1, 2.
+fn naturals() -> Generator<i64> {
+    var i = 0;
+    while true {
+        yield i;
+        i = i + 1;
+    }
+}
+
+fn main() {
+    for n in naturals() {
+        if n == 3 { break; }
+        print(n);
+    }
+}

@@ -1,0 +1,61 @@
+// std.crypto.hash against published vectors: SHA-256, SHA-512, HMAC-SHA256
+// and BLAKE3 (stdlib/crypto/hash.pilot), on byte lengths that cross each
+// padding and chunk boundary.
+//
+// Expected output (one digest per line, in this order), not taken from this
+// code:
+// * SHA-256 "", "abc", and the 448-bit two-block message
+//   "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq":
+//   FIPS 180-4 / NIST CSRC "SHA256.pdf" examples (and the "" digest of
+//   FIPS 180-2 Appendix B).
+// * SHA-512 "", "abc", and the 896-bit two-block message
+//   "abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmno"
+//   "ijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu": NIST CSRC "SHA512.pdf".
+// * SHA-256 and SHA-512 of digits(56) and digits(112), where digits(n) is
+//   the first n bytes of "0123456789" repeated (56 and 112 bytes leave no
+//   room for the length field, so the padding takes a second block):
+//   Python 3 hashlib.
+// * HMAC-SHA256 RFC 4231 test case 2 (key "Jefe", data "what do ya want for
+//   nothing?"); key "key" with "The quick brown fox jumps over the lazy dog"
+//   (the Wikipedia HMAC example); and a 70-byte key digits(70) (over one
+//   64-byte block, so the key is hashed first) with data "abc": Python 3 hmac.
+// * BLAKE3 "" and "abc": the BLAKE3 README / official test_vectors.json
+//   (input length 0). BLAKE3 of digits(64), digits(1024) (one full chunk),
+//   digits(1025) (two chunks), digits(2050) (three chunks) and digits(4097)
+//   (five chunks: three levels of parent nodes): a separate BLAKE3
+//   reference written from the BLAKE3 paper in Python, which reproduces
+//   the official test_vectors.json hashes for the i % 251 pattern at
+//   lengths 0, 1, 1023, 1024, 1025, 2048, 2049, 3072, 3073, 4096 and 4097
+//   (that pattern holds bytes above 127, which a Pilot `str` literal cannot
+//   carry as single bytes, so the test uses digits(n)).
+
+use std.crypto.hash;
+
+fn digits(n: i64) -> str {
+    var s = "";
+    while s.len() < n {
+        s = s + "0123456789";
+    }
+    return s.slice(0, n);
+}
+
+fn main() {
+    print(sha256_hex(""));
+    print(sha256_hex("abc"));
+    print(sha256_hex("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"));
+    print(sha512_hex(""));
+    print(sha512_hex("abc"));
+    print(sha512_hex("abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmno" + "ijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu"));
+    print(sha256_hex(digits(56)));
+    print(sha512_hex(digits(112)));
+    print(hmac_sha256_hex("Jefe", "what do ya want for nothing?"));
+    print(hmac_sha256_hex("key", "The quick brown fox jumps over the lazy dog"));
+    print(hmac_sha256_hex(digits(70), "abc"));
+    print(blake3_hex(""));
+    print(blake3_hex("abc"));
+    print(blake3_hex(digits(64)));
+    print(blake3_hex(digits(1024)));
+    print(blake3_hex(digits(1025)));
+    print(blake3_hex(digits(2050)));
+    print(blake3_hex(digits(4097)));
+}

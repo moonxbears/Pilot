@@ -9,27 +9,31 @@ pub lvl(0) pkg selfhost.gate;
 use std.crypto.hash;
 use selfhost.*;
 
-fn gr_reg_gate(reg: i64, ids: i64, gid: str, cat: GateCategory, fast_def: bool) -> usize {
-    let entry = __engine("map_new");
-    __engine("map_set", entry, "id", gid);
-    __engine("map_set", entry, "category", cat);
-    __engine("map_set", entry, "fast_default", fast_def);
-    __engine("map_set", reg, gid, entry);
-    return glist_push(ids, gid);
+/// One registered gate: its id, its category, and whether the fast default
+/// run (no `--full`) runs it.
+pub struct GateEntry : IAnyValue {
+    pub id: str;
+    pub category: GateCategory;
+    pub fast_default: bool;
 }
 
-pub fn build_gate_registry() -> i64 {
-    let reg = __engine("map_new");
-    let ids = glist_new();
-    let _ = gr_reg_gate(reg, ids, "adaptability", GateCategoryId.Adaptability, true);
-    let _ = gr_reg_gate(reg, ids, "hygiene", GateCategoryId.Hygiene, true);
-    let _ = gr_reg_gate(reg, ids, "seams", GateCategoryId.Hygiene, true);
-    let _ = gr_reg_gate(reg, ids, "keywords", GateCategoryId.Hygiene, true);
-    let _ = gr_reg_gate(reg, ids, "lex_table", GateCategoryId.Hygiene, false);
-    let _ = gr_reg_gate(reg, ids, "rename_litmus", GateCategoryId.Adaptability, false);
-    let _ = gr_reg_gate(reg, ids, "bootstrap_parity", GateCategoryId.BootstrapParity, false);
-    __engine("map_set", reg, "__ids__", ids);
-    return reg;
+/// Every gate `pilot gate` knows, in the order a run reports them.
+pub fn build_gate_registry() -> List<GateEntry> => [
+    GateEntry { id: "adaptability", category: GateCategoryId.Adaptability, fast_default: true },
+    GateEntry { id: "hygiene", category: GateCategoryId.Hygiene, fast_default: true },
+    GateEntry { id: "seams", category: GateCategoryId.Hygiene, fast_default: true },
+    GateEntry { id: "keywords", category: GateCategoryId.Hygiene, fast_default: true },
+    GateEntry { id: "lex_table", category: GateCategoryId.Hygiene, fast_default: false },
+    GateEntry { id: "rename_litmus", category: GateCategoryId.Adaptability, fast_default: false },
+    GateEntry { id: "bootstrap_parity", category: GateCategoryId.BootstrapParity, fast_default: false },
+];
+
+/// Whether `gid` names a registered gate.
+fn gr_is_gate(ref reg: List<GateEntry>, gid: str) -> bool {
+    for e in reg {
+        if e.id == gid { return true; }
+    }
+    return false;
 }
 
 pub fn gate_help_banner() -> str {
@@ -60,8 +64,8 @@ fn gr_parse_u64(s: str) -> i64 {
     return acc;
 }
 
-fn gr_split_ws(raw: str) -> i64 {
-    let toks = glist_new();
+fn gr_split_ws(raw: str) -> List<str> {
+    var toks: List<str> = [];
     let n = raw.len();
     var i = 0;
     while i < n {
@@ -77,7 +81,7 @@ fn gr_split_ws(raw: str) -> i64 {
             if b == 32 || b == 9 || b == 10 || b == 13 { break; }
             i = i + 1;
         }
-        let _ = glist_push(toks, raw.slice(st, i));
+        toks.push(raw.slice(st, i));
     }
     return toks;
 }
@@ -97,7 +101,7 @@ pub fn default_gate_options() -> GateRunOptions {
 
 pub fn parse_gate_cli_args(raw_args: str) -> GateRunOptions {
     let toks = gr_split_ws(raw_args);
-    let n = glist_len(toks);
+    let n = toks.len() as i64;
     let reg = build_gate_registry();
     var full = false;
     var only_id = "";
@@ -110,7 +114,7 @@ pub fn parse_gate_cli_args(raw_args: str) -> GateRunOptions {
 
     var i = 0;
     while i < n {
-        let arg = glist_get(toks, i);
+        let arg = toks[i];
         if arg == "--full" {
             full = true;
             i = i + 1;
@@ -131,9 +135,8 @@ pub fn parse_gate_cli_args(raw_args: str) -> GateRunOptions {
                 invalid = "--only requires a gate id";
                 i = n;
             } else {
-                let gid = glist_get(toks, i + 1);
-                let found = __engine("map_get", reg, gid);
-                if found.len() == 0 {
+                let gid = toks[i + 1];
+                if !gr_is_gate(reg, gid) {
                     invalid = "unknown gate id: " + gid;
                 } else {
                     only_id = gid;
@@ -145,9 +148,9 @@ pub fn parse_gate_cli_args(raw_args: str) -> GateRunOptions {
                 invalid = "--seed requires a numeric seed";
                 i = n;
             } else {
-                let parsed = gr_parse_u64(glist_get(toks, i + 1));
+                let parsed = gr_parse_u64(toks[i + 1]);
                 if parsed < 0 {
-                    invalid = "invalid numeric seed: " + glist_get(toks, i + 1);
+                    invalid = "invalid numeric seed: " + toks[i + 1];
                 } else {
                     seed = parsed;
                 }
@@ -193,34 +196,24 @@ pub fn run_gate_by_id(workspace_root: str, gate_id: str, ref opts: GateRunOption
     if gate_id == "bootstrap_parity" {
         return execute_bootstrap_parity_gate(workspace_root, opts);
     }
-    return __engine("get_env");
+    return none;
 }
 
 pub fn run_all_gates(workspace_root: str, ref opts: GateRunOptions) -> List<GateReport> {
-    let reports = glist_new();
-    let reg = build_gate_registry();
-    let ids = __engine("map_get", reg, "__ids__");
-    let n_ids = glist_len(ids);
-
+    var reports: List<GateReport> = [];
     if opts.only_id.len() > 0 {
-        let single = run_gate_by_id(workspace_root, opts.only_id, opts);
-        if single.gate_id.len() > 0 {
-            let _ = glist_push(reports, single);
+        if some single = run_gate_by_id(workspace_root, opts.only_id, opts) {
+            reports.push(single);
         }
         return reports;
     }
-
-    var i = 0;
-    while i < n_ids {
-        let gid = glist_get(ids, i);
-        let desc = __engine("map_get", reg, gid);
-        let is_fast = __engine("map_get", desc, "fast_default") == true;
-        let should_run = opts.full == true || is_fast || (opts.litmus == true && gid == "rename_litmus");
+    for e in build_gate_registry() {
+        let should_run = opts.full == true || e.fast_default || (opts.litmus == true && e.id == "rename_litmus");
         if should_run {
-            let rep = run_gate_by_id(workspace_root, gid, opts);
-            let _ = glist_push(reports, rep);
+            if some rep = run_gate_by_id(workspace_root, e.id, opts) {
+                reports.push(rep);
+            }
         }
-        i = i + 1;
     }
     return reports;
 }
@@ -232,7 +225,7 @@ pub fn apply_ratchet_update(workspace_root: str) -> str {
     if mf_src.len() == 0 {
         return "ERROR: unable to read selfhost/gate/manifest.pilot";
     }
-    let crate_sums = __engine("map_new");
+    var crate_sums = Map<str, i64>();
     let rs_files = gate_fs_walk_files(gm_join_path(root, "crates"));
     var fi = 0;
     while fi < rs_files.len() {
@@ -242,22 +235,19 @@ pub fn apply_ratchet_update(workspace_root: str) -> str {
             let sidx = gm_find(fp, "/src/", cidx);
             if cidx >= 0 && sidx > cidx {
                 let ckey = fp.slice(cidx, sidx);
-                let prev = (__engine("map_get", crate_sums, ckey) ?? 0);
-                __engine("map_set", crate_sums, ckey, prev + gm_count_lines(gate_fs_read_text(fp)));
+                let prev = crate_sums.get(ckey) ?? 0;
+                crate_sums.set(ckey, prev + gm_count_lines(gate_fs_read_text(fp)));
             }
         }
         fi = fi + 1;
     }
 
     let reg = build_crate_ceiling_registry();
-    let keys = __engine("map_get", reg, "__keys__");
     var tightened = 0;
-    var ki = 0;
-    while ki < glist_len(keys) {
-        let cpath = glist_get(keys, ki);
-        let rule = __engine("map_get", reg, cpath);
+    for cpath in reg.keys() {
+        guard some rule = reg.get(cpath) else { continue; };
         if rule.must_be_absent == false {
-            let live_loc = (__engine("map_get", crate_sums, cpath) ?? 0);
+            let live_loc = crate_sums.get(cpath) ?? 0;
             if live_loc > 0 && live_loc < rule.max_loc {
                 let old_pat = "\"" + cpath + "\", " + rule.max_loc + ", false";
                 let new_pat = "\"" + cpath + "\", " + live_loc + ", false";
@@ -268,7 +258,6 @@ pub fn apply_ratchet_update(workspace_root: str) -> str {
                 }
             }
         }
-        ki = ki + 1;
     }
     if tightened > 0 {
         let _ = gate_fs_write_text(mf_path, mf_src);
@@ -286,16 +275,16 @@ fn gr_blocks(ref rep: GateReport) -> bool {
     return rep.passed == false && !gr_at_registered_seam(rep);
 }
 
-pub fn format_gate_reports_json(reports: List<GateReport>) -> str {
-    let n = glist_len(reports);
+pub fn format_gate_reports_json(ref reports: List<GateReport>) -> str {
+    let n = reports.len() as i64;
     var all_passed = true;
     var total_viols = 0;
     var at_seams = 0;
     var gates_json = "";
     var i = 0;
     while i < n {
-        let rep = glist_get(reports, i);
-        let vcount = glist_len(rep.violations);
+        let rep = reports[i];
+        let vcount = rep.violations.len() as i64;
         total_viols = total_viols + vcount;
         if rep.passed == false { all_passed = false; }
         if gr_at_registered_seam(rep) { at_seams = at_seams + 1; }
@@ -303,7 +292,7 @@ pub fn format_gate_reports_json(reports: List<GateReport>) -> str {
         var viols_json = "";
         var vi = 0;
         while vi < vcount {
-            let v = glist_get(rep.violations, vi);
+            let v = rep.violations[vi];
             if vi > 0 { viols_json = viols_json + ","; }
             viols_json = viols_json +
                 "{\"code\":\"" + gm_json_escape(v.code) +
@@ -335,8 +324,8 @@ pub fn format_gate_reports_json(reports: List<GateReport>) -> str {
            ",\"gates\":[" + gates_json + "]}";
 }
 
-pub fn format_gate_reports_human(reports: List<GateReport>) -> str {
-    let n = glist_len(reports);
+pub fn format_gate_reports_human(ref reports: List<GateReport>) -> str {
+    let n = reports.len() as i64;
     var blocked = false;
     var passed = 0;
     var at_seams = 0;
@@ -344,8 +333,8 @@ pub fn format_gate_reports_human(reports: List<GateReport>) -> str {
     var out = "=== Pilot Pure-Pilot Architectural Gate Runner ===\n";
     var i = 0;
     while i < n {
-        let rep = glist_get(reports, i);
-        let vcount = glist_len(rep.violations);
+        let rep = reports[i];
+        let vcount = rep.violations.len() as i64;
         total_viols = total_viols + vcount;
         if gr_blocks(rep) { blocked = true; }
         if rep.passed == true {
@@ -368,7 +357,7 @@ pub fn format_gate_reports_human(reports: List<GateReport>) -> str {
         }
         var vi = 0;
         while vi < vcount {
-            let v = glist_get(rep.violations, vi);
+            let v = rep.violations[vi];
             out = out + "    -> " + v.code + " at " + v.file_path + ":" + v.line + ":" + v.column +
                   " [" + v.offending_snippet + "]: " + v.message + "\n" +
                   "       fix: " + v.remediation + "\n";
@@ -407,10 +396,8 @@ pub fn run_pilot_gate_cli(workspace_root: str, raw_args: str) -> str {
     }
     let reports = run_all_gates(workspace_root, opts);
     var all_ok = true;
-    var i = 0;
-    while i < glist_len(reports) {
-        if gr_blocks(glist_get(reports, i)) { all_ok = false; }
-        i = i + 1;
+    for rep in reports {
+        if gr_blocks(rep) { all_ok = false; }
     }
     let code = if all_ok { "0" } else { "1" };
     let body = if opts.json == true {

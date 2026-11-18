@@ -1,0 +1,9 @@
+// VAR001: a `var` written with neither a type nor a value has no type, so
+// the declaration (line 6, column 9) and every use of it (line 7, column 5
+// and line 8, column 11) are refused.
+fn main() {
+    print(0);
+    var x;
+    x = 3;
+    print(x);
+}

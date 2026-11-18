@@ -1,0 +1,356 @@
+// ==============================================================================
+// FILE: selfhost/check/lint_hints.pilot
+// Lints read off the shape of the program, one node at a time.
+// ==============================================================================
+//   UNIMP001  warning  a call of a placeholder named `todo` or `unimplemented`
+//   UNIMP004  warning  a `struct`, `interface` or `fn` marked `[Unimplemented]`
+//                      or `[Todo]`
+//   UNREACH001 warning the first statement of a block after a `return`,
+//                      `break`, `continue`, or `panic(..)` / `fail(..)` call
+//   LOOP005   warning  `while` on a constant true condition (`true`, a nonzero
+//                      integer) whose body neither returns nor breaks out of it
+//   COND001   warning  an `if` on a boolean literal
+//   COND002   warning  an `if` whose first branch is an empty block
+//   OPT001    info     a binary operation of two literals (not a division by
+//                      zero, which DIV001 reports)
+//   FLOAT001  warning  `==` / `!=` with a float literal operand
+//   DIV001    error    `/`, `//` or `%` by the integer literal 0
+//   VAR001    error    `let` / `var` with neither a type nor a value
+//   INLINE001 warning  `[Inline]`, which the seed engine does not honour yet
+//                      (PilIR and `--emit c` do: selfhost/ir/pass_inline.pilot)
+//   ENGINE001 error    a call of `__engine` outside a core file: a file whose
+//                      package is `Pilot.Core` / `core` or below it, or that
+//                      carries `[EnforceCoreNaming]`
+//   HARD001   error    an integer above 1, a float other than 0.0 and 1.0, or
+//                      a non-empty string written as a literal in executable
+//                      code (not in a `const`) under `[NoHardcoding]`: on the
+//                      package, on an enclosing declaration, or naming the
+//                      file's package (`[NoHardcoding(Pkg.Name)]`,
+//                      `[ApplyToNamespace(Pkg.Name, NoHardcoding)]`)
+// Every one of them can be silenced with `[Suppress(..)]`
+// (selfhost/check/suppress.pilot).
+pub lvl(0) pkg selfhost.check;
+
+
+/// `BinaryOp` codes of `/`, `//` and `%` (`binary_op_symbols`).
+const LINT_OP_DIV_LO: i64 = 4;
+const LINT_OP_DIV_HI: i64 = 6;
+/// `BinaryOp` code of `!=`.
+const LINT_OP_NE: i64 = 9;
+/// The arithmetic, comparison, logic and bitwise `BinaryOp` codes: `+` up to `|`.
+const LINT_OP_FOLDS_HI: i64 = 20;
+/// The bits of the float 1.0 (IEEE 754 binary64: sign 0, exponent 1023 =
+/// 0x3FF, fraction 0, so 0x3FF0000000000000 = 1023 * 2^52).
+const LINT_ONE_BITS: i64 = 4607182418800017408;
+
+/// Whether `k` is the kind of a literal (integer, float, bool, string).
+fn lint_is_literal(k: i64) -> bool => k == nk_int() || k == nk_float() || k == nk_bool() || k == nk_str();
+
+/// The name a call's callee node carries: a function's or a method's name.
+fn lint_callee_name(ref s: Snap, c: i64) -> str {
+    let k = kind(s, c);
+    if k == nk_ident() || k == nk_type_named() { return node_name(s, c); }
+    if k == nk_member() { return sym_text(s, rhs(s, c)); }
+    return "";
+}
+
+/// The callee of call node `n`, or -1.
+fn lint_callee(ref s: Snap, n: i64) -> i64 {
+    let ch = children(s, n);
+    return if ch.len() > 0 { ch[0] } else { -1 };
+}
+
+/// Whether node `n` has an attribute named `name`.
+fn lint_has_attr(ref p: Program, n: i64, name: str) -> bool {
+    for row_index in nl_get(p.attrs, f"{n}") {
+        if sym_text(p.s, p.s.attrs[row_index].1) == name { return true; }
+    }
+    return false;
+}
+
+/// Whether statement `n` leaves its block: `return`, `break`, `continue`,
+/// or a call of `panic` / `fail` as a statement.
+fn lint_diverges(ref s: Snap, n: i64) -> bool {
+    let k = kind(s, n);
+    if k == nk_return() || k == nk_break() || k == nk_continue() { return true; }
+    if k != nk_expr_stmt() { return false; }
+    let e = lhs(s, n);
+    if e < 0 || kind(s, e) != nk_call() { return false; }
+    let c = lint_callee(s, e);
+    if c < 0 { return false; }
+    let name = lint_callee_name(s, c);
+    return name == nameof(panic) || name == nameof(fail);
+}
+
+/// Whether node `n` holds a `return` of its function (not one of a nested
+/// function or closure) or, while `own` holds, a `break` of the loop it
+/// sits in (not of a nested loop or switch).
+fn lint_leaves_loop(ref s: Snap, n: i64, own: bool) -> bool {
+    let k = kind(s, n);
+    if k == nk_fn() || k == nk_operator() || k == nk_lambda() { return false; }
+    if k == nk_return() || (own && k == nk_break()) { return true; }
+    let inner = own && k != nk_while() && k != nk_for() && k != nk_match();
+    for c in children(s, n) {
+        if lint_leaves_loop(s, c, inner) { return true; }
+    }
+    return false;
+}
+
+/// Whether node `n` is a literal whose value is a constant true condition.
+fn lint_always_true(ref s: Snap, n: i64) -> bool {
+    if n < 0 { return false; }
+    let k = kind(s, n);
+    return (k == nk_bool() || k == nk_int()) && lit_value(s, n) != 0;
+}
+
+/// Whether `n` is the integer literal 0.
+fn lint_is_zero(ref s: Snap, n: i64) -> bool => n >= 0 && kind(s, n) == nk_int() && lit_value(s, n) == 0;
+
+/// UNREACH001 in block `n`: the statement after the first one that leaves it.
+fn lint_block(ref ls: LintScope, var ref sink: DiagSink, n: i64) {
+    let s = ls.p.s;
+    let ch = children(s, n);
+    var i = 0;
+    while i + 1 < ch.len() {
+        if lint_diverges(s, ch[i]) {
+            lint_report(ls, sink, ch[i + 1], LintLevel::Warning, "UNREACH001", "Unreachable code detected after diverging statement");
+            return;
+        }
+        i = i + 1;
+    }
+}
+
+/// LOOP005 on `while` node `n`.
+fn lint_while(ref ls: LintScope, var ref sink: DiagSink, n: i64) {
+    let s = ls.p.s;
+    let ch = children(s, n);
+    if ch.len() < 2 || !lint_always_true(s, ch[0]) { return; }
+    if !lint_leaves_loop(s, ch[1], true) {
+        lint_report(ls, sink, n, LintLevel::Warning, "LOOP005",
+            "Potential infinite loop detected; condition is always true and body contains no 'break' or 'return' statement");
+    }
+}
+
+/// COND001 and COND002 on `if` node `n`.
+fn lint_if(ref ls: LintScope, var ref sink: DiagSink, n: i64) {
+    let s = ls.p.s;
+    let ch = children(s, n);
+    if ch.len() < 2 { return; }
+    if kind(s, ch[0]) == nk_bool() {
+        lint_report(ls, sink, ch[0], LintLevel::Warning, "COND001", "Condition expression is a compile-time boolean constant; one branch is unreachable");
+    }
+    let then_b = ch[1];
+    if kind(s, then_b) == nk_block() && children(s, then_b).len() == 0 {
+        lint_report(ls, sink, then_b, LintLevel::Warning, "COND002", "Empty branch in 'if' statement; branch has no effect");
+    }
+}
+
+/// DIV001, OPT001 and FLOAT001 on binary node `n`.
+fn lint_binary(ref ls: LintScope, var ref sink: DiagSink, n: i64) {
+    let s = ls.p.s;
+    let a = lhs(s, n);
+    let b = rhs(s, n);
+    if a < 0 || b < 0 { return; }
+    let op = flags(s, n);
+    let divides = op >= LINT_OP_DIV_LO && op <= LINT_OP_DIV_HI;
+    if divides && lint_is_zero(s, b) {
+        lint_report(ls, sink, n, LintLevel::Error, "DIV001", "Compile-time division by zero detected");
+    }
+    if op >= 1 && op <= LINT_OP_FOLDS_HI && lint_is_literal(kind(s, a)) && lint_is_literal(kind(s, b)) && !(divides && lit_value(s, b) == 0) {
+        lint_report(ls, sink, n, LintLevel::Info, "OPT001", "Constant binary expression can be folded at compile time");
+    }
+    if (op == op_eq() || op == LINT_OP_NE) && (kind(s, a) == nk_float() || kind(s, b) == nk_float()) {
+        lint_report(ls, sink, n, LintLevel::Warning, "FLOAT001",
+            "Direct floating-point equality comparison ('==' or '!=') may fail due to precision; use epsilon comparison");
+    }
+}
+
+/// UNIMP001 and ENGINE001 on call node `n`.
+fn lint_call(ref ls: LintScope, var ref sink: DiagSink, n: i64, core: bool) {
+    let s = ls.p.s;
+    let c = lint_callee(s, n);
+    if c < 0 { return; }
+    let name = lint_callee_name(s, c);
+    if name == nameof(todo) || name == nameof(unimplemented) {
+        lint_report(ls, sink, n, LintLevel::Warning, "UNIMP001", f"Call to unimplemented placeholder ('{name}')");
+    }
+    let ck = kind(s, c);
+    if !core && (ck == nk_ident() || ck == nk_type_named()) && name == nameof(__engine) {
+        lint_report(ls, sink, n, LintLevel::Error, "ENGINE001",
+            "Direct '__engine' invocation is banned outside of core; use mapped core classes, structs, or functions (such as File, Map, or Reflect) instead");
+    }
+}
+
+/// VAR001 on `let` / `var` node `n`.
+fn lint_binding(ref ls: LintScope, var ref sink: DiagSink, n: i64) {
+    let s = ls.p.s;
+    if rhs(s, n) >= 0 || annot(s, n) >= 0 { return; }
+    let name = node_name(s, n);
+    let c0 = if name.len() > 0 { name.byte_at(0) as i64 } else { 0 };
+    // `{`, `[` and `(` open a destructuring pattern, not a name.
+    if c0 == 123 || c0 == 91 || c0 == 40 { return; }
+    lint_report(ls, sink, n, LintLevel::Error, "VAR001", f"Variable '{name}' requires an explicit type annotation or initial value");
+}
+
+/// Whether a package named `name` is core: `Pilot.Core`, `core`, or below one.
+fn lint_core_package(name: str) -> bool {
+    return name == "Pilot.Core" || name == "core" || name.starts_with("Pilot.Core.") || name.starts_with("core.");
+}
+
+/// The names of the `[NoHardcoding]` attribute and its synonyms.
+fn lint_no_hardcoding(name: str) -> bool {
+    return name == nameof(NoHardcoding) || name == nameof(NoHardcodingAttr) || name == nameof(NoHardcode) || name == nameof(NoHardcodeAttr);
+}
+
+/// What each file (unit index) says about ENGINE001 and HARD001.
+pub struct LintFiles {
+    /// 1 for a core file.
+    pub core: List<i64>;
+    /// 1 when some `[NoHardcoding]` applies in the file.
+    pub any_hard: List<i64>;
+    /// 1 when `[NoHardcoding]` without arguments sits on its package.
+    pub package_hard: List<i64>;
+    /// The packages `[NoHardcoding(..)]` / `[ApplyToNamespace(.., NoHardcoding)]` name.
+    pub hard_targets: List<List<str>>;
+}
+
+fn lint_files(ref ls: LintScope) -> LintFiles {
+    let s = ls.p.s;
+    let units = s.files.len();
+    var targets: List<List<str>> = [];
+    var u = 0;
+    while u < units {
+        let fresh: List<str> = [];
+        targets.push(fresh);
+        u = u + 1;
+    }
+    let lf = LintFiles { core: filled(units, 0), any_hard: filled(units, 0), package_hard: filled(units, 0), hard_targets: targets };
+    u = 0;
+    while u < units {
+        for d in ls.packages[u] {
+            if lint_core_package(node_name(s, d)) { lf.core[u] = 1; }
+        }
+        u = u + 1;
+    }
+    for row in s.attrs {
+        let t = row.0;
+        let unit = unit_of(s, t);
+        if unit < 0 || unit >= units { continue; }
+        let name = sym_text(s, row.1);
+        let args = row.2;
+        if name == nameof(EnforceCoreNaming) || name == nameof(EnforceCoreNamingAttr) { lf.core[unit] = 1; }
+        let named: List<str> = lf.hard_targets[unit];
+        if lint_no_hardcoding(name) {
+            lf.any_hard[unit] = 1;
+            if args.len() == 0 && is_package_decl(s, t) { lf.package_hard[unit] = 1; }
+            for a in args {
+                let text = lint_arg_text(s, a);
+                if text.len() > 0 { named.push(text); }
+            }
+        } else if (name == nameof(ApplyToNamespace) || name == nameof(NamespaceAttr)) && args.len() >= 2 {
+            let what = lint_arg_text(s, args[1]);
+            if what == nameof(NoHardcoding) || what == nameof(NoHardcode) {
+                named.push(lint_arg_text(s, args[0]));
+                lf.any_hard[unit] = 1;
+            }
+        }
+    }
+    return lf;
+}
+
+/// Whether `[NoHardcoding]` covers node `n`.
+fn lint_hard_scope(ref ls: LintScope, ref lf: LintFiles, n: i64) -> bool {
+    let p = ls.p;
+    let s = p.s;
+    let unit = unit_of(s, n);
+    if lf.package_hard[unit] == 1 { return true; }
+    let named: List<str> = lf.hard_targets[unit];
+    for d in ls.packages[unit] {
+        let pkg_name = node_name(s, d);
+        for t in named { if t == pkg_name { return true; } }
+    }
+    var cur = n;
+    while cur >= 0 {
+        for row_index in nl_get(p.attrs, f"{cur}") {
+            if lint_no_hardcoding(sym_text(s, s.attrs[row_index].1)) { return true; }
+        }
+        cur = p.parents[cur];
+    }
+    return false;
+}
+
+/// Whether literal `n` sits in code that runs (a function, constructor,
+/// destructor, operator, closure or statement) and not in a `const`.
+fn lint_in_running_code(ref p: Program, n: i64) -> bool {
+    let s = p.s;
+    var runs = false;
+    var cur = n;
+    while cur >= 0 {
+        let k = kind(s, cur);
+        if k == nk_const() { return false; }
+        if k == nk_fn() || k == nk_ctor() || k == nk_dtor() || k == nk_operator() || k == nk_lambda()
+            || (k >= nk_let() && k <= nk_catch()) {
+            runs = true;
+        }
+        cur = p.parents[cur];
+    }
+    return runs;
+}
+
+/// HARD001 on literal node `n`.
+fn lint_literal(ref ls: LintScope, var ref sink: DiagSink, ref lf: LintFiles, n: i64) {
+    let p = ls.p;
+    let s = p.s;
+    let k = kind(s, n);
+    let magic = (k == nk_str() && node_name(s, n).len() > 0)
+        || (k == nk_int() && lit_value(s, n) > 1)
+        || (k == nk_float() && lit_value(s, n) != 0 && lit_value(s, n) != LINT_ONE_BITS);
+    if !magic || !lint_in_running_code(p, n) || !lint_hard_scope(ls, lf, n) { return; }
+    let tail = "is prohibited in '[NoHardcoding]' scope; extract to a 'const' declaration or configuration";
+    if k == nk_str() {
+        lint_report(ls, sink, n, LintLevel::Error, "HARD001", f"Hardcoded string literal '\"{node_name(s, n)}\"' {tail}");
+    } else {
+        let shown = if k == nk_int() { f"{lit_value(s, n)}" } else { node_text(s, n) };
+        lint_report(ls, sink, n, LintLevel::Error, "HARD001", f"Hardcoded numeric literal '{shown}' {tail}");
+    }
+}
+
+/// UNIMP004 and INLINE001, from the attributes of the user's files.
+fn lint_attrs(ref ls: LintScope, var ref sink: DiagSink) {
+    let s = ls.p.s;
+    for row in s.attrs {
+        let t = row.0;
+        if !in_user_file(s, t) { continue; }
+        let name = sym_text(s, row.1);
+        let k = kind(s, t);
+        if (name == nameof(Unimplemented) || name == nameof(Todo)) && (k == nk_struct() || k == nk_interface() || k == nk_fn()) {
+            lint_report(ls, sink, t, LintLevel::Warning, "UNIMP004", f"Declaration '{node_name(s, t)}' is marked as unimplemented or todo");
+        }
+        if name == nameof(Inline) {
+            lint_report(ls, sink, t, LintLevel::Warning, "INLINE001",
+                "'[Inline]' is not honoured by the seed engine yet; PilIR and `--emit c` inline calls to this declaration, the seed still calls it");
+        }
+    }
+}
+
+/// Applies every lint of this file to the user's files.
+pub fn check_lint_hints(ref p: Program, var ref sink: DiagSink) {
+    let s = p.s;
+    let ls = lint_scope(p);
+    let lf = lint_files(ls);
+    lint_attrs(ls, sink);
+    var n = s.user_lo;
+    while n < s.user_hi {
+        if in_user_file(s, n) {
+            let k = kind(s, n);
+            if k == nk_block() { lint_block(ls, sink, n); }
+            else if k == nk_while() { lint_while(ls, sink, n); }
+            else if k == nk_if() { lint_if(ls, sink, n); }
+            else if k == nk_binary() { lint_binary(ls, sink, n); }
+            else if k == nk_call() { lint_call(ls, sink, n, lf.core[unit_of(s, n)] == 1); }
+            else if k == nk_let() || k == nk_var() { lint_binding(ls, sink, n); }
+            if lint_is_literal(k) && lf.any_hard[unit_of(s, n)] == 1 { lint_literal(ls, sink, lf, n); }
+        }
+        n = n + 1;
+    }
+}

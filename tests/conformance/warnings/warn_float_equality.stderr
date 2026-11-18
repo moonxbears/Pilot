@@ -1,0 +1,4 @@
+warning[FLOAT001]: Direct floating-point equality comparison ('==' or '!=') may fail due to precision; use epsilon comparison
+warn_float_equality.pilot:8:11
+warning[FLOAT001]: Direct floating-point equality comparison ('==' or '!=') may fail due to precision; use epsilon comparison
+warn_float_equality.pilot:9:11

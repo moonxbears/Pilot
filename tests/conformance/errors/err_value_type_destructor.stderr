@@ -1,0 +1,2 @@
+error[COMP005]: Declared Lattice Contract Violated: Struct 'Handle' is declared ': IValue' (0b00), but spliced fields introduce lattice bits 0b10
+err_value_type_destructor.pilot:5:1

@@ -3,9 +3,20 @@
 // Milestone 58.2: Spec-Compliant Cryptographic Hashes & HMAC in Pilot
 // Implements RFC 6234 SHA-256 & SHA-512, official BLAKE3 multi-chunk Merkle
 // tree hashing, and RFC 2104 HMAC-SHA256 in pure Pilot.
+//
+// Byte buffers and word schedules are `List<i64>`: every stored word is
+// masked to 32 bits, but sums of up to five words are formed before masking,
+// so the arithmetic stays in i64 exactly as before. The round-constant tables
+// are FIPS 180-4 §4.2.2/§4.2.3 (SHA-256/512 K), §5.3.3 (IV, shared with BLAKE3)
+// and the BLAKE3 spec §2.2 message permutation. Each function copies a table
+// into a local once (`let k = SHA256_K;`) and indexes the local: on the VM
+// each read of a `const` list costs about as much as copying it (measured
+// 2026-11-17: `SHA256_K[t]` in the round loop made SHA-256 about twice as slow).
 // ============================================================================
 
 pub pkg std.crypto.hash;
+
+pub const MAX_32_BIT: i64 = 4294967295;
 
 [Layout(c_abi)]
 pub struct Digest256 : IValue {
@@ -17,18 +28,18 @@ pub struct Digest256 : IValue {
 }
 
 pub pure fn rotr32(x: i64, n: i64) -> i64 {
-    let u = x & 4294967295;
+    let u = x & MAX_32_BIT;
     if n <= 0 { return u; }
-    return ((u >> n) | ((u << (32 - n)) & 4294967295)) & 4294967295;
+    return ((u >> n) | ((u << (32 - n)) & MAX_32_BIT)) & MAX_32_BIT;
 }
 
 pub pure fn sha256_ch(x: i64, y: i64, z: i64) -> i64 {
-    let not_x = (x & 4294967295) ^ 4294967295;
-    return ((x & y) ^ (not_x & z)) & 4294967295;
+    let not_x = (x & MAX_32_BIT) ^ MAX_32_BIT;
+    return ((x & y) ^ (not_x & z)) & MAX_32_BIT;
 }
 
 pub pure fn sha256_maj(x: i64, y: i64, z: i64) -> i64 {
-    return ((x & y) ^ (x & z) ^ (y & z)) & 4294967295;
+    return ((x & y) ^ (x & z) ^ (y & z)) & MAX_32_BIT;
 }
 
 pub pure fn sha256_sigma0(x: i64) -> i64 {
@@ -40,12 +51,12 @@ pub pure fn sha256_sigma1(x: i64) -> i64 {
 }
 
 pub pure fn sha256_lsigma0(x: i64) -> i64 {
-    let u = x & 4294967295;
+    let u = x & MAX_32_BIT;
     return rotr32(u, 7) ^ rotr32(u, 18) ^ (u >> 3);
 }
 
 pub pure fn sha256_lsigma1(x: i64) -> i64 {
-    let u = x & 4294967295;
+    let u = x & MAX_32_BIT;
     return rotr32(u, 17) ^ rotr32(u, 19) ^ (u >> 10);
 }
 
@@ -60,91 +71,121 @@ pub pure fn hash_hex_byte(b: i64) -> str {
 }
 
 pub pure fn hash_hex_u32_be(w: i64) -> str {
-    let u = w & 4294967295;
+    let u = w & MAX_32_BIT;
     return hash_hex_byte(u >> 24) + hash_hex_byte(u >> 16) + hash_hex_byte(u >> 8) + hash_hex_byte(u);
 }
 
 pub pure fn hash_hex_u32_le(w: i64) -> str {
-    let u = w & 4294967295;
+    let u = w & MAX_32_BIT;
     return hash_hex_byte(u) + hash_hex_byte(u >> 8) + hash_hex_byte(u >> 16) + hash_hex_byte(u >> 24);
 }
 
-pub pure fn sha256_k_const(i: i64) -> i64 {
-    if i < 16 {
-        if i == 0 { return 1116352408; }
-        if i == 1 { return 1899447441; }
-        if i == 2 { return 3049323471; }
-        if i == 3 { return 3921009573; }
-        if i == 4 { return 961987163; }
-        if i == 5 { return 1508970993; }
-        if i == 6 { return 2453635748; }
-        if i == 7 { return 2870763221; }
-        if i == 8 { return 3624381080; }
-        if i == 9 { return 310598401; }
-        if i == 10 { return 607225278; }
-        if i == 11 { return 1426881987; }
-        if i == 12 { return 1925078388; }
-        if i == 13 { return 2162078206; }
-        if i == 14 { return 2614888103; }
-        return 3248222580;
+const SHA256_K: List<i64> = [
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+];
+const SHA512_K_HI: List<i64> = [
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+    0xca273ece, 0xd186b8c7, 0xeada7dd6, 0xf57d4f7f, 0x06f067aa, 0x0a637dc5, 0x113f9804, 0x1b710b35,
+    0x28db77f5, 0x32caab7b, 0x3c9ebe0a, 0x431d67c4, 0x4cc5d4be, 0x597f299c, 0x5fcb6fab, 0x6c44198c,
+];
+const SHA512_K_LO: List<i64> = [
+    0xd728ae22, 0x23ef65cd, 0xec4d3b2f, 0x8189dbbc, 0xf348b538, 0xb605d019, 0xaf194f9b, 0xda6d8118,
+    0xa3030242, 0x45706fbe, 0x4ee4b28c, 0xd5ffb4e2, 0xf27b896f, 0x3b1696b1, 0x25c71235, 0xcf692694,
+    0x9ef14ad2, 0x384f25e3, 0x8b8cd5b5, 0x77ac9c65, 0x592b0275, 0x6ea6e483, 0xbd41fbd4, 0x831153b5,
+    0xee66dfab, 0x2db43210, 0x98fb213f, 0xbeef0ee4, 0x3da88fc2, 0x930aa725, 0xe003826f, 0x0a0e6e70,
+    0x46d22ffc, 0x5c26c926, 0x5ac42aed, 0x9d95b3df, 0x8baf63de, 0x3c77b2a8, 0x47edaee6, 0x1482353b,
+    0x4cf10364, 0xbc423001, 0xd0f89791, 0x0654be30, 0xd6ef5218, 0x5565a910, 0x5771202a, 0x32bbd1b8,
+    0xb8d2d0c8, 0x5141ab53, 0xdf8eeb99, 0xe19b48a8, 0xc5c95a63, 0xe3418acb, 0x7763e373, 0xd6b2b8a3,
+    0x5defb2fc, 0x43172f60, 0xa1f0ab72, 0x1a6439ec, 0x23631e28, 0xde82bde9, 0xb2c67915, 0xe372532b,
+    0xea26619c, 0x21c0c207, 0xcde0eb1e, 0xee6ed178, 0x72176fba, 0xa2c898a6, 0xbef90dae, 0x131c471b,
+    0x23047d84, 0x40c72493, 0x15c9bebc, 0x9c100d4c, 0xcb3e42b6, 0xfc657e2a, 0x3ad6faec, 0x4a475817,
+];
+const BLAKE3_IV: List<i64> = [
+    0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+];
+const BLAKE3_MSG_PERM: List<i64> = [
+    2, 6, 3, 10, 7, 0, 4, 13, 1, 11, 12, 5, 9, 14, 15, 8,
+];
+// ============================================================================
+// Shared byte and word buffers
+// ============================================================================
+
+// A list of `n` zero words.
+pub fn hash_zero_words(n: i64) -> List<i64> {
+    var out: List<i64> = [];
+    var i = 0;
+    while i < n {
+        out.push(0);
+        i = i + 1;
     }
-    if i < 32 {
-        if i == 16 { return 3835390401; }
-        if i == 17 { return 4022224774; }
-        if i == 18 { return 264347078; }
-        if i == 19 { return 604807628; }
-        if i == 20 { return 770255983; }
-        if i == 21 { return 1249150122; }
-        if i == 22 { return 1555081692; }
-        if i == 23 { return 1996064986; }
-        if i == 24 { return 2554220882; }
-        if i == 25 { return 2821834349; }
-        if i == 26 { return 2952996808; }
-        if i == 27 { return 3210313671; }
-        if i == 28 { return 3336571891; }
-        if i == 29 { return 3584528711; }
-        if i == 30 { return 113926993; }
-        return 338241895;
-    }
-    if i < 48 {
-        if i == 32 { return 666307205; }
-        if i == 33 { return 773529912; }
-        if i == 34 { return 1294757372; }
-        if i == 35 { return 1396182291; }
-        if i == 36 { return 1695183700; }
-        if i == 37 { return 1986661051; }
-        if i == 38 { return 2177026350; }
-        if i == 39 { return 2456956037; }
-        if i == 40 { return 2730485921; }
-        if i == 41 { return 2820302411; }
-        if i == 42 { return 3259730800; }
-        if i == 43 { return 3345764771; }
-        if i == 44 { return 3516065817; }
-        if i == 45 { return 3600352804; }
-        if i == 46 { return 4094571909; }
-        return 275423344;
-    }
-    if i == 48 { return 430227734; }
-    if i == 49 { return 506948616; }
-    if i == 50 { return 659060556; }
-    if i == 51 { return 883997877; }
-    if i == 52 { return 958139571; }
-    if i == 53 { return 1322822218; }
-    if i == 54 { return 1537002063; }
-    if i == 55 { return 1747873779; }
-    if i == 56 { return 1955562222; }
-    if i == 57 { return 2024104815; }
-    if i == 58 { return 2227730452; }
-    if i == 59 { return 2361852424; }
-    if i == 60 { return 2428436474; }
-    if i == 61 { return 2756734187; }
-    if i == 62 { return 3204031479; }
-    return 3329325298;
+    return out;
 }
 
-pub pure fn sha256_padded_byte(bmap: i64, blen: i64, padded_len: i64, idx: i64) -> i64 {
+// The bytes of `msg`, one item per byte.
+pub fn hash_str_bytes(msg: str) -> List<i64> {
+    let n = msg.len();
+    var out: List<i64> = [];
+    var i = 0;
+    while i < n {
+        let b: i64 = msg.byte_at(i);
+        out.push(b);
+        i = i + 1;
+    }
+    return out;
+}
+
+// Appends the four big-endian bytes of the 32-bit word `w`.
+pub fn hash_push_u32_be(var ref out: List<i64>, w: i64) {
+    let u = w & MAX_32_BIT;
+    out.push((u >> 24) & 255);
+    out.push((u >> 16) & 255);
+    out.push((u >> 8) & 255);
+    out.push(u & 255);
+}
+
+// The big-endian bytes of a list of 32-bit words (a SHA digest's bytes).
+pub fn hash_words_be_bytes(ref words: List<i64>) -> List<i64> {
+    var out: List<i64> = [];
+    var i = 0;
+    while i < words.len() {
+        hash_push_u32_be(out, words[i]);
+        i = i + 1;
+    }
+    return out;
+}
+
+// The lowercase hex of a list of 32-bit words, each written big-endian.
+pub fn hash_words_hex_be(words: List<i64>) -> str {
+    var hex_s = "";
+    var i = 0;
+    while i < words.len() {
+        hex_s = hex_s + hash_hex_u32_be(words[i]);
+        i = i + 1;
+    }
+    return hex_s;
+}
+
+// ============================================================================
+// RFC 6234 SHA-256
+// ============================================================================
+
+pub pure fn sha256_padded_byte(ref bytes: List<i64>, blen: i64, padded_len: i64, idx: i64) -> i64 {
     if idx < blen {
-        return ((__engine("map_get", bmap, idx) ?? 0)) & 255;
+        return bytes[idx] & 255;
     }
     if idx == blen {
         return 128;
@@ -158,7 +199,8 @@ pub pure fn sha256_padded_byte(bmap: i64, blen: i64, padded_len: i64, idx: i64) 
     return 0;
 }
 
-pub fn sha256_hash_byte_map(bmap: i64, blen: i64) -> i64 {
+// The eight state words H0..H7 of SHA-256 over the first `blen` items of `bytes`.
+pub fn sha256_words(ref bytes: List<i64>, blen: i64) -> List<i64> {
     var h0 = 1779033703;
     var h1 = 3144134277;
     var h2 = 1013904242;
@@ -169,27 +211,26 @@ pub fn sha256_hash_byte_map(bmap: i64, blen: i64) -> i64 {
     var h7 = 1541459225;
 
     let padded_len = ((blen + 9 + 63) / 64) * 64;
-    let wmap = __engine("map_new");
+    var w = hash_zero_words(64);
+    let k = SHA256_K;
     var blk = 0;
     while blk < padded_len {
         var t = 0;
         while t < 16 {
             let base = blk + (t * 4);
-            let b0 = sha256_padded_byte(bmap, blen, padded_len, base);
-            let b1 = sha256_padded_byte(bmap, blen, padded_len, base + 1);
-            let b2 = sha256_padded_byte(bmap, blen, padded_len, base + 2);
-            let b3 = sha256_padded_byte(bmap, blen, padded_len, base + 3);
-            let word = ((b0 << 24) | (b1 << 16) | (b2 << 8) | b3) & 4294967295;
-            __engine("map_set", wmap, t, word);
+            let b0 = sha256_padded_byte(bytes, blen, padded_len, base);
+            let b1 = sha256_padded_byte(bytes, blen, padded_len, base + 1);
+            let b2 = sha256_padded_byte(bytes, blen, padded_len, base + 2);
+            let b3 = sha256_padded_byte(bytes, blen, padded_len, base + 3);
+            w[t] = ((b0 << 24) | (b1 << 16) | (b2 << 8) | b3) & MAX_32_BIT;
             t = t + 1;
         }
         while t < 64 {
-            let w15 = (__engine("map_get", wmap, t - 15) ?? 0);
-            let w2 = (__engine("map_get", wmap, t - 2) ?? 0);
-            let w16 = (__engine("map_get", wmap, t - 16) ?? 0);
-            let w7 = (__engine("map_get", wmap, t - 7) ?? 0);
-            let wt = (w16 + sha256_lsigma0(w15) + w7 + sha256_lsigma1(w2)) & 4294967295;
-            __engine("map_set", wmap, t, wt);
+            let w15 = w[t - 15];
+            let w2 = w[t - 2];
+            let w16 = w[t - 16];
+            let w7 = w[t - 7];
+            w[t] = (w16 + sha256_lsigma0(w15) + w7 + sha256_lsigma1(w2)) & MAX_32_BIT;
             t = t + 1;
         }
 
@@ -204,86 +245,49 @@ pub fn sha256_hash_byte_map(bmap: i64, blen: i64) -> i64 {
 
         t = 0;
         while t < 64 {
-            let wt = (__engine("map_get", wmap, t) ?? 0);
-            let kt = sha256_k_const(t);
-            let t1 = (h + sha256_sigma1(e) + sha256_ch(e, f, g) + kt + wt) & 4294967295;
-            let t2 = (sha256_sigma0(a) + sha256_maj(a, b, c_v)) & 4294967295;
+            let wt = w[t];
+            let kt = k[t];
+            let t1 = (h + sha256_sigma1(e) + sha256_ch(e, f, g) + kt + wt) & MAX_32_BIT;
+            let t2 = (sha256_sigma0(a) + sha256_maj(a, b, c_v)) & MAX_32_BIT;
             h = g;
             g = f;
             f = e;
-            e = (d + t1) & 4294967295;
+            e = (d + t1) & MAX_32_BIT;
             d = c_v;
             c_v = b;
             b = a;
-            a = (t1 + t2) & 4294967295;
+            a = (t1 + t2) & MAX_32_BIT;
             t = t + 1;
         }
 
-        h0 = (h0 + a) & 4294967295;
-        h1 = (h1 + b) & 4294967295;
-        h2 = (h2 + c_v) & 4294967295;
-        h3 = (h3 + d) & 4294967295;
-        h4 = (h4 + e) & 4294967295;
-        h5 = (h5 + f) & 4294967295;
-        h6 = (h6 + g) & 4294967295;
-        h7 = (h7 + h) & 4294967295;
+        h0 = (h0 + a) & MAX_32_BIT;
+        h1 = (h1 + b) & MAX_32_BIT;
+        h2 = (h2 + c_v) & MAX_32_BIT;
+        h3 = (h3 + d) & MAX_32_BIT;
+        h4 = (h4 + e) & MAX_32_BIT;
+        h5 = (h5 + f) & MAX_32_BIT;
+        h6 = (h6 + g) & MAX_32_BIT;
+        h7 = (h7 + h) & MAX_32_BIT;
         blk = blk + 64;
     }
-
-    let out = __engine("map_new");
-    __engine("map_set", out, "h0", h0);
-    __engine("map_set", out, "h1", h1);
-    __engine("map_set", out, "h2", h2);
-    __engine("map_set", out, "h3", h3);
-    __engine("map_set", out, "h4", h4);
-    __engine("map_set", out, "h5", h5);
-    __engine("map_set", out, "h6", h6);
-    __engine("map_set", out, "h7", h7);
-
-    var wi = 0;
-    while wi < 8 {
-        let hv = (__engine("map_get", out, "h" + wi) ?? 0);
-        let base_b = wi * 4;
-        __engine("map_set", out, base_b, (hv >> 24) & 255);
-        __engine("map_set", out, base_b + 1, (hv >> 16) & 255);
-        __engine("map_set", out, base_b + 2, (hv >> 8) & 255);
-        __engine("map_set", out, base_b + 3, hv & 255);
-        wi = wi + 1;
-    }
-
-    let hex_str = hash_hex_u32_be(h0) + hash_hex_u32_be(h1) + hash_hex_u32_be(h2) + hash_hex_u32_be(h3)
-        + hash_hex_u32_be(h4) + hash_hex_u32_be(h5) + hash_hex_u32_be(h6) + hash_hex_u32_be(h7);
-    __engine("map_set", out, "hex", hex_str);
-    return out;
+    return [h0, h1, h2, h3, h4, h5, h6, h7];
 }
 
 pub fn sha256_hex(msg: str) -> str {
-    let n = msg.len();
-    let bmap = __engine("map_new");
-    var i = 0;
-    while i < n {
-        __engine("map_set", bmap, i, msg.byte_at(i));
-        i = i + 1;
-    }
-    let res = sha256_hash_byte_map(bmap, n);
-    return __engine("map_get", res, "hex");
+    let bytes = hash_str_bytes(msg);
+    let h = sha256_words(bytes, msg.len());
+    return hash_words_hex_be(h);
 }
 
 pub fn sha256_digest(msg: str) -> Digest256 {
-    let n = msg.len();
-    let bmap = __engine("map_new");
-    var i = 0;
-    while i < n {
-        __engine("map_set", bmap, i, msg.byte_at(i));
-        i = i + 1;
-    }
-    let res = sha256_hash_byte_map(bmap, n);
+    let bytes = hash_str_bytes(msg);
+    let h = sha256_words(bytes, msg.len());
     return Digest256 {
-        h0: (__engine("map_get", res, "h0") ?? 0),
-        h1: (__engine("map_get", res, "h1") ?? 0),
-        h2: (__engine("map_get", res, "h2") ?? 0),
-        h3: (__engine("map_get", res, "h3") ?? 0),
-        hex_prefix: __engine("map_get", res, "hex"),
+        h0: h[0],
+        h1: h[1],
+        h2: h[2],
+        h3: h[3],
+        hex_prefix: hash_words_hex_be(h),
     };
 }
 
@@ -293,65 +297,43 @@ pub fn sha256_digest(msg: str) -> Digest256 {
 
 pub fn hmac_sha256_hex(key: str, msg: str) -> str {
     let klen = key.len();
-    let kblock = __engine("map_new");
+    var kblock = hash_str_bytes(key);
     if klen > 64 {
-        let raw_k = __engine("map_new");
-        var ki = 0;
-        while ki < klen {
-            __engine("map_set", raw_k, ki, key.byte_at(ki));
-            ki = ki + 1;
-        }
-        let kh = sha256_hash_byte_map(raw_k, klen);
-        var j = 0;
-        while j < 32 {
-            __engine("map_set", kblock, j, (__engine("map_get", kh, j) ?? 0));
-            j = j + 1;
-        }
-        while j < 64 {
-            __engine("map_set", kblock, j, 0);
-            j = j + 1;
-        }
-    } else {
-        var j = 0;
-        while j < klen {
-            __engine("map_set", kblock, j, key.byte_at(j));
-            j = j + 1;
-        }
-        while j < 64 {
-            __engine("map_set", kblock, j, 0);
-            j = j + 1;
-        }
+        let kh = sha256_words(kblock, klen);
+        kblock = hash_words_be_bytes(kh);
+    }
+    while kblock.len() < 64 {
+        kblock.push(0);
     }
 
     let mlen = msg.len();
-    let inner_in = __engine("map_new");
+    var inner_in: List<i64> = [];
     var i = 0;
     while i < 64 {
-        let kb = (__engine("map_get", kblock, i) ?? 0);
-        __engine("map_set", inner_in, i, (kb ^ 54) & 255);
+        inner_in.push((kblock[i] ^ 54) & 255);
         i = i + 1;
     }
     var mi = 0;
     while mi < mlen {
-        __engine("map_set", inner_in, 64 + mi, msg.byte_at(mi));
+        let mb: i64 = msg.byte_at(mi);
+        inner_in.push(mb);
         mi = mi + 1;
     }
-    let inner_hash = sha256_hash_byte_map(inner_in, 64 + mlen);
+    let inner_hash = sha256_words(inner_in, 64 + mlen);
 
-    let outer_in = __engine("map_new");
+    var outer_in: List<i64> = [];
     i = 0;
     while i < 64 {
-        let kb = (__engine("map_get", kblock, i) ?? 0);
-        __engine("map_set", outer_in, i, (kb ^ 92) & 255);
+        outer_in.push((kblock[i] ^ 92) & 255);
         i = i + 1;
     }
     var di = 0;
-    while di < 32 {
-        __engine("map_set", outer_in, 64 + di, (__engine("map_get", inner_hash, di) ?? 0));
+    while di < 8 {
+        hash_push_u32_be(outer_in, inner_hash[di]);
         di = di + 1;
     }
-    let outer_hash = sha256_hash_byte_map(outer_in, 96);
-    return __engine("map_get", outer_hash, "hex");
+    let outer_hash = sha256_words(outer_in, 96);
+    return hash_words_hex_be(outer_hash);
 }
 
 pub fn hmac_sha256_tag(key: str, msg: str) -> i64 {
@@ -364,37 +346,37 @@ pub fn hmac_sha256_tag(key: str, msg: str) -> i64 {
 // ============================================================================
 
 pub pure fn rotr64_hi(h: i64, l: i64, n: i64) -> i64 {
-    let uh = h & 4294967295;
-    let ul = l & 4294967295;
+    let uh = h & MAX_32_BIT;
+    let ul = l & MAX_32_BIT;
     if n == 0 { return uh; }
     if n < 32 {
-        return ((uh >> n) | ((ul << (32 - n)) & 4294967295)) & 4294967295;
+        return ((uh >> n) | ((ul << (32 - n)) & MAX_32_BIT)) & MAX_32_BIT;
     }
     if n == 32 { return ul; }
     let k = n - 32;
-    return ((ul >> k) | ((uh << (32 - k)) & 4294967295)) & 4294967295;
+    return ((ul >> k) | ((uh << (32 - k)) & MAX_32_BIT)) & MAX_32_BIT;
 }
 
 pub pure fn rotr64_lo(h: i64, l: i64, n: i64) -> i64 {
-    let uh = h & 4294967295;
-    let ul = l & 4294967295;
+    let uh = h & MAX_32_BIT;
+    let ul = l & MAX_32_BIT;
     if n == 0 { return ul; }
     if n < 32 {
-        return ((ul >> n) | ((uh << (32 - n)) & 4294967295)) & 4294967295;
+        return ((ul >> n) | ((uh << (32 - n)) & MAX_32_BIT)) & MAX_32_BIT;
     }
     if n == 32 { return uh; }
     let k = n - 32;
-    return ((uh >> k) | ((ul << (32 - k)) & 4294967295)) & 4294967295;
+    return ((uh >> k) | ((ul << (32 - k)) & MAX_32_BIT)) & MAX_32_BIT;
 }
 
 pub pure fn shr64_hi(h: i64, n: i64) -> i64 {
-    return (h & 4294967295) >> n;
+    return (h & MAX_32_BIT) >> n;
 }
 
 pub pure fn shr64_lo(h: i64, l: i64, n: i64) -> i64 {
-    let uh = h & 4294967295;
-    let ul = l & 4294967295;
-    return ((ul >> n) | ((uh << (32 - n)) & 4294967295)) & 4294967295;
+    let uh = h & MAX_32_BIT;
+    let ul = l & MAX_32_BIT;
+    return ((ul >> n) | ((uh << (32 - n)) & MAX_32_BIT)) & MAX_32_BIT;
 }
 
 pub pure fn sha512_sigma0_hi(h: i64, l: i64) -> i64 {
@@ -428,198 +410,9 @@ pub pure fn sha512_lsigma1_hi(h: i64, l: i64) -> i64 {
 pub pure fn sha512_lsigma1_lo(h: i64, l: i64) -> i64 {
     return rotr64_lo(h, l, 19) ^ rotr64_lo(h, l, 61) ^ shr64_lo(h, l, 6);
 }
-
-pub pure fn sha512_k_hi(i: i64) -> i64 {
-    if i < 20 {
-        if i == 0 { return 1116352408; }
-        if i == 1 { return 1899447441; }
-        if i == 2 { return 3049323471; }
-        if i == 3 { return 3921009573; }
-        if i == 4 { return 961987163; }
-        if i == 5 { return 1508970993; }
-        if i == 6 { return 2453635748; }
-        if i == 7 { return 2870763221; }
-        if i == 8 { return 3624381080; }
-        if i == 9 { return 310598401; }
-        if i == 10 { return 607225278; }
-        if i == 11 { return 1426881987; }
-        if i == 12 { return 1925078388; }
-        if i == 13 { return 2162078206; }
-        if i == 14 { return 2614888103; }
-        if i == 15 { return 3248222580; }
-        if i == 16 { return 3835390401; }
-        if i == 17 { return 4022224774; }
-        if i == 18 { return 264347078; }
-        return 604807628;
-    }
-    if i < 40 {
-        if i == 20 { return 770255983; }
-        if i == 21 { return 1249150122; }
-        if i == 22 { return 1555081692; }
-        if i == 23 { return 1996064986; }
-        if i == 24 { return 2554220882; }
-        if i == 25 { return 2821834349; }
-        if i == 26 { return 2952996808; }
-        if i == 27 { return 3210313671; }
-        if i == 28 { return 3336571891; }
-        if i == 29 { return 3584528711; }
-        if i == 30 { return 113926993; }
-        if i == 31 { return 338241895; }
-        if i == 32 { return 666307205; }
-        if i == 33 { return 773529912; }
-        if i == 34 { return 1294757372; }
-        if i == 35 { return 1396182291; }
-        if i == 36 { return 1695183700; }
-        if i == 37 { return 1986661051; }
-        if i == 38 { return 2177026350; }
-        return 2456956037;
-    }
-    if i < 60 {
-        if i == 40 { return 2730485921; }
-        if i == 41 { return 2820302411; }
-        if i == 42 { return 3259730800; }
-        if i == 43 { return 3345764771; }
-        if i == 44 { return 3516065817; }
-        if i == 45 { return 3600352804; }
-        if i == 46 { return 4094571909; }
-        if i == 47 { return 275423344; }
-        if i == 48 { return 430227734; }
-        if i == 49 { return 506948616; }
-        if i == 50 { return 659060556; }
-        if i == 51 { return 883997877; }
-        if i == 52 { return 958139571; }
-        if i == 53 { return 1322822218; }
-        if i == 54 { return 1537002063; }
-        if i == 55 { return 1747873779; }
-        if i == 56 { return 1955562222; }
-        if i == 57 { return 2024104815; }
-        if i == 58 { return 2227730452; }
-        return 2361852424;
-    }
-    if i == 60 { return 2428436474; }
-    if i == 61 { return 2756734187; }
-    if i == 62 { return 3204031479; }
-    if i == 63 { return 3329325298; }
-    if i == 64 { return 3391569614; }
-    if i == 65 { return 3515267271; }
-    if i == 66 { return 3940187606; }
-    if i == 67 { return 4118630271; }
-    if i == 68 { return 116418474; }
-    if i == 69 { return 174292421; }
-    if i == 70 { return 289380356; }
-    if i == 71 { return 460393269; }
-    if i == 72 { return 685471733; }
-    if i == 73 { return 852142971; }
-    if i == 74 { return 1017036298; }
-    if i == 75 { return 1126000580; }
-    if i == 76 { return 1288033470; }
-    if i == 77 { return 1501505948; }
-    if i == 78 { return 1607167915; }
-    return 1816402316;
-}
-
-pub pure fn sha512_k_lo(i: i64) -> i64 {
-    if i < 20 {
-        if i == 0 { return 3609767458; }
-        if i == 1 { return 602891725; }
-        if i == 2 { return 3964484399; }
-        if i == 3 { return 2173295548; }
-        if i == 4 { return 4081628472; }
-        if i == 5 { return 3053834265; }
-        if i == 6 { return 2937671579; }
-        if i == 7 { return 3664609560; }
-        if i == 8 { return 2734883394; }
-        if i == 9 { return 1164996542; }
-        if i == 10 { return 1323610764; }
-        if i == 11 { return 3590304994; }
-        if i == 12 { return 4068182383; }
-        if i == 13 { return 991336113; }
-        if i == 14 { return 633803317; }
-        if i == 15 { return 3479774868; }
-        if i == 16 { return 2666613458; }
-        if i == 17 { return 944711139; }
-        if i == 18 { return 2341262773; }
-        return 2007800933;
-    }
-    if i < 40 {
-        if i == 20 { return 1495990901; }
-        if i == 21 { return 1856431235; }
-        if i == 22 { return 3175218132; }
-        if i == 23 { return 2198950837; }
-        if i == 24 { return 3999719339; }
-        if i == 25 { return 766784016; }
-        if i == 26 { return 2566594879; }
-        if i == 27 { return 3203337956; }
-        if i == 28 { return 1034457026; }
-        if i == 29 { return 2466948901; }
-        if i == 30 { return 3758326383; }
-        if i == 31 { return 168717936; }
-        if i == 32 { return 1188179964; }
-        if i == 33 { return 1546045734; }
-        if i == 34 { return 1522805485; }
-        if i == 35 { return 2643833823; }
-        if i == 36 { return 2343527390; }
-        if i == 37 { return 1014477480; }
-        if i == 38 { return 1206759142; }
-        return 344077627;
-    }
-    if i < 60 {
-        if i == 40 { return 1290863460; }
-        if i == 41 { return 3158454273; }
-        if i == 42 { return 3505952657; }
-        if i == 43 { return 106217008; }
-        if i == 44 { return 3606008344; }
-        if i == 45 { return 1432725776; }
-        if i == 46 { return 1467031594; }
-        if i == 47 { return 851169720; }
-        if i == 48 { return 3100823752; }
-        if i == 49 { return 1363258195; }
-        if i == 50 { return 3750685593; }
-        if i == 51 { return 3785050280; }
-        if i == 52 { return 3318307427; }
-        if i == 53 { return 3812723403; }
-        if i == 54 { return 2003034995; }
-        if i == 55 { return 3602036899; }
-        if i == 56 { return 1575990012; }
-        if i == 57 { return 1125592928; }
-        if i == 58 { return 2716904306; }
-        return 442776044;
-    }
-    if i == 60 { return 593698344; }
-    if i == 61 { return 3733110249; }
-    if i == 62 { return 2999351573; }
-    if i == 63 { return 3815920427; }
-    if i == 64 { return 3928383900; }
-    if i == 65 { return 566280711; }
-    if i == 66 { return 3454069534; }
-    if i == 67 { return 4000239992; }
-    if i == 68 { return 1914138554; }
-    if i == 69 { return 2731055270; }
-    if i == 70 { return 3203993006; }
-    if i == 71 { return 320620315; }
-    if i == 72 { return 587496836; }
-    if i == 73 { return 1086792851; }
-    if i == 74 { return 365543100; }
-    if i == 75 { return 2618297676; }
-    if i == 76 { return 3409855158; }
-    if i == 77 { return 4234509866; }
-    if i == 78 { return 987167468; }
-    return 1246189591;
-}
-
-pub fn sha512_init_k_table(kmap: i64) -> i64 {
-    var i = 0;
-    while i < 80 {
-        __engine("map_set", kmap, i, sha512_k_hi(i));
-        __engine("map_set", kmap, 100 + i, sha512_k_lo(i));
-        i = i + 1;
-    }
-    return kmap;
-}
-
-pub pure fn sha512_padded_byte(bmap: i64, blen: i64, padded_len: i64, idx: i64) -> i64 {
+pub pure fn sha512_padded_byte(ref bytes: List<i64>, blen: i64, padded_len: i64, idx: i64) -> i64 {
     if idx < blen {
-        return ((__engine("map_get", bmap, idx) ?? 0)) & 255;
+        return bytes[idx] & 255;
     }
     if idx == blen {
         return 128;
@@ -633,19 +426,9 @@ pub pure fn sha512_padded_byte(bmap: i64, blen: i64, padded_len: i64, idx: i64) 
     return 0;
 }
 
-pub fn sha512_store_u32_be(st: i64, base_b: i64, w: i64) -> i64 {
-    let u = w & 4294967295;
-    __engine("map_set", st, base_b, (u >> 24) & 255);
-    __engine("map_set", st, base_b + 1, (u >> 16) & 255);
-    __engine("map_set", st, base_b + 2, (u >> 8) & 255);
-    __engine("map_set", st, base_b + 3, u & 255);
-    return st;
-}
-
-pub fn sha512_hash_byte_map(bmap: i64, blen: i64) -> i64 {
-    let st = __engine("map_new");
-    sha512_init_k_table(st);
-
+// The sixteen 32-bit halves (H0 hi, H0 lo, .., H7 hi, H7 lo) of SHA-512 over
+// the first `blen` items of `bytes`; `hash_words_be_bytes` gives the 64 digest bytes.
+pub fn sha512_words(ref bytes: List<i64>, blen: i64) -> List<i64> {
     var h0_h = 1779033703; var h0_l = 4089235720;
     var h1_h = 3144134277; var h1_l = 2227873595;
     var h2_h = 1013904242; var h2_l = 4271175723;
@@ -656,34 +439,36 @@ pub fn sha512_hash_byte_map(bmap: i64, blen: i64) -> i64 {
     var h7_h = 1541459225; var h7_l = 327033209;
 
     let padded_len = ((blen + 17 + 127) / 128) * 128;
+    var w_hi = hash_zero_words(80);
+    var w_lo = hash_zero_words(80);
+    let k_hi = SHA512_K_HI;
+    let k_lo = SHA512_K_LO;
     var blk = 0;
     while blk < padded_len {
         var t = 0;
         while t < 16 {
             let base = blk + (t * 8);
-            let b0 = sha512_padded_byte(bmap, blen, padded_len, base);
-            let b1 = sha512_padded_byte(bmap, blen, padded_len, base + 1);
-            let b2 = sha512_padded_byte(bmap, blen, padded_len, base + 2);
-            let b3 = sha512_padded_byte(bmap, blen, padded_len, base + 3);
-            let b4 = sha512_padded_byte(bmap, blen, padded_len, base + 4);
-            let b5 = sha512_padded_byte(bmap, blen, padded_len, base + 5);
-            let b6 = sha512_padded_byte(bmap, blen, padded_len, base + 6);
-            let b7 = sha512_padded_byte(bmap, blen, padded_len, base + 7);
-            let wh = ((b0 << 24) | (b1 << 16) | (b2 << 8) | b3) & 4294967295;
-            let wl = ((b4 << 24) | (b5 << 16) | (b6 << 8) | b7) & 4294967295;
-            __engine("map_set", st, 200 + t, wh);
-            __engine("map_set", st, 300 + t, wl);
+            let b0 = sha512_padded_byte(bytes, blen, padded_len, base);
+            let b1 = sha512_padded_byte(bytes, blen, padded_len, base + 1);
+            let b2 = sha512_padded_byte(bytes, blen, padded_len, base + 2);
+            let b3 = sha512_padded_byte(bytes, blen, padded_len, base + 3);
+            let b4 = sha512_padded_byte(bytes, blen, padded_len, base + 4);
+            let b5 = sha512_padded_byte(bytes, blen, padded_len, base + 5);
+            let b6 = sha512_padded_byte(bytes, blen, padded_len, base + 6);
+            let b7 = sha512_padded_byte(bytes, blen, padded_len, base + 7);
+            w_hi[t] = ((b0 << 24) | (b1 << 16) | (b2 << 8) | b3) & MAX_32_BIT;
+            w_lo[t] = ((b4 << 24) | (b5 << 16) | (b6 << 8) | b7) & MAX_32_BIT;
             t = t + 1;
         }
         while t < 80 {
-            let w15_h = (__engine("map_get", st, 200 + t - 15) ?? 0);
-            let w15_l = (__engine("map_get", st, 300 + t - 15) ?? 0);
-            let w2_h = (__engine("map_get", st, 200 + t - 2) ?? 0);
-            let w2_l = (__engine("map_get", st, 300 + t - 2) ?? 0);
-            let w16_h = (__engine("map_get", st, 200 + t - 16) ?? 0);
-            let w16_l = (__engine("map_get", st, 300 + t - 16) ?? 0);
-            let w7_h = (__engine("map_get", st, 200 + t - 7) ?? 0);
-            let w7_l = (__engine("map_get", st, 300 + t - 7) ?? 0);
+            let w15_h = w_hi[t - 15];
+            let w15_l = w_lo[t - 15];
+            let w2_h = w_hi[t - 2];
+            let w2_l = w_lo[t - 2];
+            let w16_h = w_hi[t - 16];
+            let w16_l = w_lo[t - 16];
+            let w7_h = w_hi[t - 7];
+            let w7_l = w_lo[t - 7];
 
             let s0_h = sha512_lsigma0_hi(w15_h, w15_l);
             let s0_l = sha512_lsigma0_lo(w15_h, w15_l);
@@ -691,10 +476,8 @@ pub fn sha512_hash_byte_map(bmap: i64, blen: i64) -> i64 {
             let s1_l = sha512_lsigma1_lo(w2_h, w2_l);
 
             let sum_l = w16_l + s0_l + w7_l + s1_l;
-            let wt_l = sum_l & 4294967295;
-            let wt_h = (w16_h + s0_h + w7_h + s1_h + (sum_l >> 32)) & 4294967295;
-            __engine("map_set", st, 200 + t, wt_h);
-            __engine("map_set", st, 300 + t, wt_l);
+            w_lo[t] = sum_l & MAX_32_BIT;
+            w_hi[t] = (w16_h + s0_h + w7_h + s1_h + (sum_l >> 32)) & MAX_32_BIT;
             t = t + 1;
         }
 
@@ -709,183 +492,124 @@ pub fn sha512_hash_byte_map(bmap: i64, blen: i64) -> i64 {
 
         t = 0;
         while t < 80 {
-            let wt_h = (__engine("map_get", st, 200 + t) ?? 0);
-            let wt_l = (__engine("map_get", st, 300 + t) ?? 0);
-            let kt_h = (__engine("map_get", st, t) ?? 0);
-            let kt_l = (__engine("map_get", st, 100 + t) ?? 0);
+            let wt_h = w_hi[t];
+            let wt_l = w_lo[t];
+            let kt_h = k_hi[t];
+            let kt_l = k_lo[t];
 
             let t1_l_sum = h_l + sha512_sigma1_lo(e_h, e_l) + sha256_ch(e_l, f_l, g_l) + kt_l + wt_l;
-            let t1_l = t1_l_sum & 4294967295;
-            let t1_h = (h_h + sha512_sigma1_hi(e_h, e_l) + sha256_ch(e_h, f_h, g_h) + kt_h + wt_h + (t1_l_sum >> 32)) & 4294967295;
+            let t1_l = t1_l_sum & MAX_32_BIT;
+            let t1_h = (h_h + sha512_sigma1_hi(e_h, e_l) + sha256_ch(e_h, f_h, g_h) + kt_h + wt_h + (t1_l_sum >> 32)) & MAX_32_BIT;
 
             let t2_l_sum = sha512_sigma0_lo(a_h, a_l) + sha256_maj(a_l, b_l, c_l);
-            let t2_l = t2_l_sum & 4294967295;
-            let t2_h = (sha512_sigma0_hi(a_h, a_l) + sha256_maj(a_h, b_h, c_h) + (t2_l_sum >> 32)) & 4294967295;
+            let t2_l = t2_l_sum & MAX_32_BIT;
+            let t2_h = (sha512_sigma0_hi(a_h, a_l) + sha256_maj(a_h, b_h, c_h) + (t2_l_sum >> 32)) & MAX_32_BIT;
 
             h_h = g_h; h_l = g_l;
             g_h = f_h; g_l = f_l;
             f_h = e_h; f_l = e_l;
             let ne_l = d_l + t1_l;
-            e_l = ne_l & 4294967295;
-            e_h = (d_h + t1_h + (ne_l >> 32)) & 4294967295;
+            e_l = ne_l & MAX_32_BIT;
+            e_h = (d_h + t1_h + (ne_l >> 32)) & MAX_32_BIT;
             d_h = c_h; d_l = c_l;
             c_h = b_h; c_l = b_l;
             b_h = a_h; b_l = a_l;
             let na_l = t1_l + t2_l;
-            a_l = na_l & 4294967295;
-            a_h = (t1_h + t2_h + (na_l >> 32)) & 4294967295;
+            a_l = na_l & MAX_32_BIT;
+            a_h = (t1_h + t2_h + (na_l >> 32)) & MAX_32_BIT;
             t = t + 1;
         }
 
-        let s0l = h0_l + a_l; h0_l = s0l & 4294967295; h0_h = (h0_h + a_h + (s0l >> 32)) & 4294967295;
-        let s1l = h1_l + b_l; h1_l = s1l & 4294967295; h1_h = (h1_h + b_h + (s1l >> 32)) & 4294967295;
-        let s2l = h2_l + c_l; h2_l = s2l & 4294967295; h2_h = (h2_h + c_h + (s2l >> 32)) & 4294967295;
-        let s3l = h3_l + d_l; h3_l = s3l & 4294967295; h3_h = (h3_h + d_h + (s3l >> 32)) & 4294967295;
-        let s4l = h4_l + e_l; h4_l = s4l & 4294967295; h4_h = (h4_h + e_h + (s4l >> 32)) & 4294967295;
-        let s5l = h5_l + f_l; h5_l = s5l & 4294967295; h5_h = (h5_h + f_h + (s5l >> 32)) & 4294967295;
-        let s6l = h6_l + g_l; h6_l = s6l & 4294967295; h6_h = (h6_h + g_h + (s6l >> 32)) & 4294967295;
-        let s7l = h7_l + h_l; h7_l = s7l & 4294967295; h7_h = (h7_h + h_h + (s7l >> 32)) & 4294967295;
+        let s0l = h0_l + a_l; h0_l = s0l & MAX_32_BIT; h0_h = (h0_h + a_h + (s0l >> 32)) & MAX_32_BIT;
+        let s1l = h1_l + b_l; h1_l = s1l & MAX_32_BIT; h1_h = (h1_h + b_h + (s1l >> 32)) & MAX_32_BIT;
+        let s2l = h2_l + c_l; h2_l = s2l & MAX_32_BIT; h2_h = (h2_h + c_h + (s2l >> 32)) & MAX_32_BIT;
+        let s3l = h3_l + d_l; h3_l = s3l & MAX_32_BIT; h3_h = (h3_h + d_h + (s3l >> 32)) & MAX_32_BIT;
+        let s4l = h4_l + e_l; h4_l = s4l & MAX_32_BIT; h4_h = (h4_h + e_h + (s4l >> 32)) & MAX_32_BIT;
+        let s5l = h5_l + f_l; h5_l = s5l & MAX_32_BIT; h5_h = (h5_h + f_h + (s5l >> 32)) & MAX_32_BIT;
+        let s6l = h6_l + g_l; h6_l = s6l & MAX_32_BIT; h6_h = (h6_h + g_h + (s6l >> 32)) & MAX_32_BIT;
+        let s7l = h7_l + h_l; h7_l = s7l & MAX_32_BIT; h7_h = (h7_h + h_h + (s7l >> 32)) & MAX_32_BIT;
 
         blk = blk + 128;
     }
-
-    sha512_store_u32_be(st, 0, h0_h);  sha512_store_u32_be(st, 4, h0_l);
-    sha512_store_u32_be(st, 8, h1_h);  sha512_store_u32_be(st, 12, h1_l);
-    sha512_store_u32_be(st, 16, h2_h); sha512_store_u32_be(st, 20, h2_l);
-    sha512_store_u32_be(st, 24, h3_h); sha512_store_u32_be(st, 28, h3_l);
-    sha512_store_u32_be(st, 32, h4_h); sha512_store_u32_be(st, 36, h4_l);
-    sha512_store_u32_be(st, 40, h5_h); sha512_store_u32_be(st, 44, h5_l);
-    sha512_store_u32_be(st, 48, h6_h); sha512_store_u32_be(st, 52, h6_l);
-    sha512_store_u32_be(st, 56, h7_h); sha512_store_u32_be(st, 60, h7_l);
-
-    let hex_str = hash_hex_u32_be(h0_h) + hash_hex_u32_be(h0_l)
-        + hash_hex_u32_be(h1_h) + hash_hex_u32_be(h1_l)
-        + hash_hex_u32_be(h2_h) + hash_hex_u32_be(h2_l)
-        + hash_hex_u32_be(h3_h) + hash_hex_u32_be(h3_l)
-        + hash_hex_u32_be(h4_h) + hash_hex_u32_be(h4_l)
-        + hash_hex_u32_be(h5_h) + hash_hex_u32_be(h5_l)
-        + hash_hex_u32_be(h6_h) + hash_hex_u32_be(h6_l)
-        + hash_hex_u32_be(h7_h) + hash_hex_u32_be(h7_l);
-    __engine("map_set", st, "hex", hex_str);
-    return st;
+    return [
+        h0_h, h0_l, h1_h, h1_l, h2_h, h2_l, h3_h, h3_l,
+        h4_h, h4_l, h5_h, h5_l, h6_h, h6_l, h7_h, h7_l,
+    ];
 }
 
 pub fn sha512_hex(msg: str) -> str {
-    let n = msg.len();
-    let bmap = __engine("map_new");
-    var i = 0;
-    while i < n {
-        __engine("map_set", bmap, i, msg.byte_at(i));
-        i = i + 1;
-    }
-    let res = sha512_hash_byte_map(bmap, n);
-    return __engine("map_get", res, "hex");
+    let bytes = hash_str_bytes(msg);
+    let h = sha512_words(bytes, msg.len());
+    return hash_words_hex_be(h);
 }
 
 // ============================================================================
 // Official BLAKE3 Compression & Multi-Chunk Merkle Tree Hash
 // ============================================================================
 
-pub pure fn blake3_g_mix(a: i64, b: i64, c: i64, d: i64, mx: i64, my: i64) -> i64 {
-    let a1 = (a + b + mx) & 4294967295;
-    let d1 = rotr32(d ^ a1, 16);
-    let c1 = (c + d1) & 4294967295;
-    let b1 = rotr32(b ^ c1, 12);
-    let a2 = (a1 + b1 + my) & 4294967295;
-    let d2 = rotr32(d1 ^ a2, 8);
-    let c2 = (c1 + d2) & 4294967295;
-    let b2 = rotr32(b1 ^ c2, 7);
-    return (a2 ^ b2 ^ c2 ^ d2) & 4294967295;
-}
+// Runs G on state words `ai`, `bi`, `ci`, `di` of `st` with the message words
+// at `xi` and `yi`.
+pub fn blake3_qround(var ref st: List<i64>, ai: i64, bi: i64, ci: i64, di: i64, xi: i64, yi: i64) {
+    let a0 = st[ai];
+    let b0 = st[bi];
+    let c0 = st[ci];
+    let d0 = st[di];
+    let mx = st[xi];
+    let my = st[yi];
 
-pub pure fn blake3_iv(i: i64) -> i64 {
-    if i == 0 { return 1779033703; }
-    if i == 1 { return 3144134277; }
-    if i == 2 { return 1013904242; }
-    if i == 3 { return 2773480762; }
-    if i == 4 { return 1359893119; }
-    if i == 5 { return 2600822924; }
-    if i == 6 { return 528734635; }
-    return 1541459225;
-}
-
-pub pure fn blake3_msg_perm(i: i64) -> i64 {
-    if i == 0 { return 2; }
-    if i == 1 { return 6; }
-    if i == 2 { return 3; }
-    if i == 3 { return 10; }
-    if i == 4 { return 7; }
-    if i == 5 { return 0; }
-    if i == 6 { return 4; }
-    if i == 7 { return 13; }
-    if i == 8 { return 1; }
-    if i == 9 { return 11; }
-    if i == 10 { return 12; }
-    if i == 11 { return 5; }
-    if i == 12 { return 9; }
-    if i == 13 { return 14; }
-    if i == 14 { return 15; }
-    return 8;
-}
-
-pub fn blake3_qround(st: i64, ai: i64, bi: i64, ci: i64, di: i64, mx: i64, my: i64) -> i64 {
-    let a0 = (__engine("map_get", st, ai) ?? 0);
-    let b0 = (__engine("map_get", st, bi) ?? 0);
-    let c0 = (__engine("map_get", st, ci) ?? 0);
-    let d0 = (__engine("map_get", st, di) ?? 0);
-
-    let a1 = (a0 + b0 + mx) & 4294967295;
+    let a1 = (a0 + b0 + mx) & MAX_32_BIT;
     let d1 = rotr32(d0 ^ a1, 16);
-    let c1 = (c0 + d1) & 4294967295;
+    let c1 = (c0 + d1) & MAX_32_BIT;
     let b1 = rotr32(b0 ^ c1, 12);
-    let a2 = (a1 + b1 + my) & 4294967295;
+    let a2 = (a1 + b1 + my) & MAX_32_BIT;
     let d2 = rotr32(d1 ^ a2, 8);
-    let c2 = (c1 + d2) & 4294967295;
+    let c2 = (c1 + d2) & MAX_32_BIT;
     let b2 = rotr32(b1 ^ c2, 7);
 
-    __engine("map_set", st, ai, a2);
-    __engine("map_set", st, bi, b2);
-    __engine("map_set", st, ci, c2);
-    __engine("map_set", st, di, d2);
-    return st;
+    st[ai] = a2;
+    st[bi] = b2;
+    st[ci] = c2;
+    st[di] = d2;
 }
 
-// `st`: indices 0..15 = state words, 16..31 = message words, 32..47 = temp permute, 48..55 = cv
-pub fn blake3_compress_in_place(st: i64, counter: i64, block_len: i64, flags: i64) -> i64 {
+// `st` (56 words): 0..15 = state words, 16..31 = message words,
+// 32..47 = permutation scratch, 48..55 = chaining value.
+pub fn blake3_compress_in_place(var ref st: List<i64>, counter: i64, block_len: i64, flags: i64) {
+    let iv = BLAKE3_IV;
+    let perm = BLAKE3_MSG_PERM;
     var i = 0;
     while i < 8 {
-        __engine("map_set", st, i, (__engine("map_get", st, 48 + i) ?? 0));
+        st[i] = st[48 + i];
         i = i + 1;
     }
-    __engine("map_set", st, 8, blake3_iv(0));
-    __engine("map_set", st, 9, blake3_iv(1));
-    __engine("map_set", st, 10, blake3_iv(2));
-    __engine("map_set", st, 11, blake3_iv(3));
-    __engine("map_set", st, 12, counter & 4294967295);
-    __engine("map_set", st, 13, (counter >> 32) & 4294967295);
-    __engine("map_set", st, 14, block_len & 4294967295);
-    __engine("map_set", st, 15, flags & 4294967295);
+    st[8] = iv[0];
+    st[9] = iv[1];
+    st[10] = iv[2];
+    st[11] = iv[3];
+    st[12] = counter & MAX_32_BIT;
+    st[13] = (counter >> 32) & MAX_32_BIT;
+    st[14] = block_len & MAX_32_BIT;
+    st[15] = flags & MAX_32_BIT;
 
     var r = 0;
     while r < 7 {
-        blake3_qround(st, 0, 4, 8, 12, (__engine("map_get", st, 16) ?? 0), (__engine("map_get", st, 17) ?? 0));
-        blake3_qround(st, 1, 5, 9, 13, (__engine("map_get", st, 18) ?? 0), (__engine("map_get", st, 19) ?? 0));
-        blake3_qround(st, 2, 6, 10, 14, (__engine("map_get", st, 20) ?? 0), (__engine("map_get", st, 21) ?? 0));
-        blake3_qround(st, 3, 7, 11, 15, (__engine("map_get", st, 22) ?? 0), (__engine("map_get", st, 23) ?? 0));
-        blake3_qround(st, 0, 5, 10, 15, (__engine("map_get", st, 24) ?? 0), (__engine("map_get", st, 25) ?? 0));
-        blake3_qround(st, 1, 6, 11, 12, (__engine("map_get", st, 26) ?? 0), (__engine("map_get", st, 27) ?? 0));
-        blake3_qround(st, 2, 7, 8, 13, (__engine("map_get", st, 28) ?? 0), (__engine("map_get", st, 29) ?? 0));
-        blake3_qround(st, 3, 4, 9, 14, (__engine("map_get", st, 30) ?? 0), (__engine("map_get", st, 31) ?? 0));
+        blake3_qround(st, 0, 4, 8, 12, 16, 17);
+        blake3_qround(st, 1, 5, 9, 13, 18, 19);
+        blake3_qround(st, 2, 6, 10, 14, 20, 21);
+        blake3_qround(st, 3, 7, 11, 15, 22, 23);
+        blake3_qround(st, 0, 5, 10, 15, 24, 25);
+        blake3_qround(st, 1, 6, 11, 12, 26, 27);
+        blake3_qround(st, 2, 7, 8, 13, 28, 29);
+        blake3_qround(st, 3, 4, 9, 14, 30, 31);
         if r < 6 {
             var pi = 0;
             while pi < 16 {
-                let src_idx = blake3_msg_perm(pi);
-                __engine("map_set", st, 32 + pi, (__engine("map_get", st, 16 + src_idx) ?? 0));
+                st[32 + pi] = st[16 + perm[pi]];
                 pi = pi + 1;
             }
             pi = 0;
             while pi < 16 {
-                __engine("map_set", st, 16 + pi, (__engine("map_get", st, 32 + pi) ?? 0));
+                st[16 + pi] = st[32 + pi];
                 pi = pi + 1;
             }
         }
@@ -894,14 +618,13 @@ pub fn blake3_compress_in_place(st: i64, counter: i64, block_len: i64, flags: i6
 
     i = 0;
     while i < 8 {
-        let s_lo = (__engine("map_get", st, i) ?? 0);
-        let s_hi = (__engine("map_get", st, i + 8) ?? 0);
-        let cv_i = (__engine("map_get", st, 48 + i) ?? 0);
-        __engine("map_set", st, i, (s_lo ^ s_hi) & 4294967295);
-        __engine("map_set", st, i + 8, (s_hi ^ cv_i) & 4294967295);
+        let s_lo = st[i];
+        let s_hi = st[i + 8];
+        let cv_i = st[48 + i];
+        st[i] = (s_lo ^ s_hi) & MAX_32_BIT;
+        st[i + 8] = (s_hi ^ cv_i) & MAX_32_BIT;
         i = i + 1;
     }
-    return st;
 }
 
 pub pure fn blake3_msg_byte(msg: str, mlen: i64, idx: i64) -> i64 {
@@ -910,8 +633,7 @@ pub pure fn blake3_msg_byte(msg: str, mlen: i64, idx: i64) -> i64 {
     }
     return 0;
 }
-
-pub fn blake3_load_msg_block(st: i64, msg: str, mlen: i64, blk_offset: i64, blk_len: i64) -> i64 {
+pub fn blake3_load_msg_block(var ref st: List<i64>, msg: str, mlen: i64, blk_offset: i64, blk_len: i64) {
     let end_off = blk_offset + blk_len;
     var wi = 0;
     while wi < 16 {
@@ -920,23 +642,60 @@ pub fn blake3_load_msg_block(st: i64, msg: str, mlen: i64, blk_offset: i64, blk_
         let b1 = if p + 1 < end_off { blake3_msg_byte(msg, mlen, p + 1) } else { 0 };
         let b2 = if p + 2 < end_off { blake3_msg_byte(msg, mlen, p + 2) } else { 0 };
         let b3 = if p + 3 < end_off { blake3_msg_byte(msg, mlen, p + 3) } else { 0 };
-        let w = (b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)) & 4294967295;
-        __engine("map_set", st, 16 + wi, w);
+        st[16 + wi] = (b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)) & MAX_32_BIT;
         wi = wi + 1;
     }
-    return st;
+}
+
+// Loads `left` (8 words of `stack_cv` at `l_base`) and the current chaining
+// value as a parent block, and resets the chaining value to the IV.
+pub fn blake3_load_parent(var ref st: List<i64>, ref stack_cv: List<i64>, l_base: i64) {
+    let iv = BLAKE3_IV;
+    var wi = 0;
+    while wi < 8 {
+        st[16 + wi] = stack_cv[l_base + wi];
+        st[24 + wi] = st[48 + wi];
+        st[48 + wi] = iv[wi];
+        wi = wi + 1;
+    }
+}
+
+// Copies the first 8 output words into the chaining value.
+pub fn blake3_keep_cv(var ref st: List<i64>) {
+    var ci = 0;
+    while ci < 8 {
+        st[48 + ci] = st[ci];
+        ci = ci + 1;
+    }
+}
+
+// Sets the chaining value to the IV.
+pub fn blake3_reset_cv(var ref st: List<i64>) {
+    let iv = BLAKE3_IV;
+    var i = 0;
+    while i < 8 {
+        st[48 + i] = iv[i];
+        i = i + 1;
+    }
+}
+
+// The first 8 output words as little-endian hex (the 32-byte BLAKE3 digest).
+pub fn blake3_out_hex(st: List<i64>) -> str {
+    var hex_s = "";
+    var hi = 0;
+    while hi < 8 {
+        hex_s = hex_s + hash_hex_u32_le(st[hi]);
+        hi = hi + 1;
+    }
+    return hex_s;
 }
 
 pub fn blake3_hex(msg: str) -> str {
     let mlen = msg.len();
-    let st = __engine("map_new");
+    var st = hash_zero_words(56);
 
     if mlen <= 1024 {
-        var i = 0;
-        while i < 8 {
-            __engine("map_set", st, 48 + i, blake3_iv(i));
-            i = i + 1;
-        }
+        blake3_reset_cv(st);
         let num_blocks = if mlen == 0 { 1 } else { (mlen + 63) / 64 };
         var b_idx = 0;
         while b_idx < num_blocks {
@@ -949,24 +708,17 @@ pub fn blake3_hex(msg: str) -> str {
             if b_idx + 1 == num_blocks { flags = flags | 2 | 8; }
             blake3_compress_in_place(st, 0, b_len, flags);
             if b_idx + 1 < num_blocks {
-                var ci = 0;
-                while ci < 8 {
-                    __engine("map_set", st, 48 + ci, (__engine("map_get", st, ci) ?? 0));
-                    ci = ci + 1;
-                }
+                blake3_keep_cv(st);
             }
             b_idx = b_idx + 1;
         }
-        var hex_s = "";
-        var hi = 0;
-        while hi < 8 {
-            hex_s = hex_s + hash_hex_u32_le((__engine("map_get", st, hi) ?? 0));
-            hi = hi + 1;
-        }
-        return hex_s;
+        return blake3_out_hex(st);
     }
 
-    // Multi-chunk Merkle stack: stack depth `d` stored at `100 + d * 8 + i`
+    // Multi-chunk Merkle stack: entry `d` holds a chaining value at
+    // `stack_cv[d * 8 ..]` and its subtree height at `stack_h[d]`.
+    var stack_cv: List<i64> = [];
+    var stack_h: List<i64> = [];
     let total_chunks = (mlen + 1023) / 1024;
     var stack_len = 0;
     var chunk_idx = 0;
@@ -974,11 +726,7 @@ pub fn blake3_hex(msg: str) -> str {
         let c_start = chunk_idx * 1024;
         let c_rem = mlen - c_start;
         let c_len = if c_rem > 1024 { 1024 } else { c_rem };
-        var i = 0;
-        while i < 8 {
-            __engine("map_set", st, 48 + i, blake3_iv(i));
-            i = i + 1;
-        }
+        blake3_reset_cv(st);
         let num_blocks = (c_len + 63) / 64;
         var b_idx = 0;
         while b_idx < num_blocks {
@@ -990,11 +738,7 @@ pub fn blake3_hex(msg: str) -> str {
             if b_idx == 0 { flags = flags | 1; }
             if b_idx + 1 == num_blocks { flags = flags | 2; }
             blake3_compress_in_place(st, chunk_idx, b_len, flags);
-            var ci = 0;
-            while ci < 8 {
-                __engine("map_set", st, 48 + ci, (__engine("map_get", st, ci) ?? 0));
-                ci = ci + 1;
-            }
+            blake3_keep_cv(st);
             b_idx = b_idx + 1;
         }
 
@@ -1003,23 +747,12 @@ pub fn blake3_hex(msg: str) -> str {
             var fold = 1;
             while fold == 1 {
                 if stack_len > 0 {
-                    let top_h = (__engine("map_get", st, 300 + stack_len - 1) ?? 0);
+                    let top_h = stack_h[stack_len - 1];
                     if top_h == cur_h {
                         stack_len = stack_len - 1;
-                        let l_base = 100 + (stack_len * 8);
-                        var wi = 0;
-                        while wi < 8 {
-                            __engine("map_set", st, 16 + wi, (__engine("map_get", st, l_base + wi) ?? 0));
-                            __engine("map_set", st, 24 + wi, (__engine("map_get", st, 48 + wi) ?? 0));
-                            __engine("map_set", st, 48 + wi, blake3_iv(wi));
-                            wi = wi + 1;
-                        }
+                        blake3_load_parent(st, stack_cv, stack_len * 8);
                         blake3_compress_in_place(st, 0, 64, 4);
-                        wi = 0;
-                        while wi < 8 {
-                            __engine("map_set", st, 48 + wi, (__engine("map_get", st, wi) ?? 0));
-                            wi = wi + 1;
-                        }
+                        blake3_keep_cv(st);
                         cur_h = top_h + 1;
                     } else {
                         fold = 0;
@@ -1028,48 +761,33 @@ pub fn blake3_hex(msg: str) -> str {
                     fold = 0;
                 }
             }
+            let s_base = stack_len * 8;
             var si = 0;
             while si < 8 {
-                __engine("map_set", st, 100 + (stack_len * 8) + si, (__engine("map_get", st, 48 + si) ?? 0));
+                if s_base + si < stack_cv.len() {
+                    stack_cv[s_base + si] = st[48 + si];
+                } else {
+                    stack_cv.push(st[48 + si]);
+                }
                 si = si + 1;
             }
-            __engine("map_set", st, 300 + stack_len, cur_h);
+            if stack_len < stack_h.len() {
+                stack_h[stack_len] = cur_h;
+            } else {
+                stack_h.push(cur_h);
+            }
             stack_len = stack_len + 1;
         } else {
             while stack_len > 1 {
                 stack_len = stack_len - 1;
-                let l_base = 100 + (stack_len * 8);
-                var wi = 0;
-                while wi < 8 {
-                    __engine("map_set", st, 16 + wi, (__engine("map_get", st, l_base + wi) ?? 0));
-                    __engine("map_set", st, 24 + wi, (__engine("map_get", st, 48 + wi) ?? 0));
-                    __engine("map_set", st, 48 + wi, blake3_iv(wi));
-                    wi = wi + 1;
-                }
+                blake3_load_parent(st, stack_cv, stack_len * 8);
                 blake3_compress_in_place(st, 0, 64, 4);
-                wi = 0;
-                while wi < 8 {
-                    __engine("map_set", st, 48 + wi, (__engine("map_get", st, wi) ?? 0));
-                    wi = wi + 1;
-                }
+                blake3_keep_cv(st);
             }
             stack_len = stack_len - 1;
-            let root_l = 100 + (stack_len * 8);
-            var rwi = 0;
-            while rwi < 8 {
-                __engine("map_set", st, 16 + rwi, (__engine("map_get", st, root_l + rwi) ?? 0));
-                __engine("map_set", st, 24 + rwi, (__engine("map_get", st, 48 + rwi) ?? 0));
-                __engine("map_set", st, 48 + rwi, blake3_iv(rwi));
-                rwi = rwi + 1;
-            }
+            blake3_load_parent(st, stack_cv, stack_len * 8);
             blake3_compress_in_place(st, 0, 64, 12);
-            var hex_s = "";
-            var hi = 0;
-            while hi < 8 {
-                hex_s = hex_s + hash_hex_u32_le((__engine("map_get", st, hi) ?? 0));
-                hi = hi + 1;
-            }
-            return hex_s;
+            return blake3_out_hex(st);
         }
         chunk_idx = chunk_idx + 1;
     }

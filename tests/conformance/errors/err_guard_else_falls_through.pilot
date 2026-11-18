@@ -1,0 +1,11 @@
+// NULL002: when its condition fails, a `guard` leaves through its `else`
+// block; an `else` that runs to its end does not leave.
+fn half(v: i64?) -> i64 {
+    // The `else` block starts at line 5, column 27.
+    guard some x = v else { print(0); }
+    return x / 2;
+}
+
+fn main() {
+    print(half(8));
+}

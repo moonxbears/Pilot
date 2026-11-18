@@ -1,0 +1,41 @@
+// Loop exits LOOP001-LOOP003 accept. A `break` without a value leaves the
+// innermost loop or switch, so one inside an inner `while` or a `switch`
+// does not mix with the `break value` of the `for .. then` around it; a
+// collecting `for` yields without breaking.
+//
+// Expected output, worked by hand:
+//   first_over([1, 4, 7], 6): the inner while runs k up to 2 each round;
+//   1 * 2 = 2, 4 * 2 = 8 > 6, so the loop breaks with 4.
+//   first_over([1, 2], 6): 2 and 4 are not over 6, so the fallback -1.
+//   first_big([0, 3, 9, 12]): 0 leaves the switch only, 3 is not over 5,
+//   9 is, so 9. first_big([0, 1]): the fallback -1.
+//   doubled: [1, 2, 3] each times 2 = 2, 4, 6: three items, the last 6.
+fn first_over(xs: List<i64>, limit: i64) -> i64 {
+    return for x in xs {
+        var k = 0;
+        while k < 10 {
+            k = k + 1;
+            if k >= 2 { break; }
+        }
+        if x * k > limit { break x; }
+    } then -1;
+}
+
+fn first_big(xs: List<i64>) -> i64 {
+    return for x in xs {
+        switch x {
+            case 0: break;
+            default: if x > 5 { break x; }
+        }
+    } then -1;
+}
+
+fn main() {
+    print(first_over([1, 4, 7], 6));
+    print(first_over([1, 2], 6));
+    print(first_big([0, 3, 9, 12]));
+    print(first_big([0, 1]));
+    let doubled = for x in [1, 2, 3] { yield x * 2; };
+    print(doubled.len());
+    print(doubled[2]);
+}

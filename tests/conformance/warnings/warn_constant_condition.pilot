@@ -1,0 +1,7 @@
+// An `if` on a boolean literal is a warning (COND001): one of its branches
+// can never run. The program still runs: `if true` takes its first branch
+// and prints 1, `if false` its `else` and prints 2.
+fn main() {
+    if true { print(1); }
+    if false { print(0); } else { print(2); }
+}

@@ -1,0 +1,15 @@
+// Names that only resemble the placeholders are neither UNIMP001 (a call
+// of `todo` / `unimplemented`) nor UNIMP004 (`[Unimplemented]` / `[Todo]`
+// on a declaration); the program runs without a warning.
+//
+// Expected output, worked by hand: todo_count() = 2; Task { done: 3 }.done
+// + 1 = 4.
+fn todo_count() -> i64 => 2;
+
+struct Task { pub done: i64; }
+
+fn main() {
+    print(todo_count());
+    let t = Task { done: 3 };
+    print(t.done + 1);
+}

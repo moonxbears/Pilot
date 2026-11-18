@@ -1,0 +1,29 @@
+// Declarations that keep the names of AGENTS.md §3 in a file that carries
+// [EnforceCoreNaming] (selfhost/check/lint_decls.pilot): an interface with
+// the `I` prefix, a PascalCase value type, an attribute ending in `Attr`, a
+// reference view ending in `View` and a scoped guard ending in `Lease`. The
+// file checks clean and runs: Square(3).area() = 3 * 3 = 9.
+[EnforceCoreNaming]
+pub pkg Demo.Naming;
+
+pub interface IShape {
+    fn area() -> i64;
+}
+pub struct Square : IShape, IValue {
+    pub side: i64;
+    pub fn area() -> i64 => .side * .side;
+}
+pub struct WeightAttr : IAttribute, IValue {
+    pub weight: i64;
+}
+pub struct CellView : IReference {
+    pub at: i64;
+}
+pub struct CellLease : IGuard {
+    pub at: i64;
+}
+
+fn main() {
+    let s = Square { side: 3 };
+    print(s.area());
+}

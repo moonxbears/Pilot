@@ -1,0 +1,94 @@
+// ==============================================================================
+// FILE: selfhost/check/suppress.pilot
+// `[Suppress(..)]` and its synonyms: diagnostics a program asks not to see.
+// ==============================================================================
+// A diagnostic at node `n` is not reported when `n` or a node around it
+// carries `[Suppress]`, `[Allow]`, `[SuppressWarning]`, `[SuppressMessage]`
+// or `[Diagnostics]`, or when the package declaration of its file carries
+// one of the first four. Without arguments the attribute silences every
+// diagnostic; otherwise one argument must be the diagnostic's code, `all`,
+// `*`, or text the message (`CODE: text`) contains.
+pub lvl(0) pkg selfhost.check;
+
+
+/// The program and, per file (unit index), its package declarations.
+pub struct LintScope {
+    pub ref p: Program;
+    pub packages: List<List<i64>>;
+}
+
+pub fn lint_scope(ref p: Program) -> LintScope {
+    let s = p.s;
+    var packages: List<List<i64>> = [];
+    var u = 0;
+    while u < s.files.len() {
+        let fresh: List<i64> = [];
+        packages.push(fresh);
+        u = u + 1;
+    }
+    for d in s.decl_nodes {
+        let unit = unit_of(s, d);
+        if is_package_decl(s, d) && unit >= 0 && unit < packages.len() {
+            let l: List<i64> = packages[unit];
+            l.push(d);
+        }
+    }
+    return LintScope { p: p, packages: packages };
+}
+
+/// The text of an attribute argument: a name, a string's text, or the last
+/// name of a member chain; "" for anything else.
+pub fn lint_arg_text(ref s: Snap, a: i64) -> str {
+    let k = kind(s, a);
+    if k == nk_member() { return sym_text(s, rhs(s, a)); }
+    if k == nk_ident() || k == nk_str() || k == nk_type_named() { return node_name(s, a); }
+    return "";
+}
+
+/// Whether a suppressing attribute on node `n` covers `code` / `text`.
+fn suppressed_at(ref p: Program, n: i64, code: str, text: str, on_package: bool) -> bool {
+    let s = p.s;
+    for row_index in nl_get(p.attrs, f"{n}") {
+        let row = s.attrs[row_index];
+        let name = sym_text(s, row.1);
+        let suppressing = name == nameof(Suppress) || name == nameof(Allow) || name == nameof(SuppressWarning)
+            || name == nameof(SuppressMessage) || (!on_package && name == nameof(Diagnostics));
+        if suppressing {
+            let args = row.2;
+            if args.len() == 0 { return true; }
+            for a in args {
+                let word = lint_arg_text(s, a);
+                if word == code || word == "all" || word == "*" || (word.len() > 0 && text.find(word, 0) >= 0) { return true; }
+            }
+        }
+    }
+    return false;
+}
+
+/// Whether the program suppresses diagnostic `code` with `message` at node `n`.
+pub fn lint_suppressed(ref ls: LintScope, n: i64, code: str, message: str) -> bool {
+    let p = ls.p;
+    let text = code + ": " + message;
+    var cur = n;
+    while cur >= 0 {
+        if suppressed_at(p, cur, code, text, false) { return true; }
+        cur = p.parents[cur];
+    }
+    let unit = unit_of(p.s, n);
+    if unit < 0 || unit >= ls.packages.len() { return false; }
+    for d in ls.packages[unit] {
+        if suppressed_at(p, d, code, text, true) { return true; }
+    }
+    return false;
+}
+
+/// How much a reported diagnostic weighs.
+pub enum LintLevel : u8 { Error, Warning, Info, }
+
+/// Reports a diagnostic at node `n` unless the program suppresses it there.
+pub fn lint_report(ref ls: LintScope, var ref sink: DiagSink, n: i64, level: LintLevel, code: str, message: str) {
+    if lint_suppressed(ls, n, code, message) { return; }
+    if level == LintLevel::Error { sink_error(sink, n, code, message); }
+    else if level == LintLevel::Warning { sink_warning(sink, n, code, message); }
+    else { sink_info(sink, n, code, message); }
+}

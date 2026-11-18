@@ -1,0 +1,10 @@
+// LOOP001: a `for` that yields collects its items; one that leaves with
+// `break value` gives that one value. It cannot do both.
+fn main() {
+    // The `for` starts at line 5, column 13.
+    let v = for x in [1, 2, 3] {
+        if x == 2 { break x; }
+        yield x;
+    } then 0;
+    print(v);
+}

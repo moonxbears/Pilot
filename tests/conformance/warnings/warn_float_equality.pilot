@@ -1,0 +1,10 @@
+// `==` or `!=` with a float literal on either side is a warning (FLOAT001):
+// a computed float rarely equals a written one exactly. The program still
+// runs: 0.5 + 0.25 = 0.75 exactly in binary (2^-1 + 2^-2), so `== 0.75` is
+// true and `0.5 != h` is false.
+fn main() {
+    let h = 0.5;
+    let q = h + 0.25;
+    print(q == 0.75);
+    print(0.5 != h);
+}

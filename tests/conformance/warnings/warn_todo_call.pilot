@@ -1,0 +1,10 @@
+// A call of a placeholder named `todo` or `unimplemented` is a warning
+// (UNIMP001): the work it stands for is still to be done. The program still
+// runs: the placeholders give 0 and 1, so it prints 0 then 1.
+fn todo() -> i64 => 0;
+fn unimplemented() -> i64 => 1;
+
+fn main() {
+    print(todo());
+    print(unimplemented());
+}

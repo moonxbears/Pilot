@@ -4,23 +4,20 @@
 // =========================================================================
 pub pkg selfhost.pkg;
 
-pub enum ArchiveFormat {
-    PilPkgV1,
+/// The header every `.pilpkg` v1 blob starts with, followed by the file
+/// count and a newline.
+pub const PILPKG_V1_HEADER: str = "PILPKG1:";
+
+/// One file packed into an archive: its path relative to the package root
+/// and its full text.
+pub struct PkgArchiveEntry {
+    pub path: str;
+    pub content: str;
 }
 
-pub pure fn archive_format_header(fmt: ArchiveFormat) -> str {
-    if fmt == ::PilPkgV1 {
-        return "PILPKG1:";
-    }
-    return "PILPKG1:";
-}
-
-pub pure fn archive_detect_format(archive_blob: str) -> ArchiveFormat {
-    let p = ar_find(archive_blob, "PILPKG1:", 0);
-    if p == 0 {
-        return ::PilPkgV1;
-    }
-    return ::PilPkgV1;
+/// An archive being built, files in the order they were added.
+pub struct PkgArchive : IObject {
+    pub entries: List<PkgArchiveEntry>;
 }
 
 pure fn ar_find(haystack: str, needle: str, start: i64) -> i64 {
@@ -51,58 +48,33 @@ fn ar_parse_int(s: str) -> i64 {
     return v;
 }
 
-pub fn pilpkg_new() -> i64 {
-    let ar = __engine("map_new");
-    let _s = __engine("map_set", ar, "count", 0);
-    return ar;
+pub fn pilpkg_new() -> PkgArchive => PkgArchive { entries: [] };
+
+/// Adds a file and returns how many files the archive now holds.
+pub fn pilpkg_add_file(var ref ar: PkgArchive, rel_path: str, content: str) -> i64 {
+    ar.entries.push(PkgArchiveEntry { path: rel_path, content: content });
+    return ar.entries.len();
 }
 
-pub fn pilpkg_add_file(ar: i64, rel_path: str, content: str) -> i64 {
-    let raw_cnt = __engine("map_get", ar, "count");
-    let cnt = if raw_cnt != none { raw_cnt } else { 0 };
-    let _p = __engine("map_set", ar, "path:" + cnt, rel_path);
-    let _c = __engine("map_set", ar, "content:" + cnt, content);
-    let _cnt = __engine("map_set", ar, "count", cnt + 1);
-    return cnt + 1;
-}
-
-pub fn pilpkg_serialize(ar: i64) -> str {
-    let raw_cnt = __engine("map_get", ar, "count");
-    let cnt = if raw_cnt != none { raw_cnt } else { 0 };
-    let hdr = archive_format_header(::PilPkgV1);
-    var out = hdr + cnt + "\n";
-    var i = 0;
-    while i < cnt {
-        let path = __engine("map_get", ar, "path:" + i);
-        let content = __engine("map_get", ar, "content:" + i);
-        let clen = content.len();
-        out = out + path + ":" + clen + "\n" + content + "\n";
-        i = i + 1;
+pub fn pilpkg_serialize(ref ar: PkgArchive) -> str {
+    var out = PILPKG_V1_HEADER + ar.entries.len() + "\n";
+    for e in ar.entries {
+        out = out + e.path + ":" + e.content.len() + "\n" + e.content + "\n";
     }
     return out;
 }
 
 pub fn pilpkg_file_count(archive_blob: str) -> i64 {
-    let fmt = archive_detect_format(archive_blob);
-    let hdr = archive_format_header(fmt);
-    let p = ar_find(archive_blob, hdr, 0);
-    if p != 0 {
-        return 0;
-    }
-    let hlen = hdr.len();
+    if ar_find(archive_blob, PILPKG_V1_HEADER, 0) != 0 { return 0; }
+    let hlen = PILPKG_V1_HEADER.len();
     let nl = ar_find(archive_blob, "\n", hlen);
     if nl < 0 { return 0; }
-    let cnt_str = archive_blob.slice(hlen, nl);
-    return ar_parse_int(cnt_str);
+    return ar_parse_int(archive_blob.slice(hlen, nl));
 }
 
+/// The text of `rel_path` in the archive, or `""` when it is not there.
 pub fn pilpkg_extract_file(archive_blob: str, rel_path: str) -> str {
-    let fmt = archive_detect_format(archive_blob);
-    let hdr = archive_format_header(fmt);
-    let p = ar_find(archive_blob, hdr, 0);
-    if p != 0 {
-        return "";
-    }
+    if ar_find(archive_blob, PILPKG_V1_HEADER, 0) != 0 { return ""; }
     let total_len = archive_blob.len();
     let hdr_nl = ar_find(archive_blob, "\n", 0);
     if hdr_nl < 0 { return ""; }
@@ -114,8 +86,7 @@ pub fn pilpkg_extract_file(archive_blob: str, rel_path: str) -> str {
         let col = ar_find(meta, ":", 0);
         if col < 0 { break; }
         let path = meta.slice(0, col);
-        let len_str = meta.slice(col + 1, meta.len());
-        let clen = ar_parse_int(len_str);
+        let clen = ar_parse_int(meta.slice(col + 1, meta.len()));
         let c_start = line_end + 1;
         let c_end = c_start + clen;
         if c_end > total_len { break; }

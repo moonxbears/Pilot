@@ -1,0 +1,2 @@
+warning[LOOP005]: Potential infinite loop detected; condition is always true and body contains no 'break' or 'return' statement
+warn_infinite_loop.pilot:7:5

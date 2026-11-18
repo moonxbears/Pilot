@@ -18,12 +18,21 @@
 pub lvl(0) pkg selfhost.gate;
 
 use std.text;
+use std.proc;
 
-pub fn rl_make_pair(from_ident: str, to_ident: str) -> i64 {
-    let p = __engine("map_new");
-    __engine("map_set", p, "from", from_ident);
-    __engine("map_set", p, "to", to_ident);
-    return p;
+/// One rename: every whole identifier `from` becomes `to`.
+pub struct RenamePair : IAnyValue {
+    pub from: str;
+    pub to: str;
+}
+
+pub fn rl_make_pair(from_ident: str, to_ident: str) -> RenamePair => RenamePair { from: from_ident, to: to_ident };
+
+/// The renames of one pass: each name in the order it is searched for, and
+/// its new name by old name.
+pub struct RenameMap : IObject {
+    pub names: List<str>;
+    pub to: Map<str, str>;
 }
 
 fn rl_seed_tag(seed_in: i64) -> str {
@@ -43,54 +52,42 @@ fn rl_seed_tag(seed_in: i64) -> str {
 }
 
 /// Pass 0: the canonical renames of AGENTS.md (Dual-Pass Universal Rename).
-pub fn build_canonical_litmus_pairs() -> i64 {
-    let pairs = glist_new();
-    let _ = glist_push(pairs, rl_make_pair(nameof(char), "c32"));
-    let _ = glist_push(pairs, rl_make_pair(nameof(slice), "window"));
-    let _ = glist_push(pairs, rl_make_pair(nameof(option), "maybe"));
-    let _ = glist_push(pairs, rl_make_pair(nameof(opt), "maybe"));
-    let _ = glist_push(pairs, rl_make_pair(nameof(result), "outcome"));
-    let _ = glist_push(pairs, rl_make_pair(nameof(res), "outcome"));
-    let _ = glist_push(pairs, rl_make_pair(nameof(range), "interval"));
-    return pairs;
-}
+pub fn build_canonical_litmus_pairs() -> List<RenamePair> => [
+    rl_make_pair(nameof(char), "c32"),
+    rl_make_pair(nameof(slice), "window"),
+    rl_make_pair(nameof(option), "maybe"),
+    rl_make_pair(nameof(opt), "maybe"),
+    rl_make_pair(nameof(result), "outcome"),
+    rl_make_pair(nameof(res), "outcome"),
+    rl_make_pair(nameof(range), "interval"),
+];
 
 /// Pass 1: the same names (plus `str`) renamed to seeded, unpredictable names.
-pub fn build_seeded_litmus_pairs(seed_val: i64) -> i64 {
+pub fn build_seeded_litmus_pairs(seed_val: i64) -> List<RenamePair> {
     let sfx = "_" + rl_seed_tag(seed_val);
-    let pairs = glist_new();
-    let _ = glist_push(pairs, rl_make_pair(nameof(char), "c32" + sfx));
-    let _ = glist_push(pairs, rl_make_pair(nameof(slice), "window" + sfx));
-    let _ = glist_push(pairs, rl_make_pair(nameof(option), "maybe" + sfx));
-    let _ = glist_push(pairs, rl_make_pair(nameof(opt), "maybe" + sfx));
-    let _ = glist_push(pairs, rl_make_pair(nameof(result), "outcome" + sfx));
-    let _ = glist_push(pairs, rl_make_pair(nameof(res), "outcome" + sfx));
-    let _ = glist_push(pairs, rl_make_pair(nameof(range), "interval" + sfx));
-    let _ = glist_push(pairs, rl_make_pair(nameof(str), "utf8view" + sfx));
-    return pairs;
+    return [
+        rl_make_pair(nameof(char), "c32" + sfx),
+        rl_make_pair(nameof(slice), "window" + sfx),
+        rl_make_pair(nameof(option), "maybe" + sfx),
+        rl_make_pair(nameof(opt), "maybe" + sfx),
+        rl_make_pair(nameof(result), "outcome" + sfx),
+        rl_make_pair(nameof(res), "outcome" + sfx),
+        rl_make_pair(nameof(range), "interval" + sfx),
+        rl_make_pair(nameof(str), "utf8view" + sfx),
+    ];
 }
 
-fn rl_pairs_to_map(rename_pairs: i64) -> i64 {
-    let rmap = __engine("map_new");
-    let n = glist_len(rename_pairs);
-    var kept = 0;
-    var i = 0;
-    while i < n {
-        let item = glist_get(rename_pairs, i);
-        let k = __engine("map_get", item, "from");
-        let v = __engine("map_get", item, "to");
-        if k.len() > 0 && v.len() > 0 {
-            __engine("map_set", rmap, k, v);
-            // The names are also kept by position, so the renamer can look
-            // for each one. `#n` and a number are not identifiers, so they
-            // never meet a name.
-            __engine("map_set", rmap, kept, k);
-            kept = kept + 1;
+/// The renames of `rename_pairs`, a pair with an empty side left out.
+fn rl_pairs_to_map(ref rename_pairs: List<RenamePair>) -> RenameMap {
+    var names: List<str> = [];
+    var to = Map<str, str>();
+    for pr in rename_pairs {
+        if pr.from.len() > 0 && pr.to.len() > 0 {
+            if !to.has(pr.from) { names.push(pr.from); }
+            to.set(pr.from, pr.to);
         }
-        i = i + 1;
     }
-    __engine("map_set", rmap, "#n", kept);
-    return rmap;
+    return RenameMap { names: names, to: to };
 }
 
 /// The first place at or after `from` where `key` is a whole identifier as
@@ -134,7 +131,7 @@ pure fn rl_literal_end(src: str, closer: str, from: i64) -> i64 {
 }
 
 /// An f-string with its holes renamed, and the place just after it.
-struct RlPiece : IValue {
+struct RlPiece : IAnyValue {
     pub text: str;
     pub end: i64;
 }
@@ -148,7 +145,7 @@ pure fn rl_is_fstring(src: str, at: i64) -> bool {
 
 /// The f-string whose quote opens at `open`, with the names in its `{...}`
 /// holes renamed (a hole is Pilot code; `{{` is text), and where it ends.
-pure fn rl_fstring(src: str, open: i64, rmap: i64) -> RlPiece {
+pure fn rl_fstring(src: str, open: i64, ref rmap: RenameMap) -> RlPiece {
     let n = src.len();
     let q = src.byte_at(open);
     var out: List<str> = [];
@@ -181,7 +178,7 @@ pure fn rl_fstring(src: str, open: i64, rmap: i64) -> RlPiece {
 /// Where the f-string hole whose code starts at `from` ends: at its closing
 /// `}`, braces counted and literals (nested f-strings too) skipped; or the
 /// end of `src`.
-pure fn rl_hole_end(src: str, from: i64, rmap: i64) -> i64 {
+pure fn rl_hole_end(src: str, from: i64, ref rmap: RenameMap) -> i64 {
     let n = src.len();
     var depth = 0;
     var p = from;
@@ -212,9 +209,9 @@ pure fn rl_hole_end(src: str, from: i64, rmap: i64) -> i64 {
 // from one comment, literal or name to be renamed to the next with
 // `gm_find`, so the bytes between them are never read one by one: this runs
 // over the whole stdlib, toolchain and corpus in each pass.
-pub pure fn rl_rename_pilot_identifiers(src: str, rmap: i64) -> str {
+pub pure fn rl_rename_pilot_identifiers(src: str, ref rmap: RenameMap) -> str {
     let n = src.len();
-    let key_count = (__engine("map_get", rmap, "#n") ?? 0) + 0;
+    let key_count = rmap.names.len() as i64;
     var keys: List<str> = [];
     var repls: List<str> = [];
     // Per name, its next whole-identifier place; -1 when there is none
@@ -222,9 +219,9 @@ pub pure fn rl_rename_pilot_identifiers(src: str, rmap: i64) -> str {
     var key_at: List<i64> = [];
     var k = 0;
     while k < key_count {
-        let key = __engine("map_get", rmap, k);
+        let key = rmap.names[k];
         keys.push(key);
-        repls.push(__engine("map_get", rmap, key));
+        repls.push(rmap.to.get(key) ?? key);
         key_at.push(-2);
         k = k + 1;
     }
@@ -311,13 +308,10 @@ fn rl_workspace_files(root: str) -> List<str> {
     let listed = run_in(root, "git", ["ls-files", "--cached", "--others", "--exclude-standard"], "");
     var out: List<str> = [];
     if listed.exit_code == 0 {
-        let lines = gm_split_lines(listed.stdout);
-        var i = 0;
-        while i < glist_len(lines) {
-            let rel = gm_trim(glist_get(lines, i));
+        for line in gm_split_lines(listed.stdout) {
+            let rel = gm_trim(line);
             // A tracked file deleted from the working tree is not there.
             if rel.len() > 0 && gate_fs_exists(gm_join_path(root, rel)) { out.push(rel); }
-            i = i + 1;
         }
         return out;
     }
@@ -325,7 +319,7 @@ fn rl_workspace_files(root: str) -> List<str> {
     return out;
 }
 
-fn rl_walk_workspace(root: str, rel: str, ref out: List<str>) {
+fn rl_walk_workspace(root: str, rel: str, var ref out: List<str>) {
     let dir = if rel == "" { root } else { gm_join_path(root, rel) };
     for f in gate_fs_list_files(dir) {
         out.push(if rel == "" { f } else { rel + "/" + f });
@@ -336,7 +330,7 @@ fn rl_walk_workspace(root: str, rel: str, ref out: List<str>) {
 }
 
 /// What `pilot test` printed and returned in the sandbox.
-pub struct LitmusRun : IValue {
+pub struct LitmusRun : IAnyValue {
     pub stdout: str;
     pub stderr: str;
     pub exit_code: i64;
@@ -364,7 +358,7 @@ fn rl_violation(file_path: str, snippet: str, message: str, remediation: str) ->
 
 /// Renames whole words in plain text, such as the diagnostics a `.stderr`
 /// expectation file quotes (`option<Pair>` -> `maybe<Pair>`).
-pub pure fn rl_rename_words(words: str, rmap: i64) -> str {
+pub pure fn rl_rename_words(words: str, ref rmap: RenameMap) -> str {
     let n = words.len();
     var out = "";
     var chunk_start = 0;
@@ -375,7 +369,7 @@ pub pure fn rl_rename_words(words: str, rmap: i64) -> str {
             let st = pos;
             pos = pos + 1;
             while pos < n && sa_is_id_char(words.byte_at(pos)) { pos = pos + 1; }
-            let repl = __engine("map_get", rmap, words.slice(st, pos)) ?? "";
+            let repl = rmap.to.get(words.slice(st, pos)) ?? "";
             if repl.len() > 0 {
                 out = out + words.slice(chunk_start, st) + repl;
                 chunk_start = pos;
@@ -408,7 +402,7 @@ fn rl_parse_count(s: str) -> i64 {
 /// `<file>.pilot:<line>:<col>` keeps its file and line; its column moves by
 /// what renaming the source line before it changed. Any other line has its
 /// words renamed.
-fn rl_rename_expectation(line: str, src_lines: i64, rmap: i64) -> str {
+fn rl_rename_expectation(line: str, ref src_lines: List<str>, ref rmap: RenameMap) -> str {
     let ext = ".pilot:";
     let at = gm_find(line, ext, 0);
     if at < 0 { return rl_rename_words(line, rmap); }
@@ -417,8 +411,8 @@ fn rl_rename_expectation(line: str, src_lines: i64, rmap: i64) -> str {
     if colon < 0 { return rl_rename_words(line, rmap); }
     let row = rl_parse_count(rest.slice(0, colon));
     let col = rl_parse_count(gm_trim(rest.slice(colon + 1, rest.len())));
-    if row < 1 || col < 1 || row > glist_len(src_lines) { return line; }
-    let src_line = glist_get(src_lines, row - 1);
+    if row < 1 || col < 1 || row > src_lines.len() as i64 { return line; }
+    let src_line = src_lines[row - 1];
     let before = src_line.slice(0, if col - 1 < src_line.len() { col - 1 } else { src_line.len() });
     let moved = rl_rename_pilot_identifiers(before, rmap).len() + 1;
     return line.slice(0, at + ext.len()) + row + ":" + moved;
@@ -426,15 +420,15 @@ fn rl_rename_expectation(line: str, src_lines: i64, rmap: i64) -> str {
 
 /// The lines of `s` in order, empty ones included, so index `k` is line
 /// `k + 1`.
-fn rl_source_lines(s: str) -> i64 {
-    let out = glist_new();
+fn rl_source_lines(s: str) -> List<str> {
+    var out: List<str> = [];
     var p = 0;
     while p <= s.len() {
         var nx = gm_find(s, "\n", p);
         if nx < 0 { nx = s.len(); }
         var end_pos = nx;
         if end_pos > p && s.byte_at(end_pos - 1) == 13 { end_pos = end_pos - 1; }
-        let _ = glist_push(out, s.slice(p, end_pos));
+        out.push(s.slice(p, end_pos));
         p = nx + 1;
     }
     return out;
@@ -442,14 +436,11 @@ fn rl_source_lines(s: str) -> i64 {
 
 /// A `.stderr` expectation file renamed to match its renamed program, whose
 /// original source is `program_src`.
-fn rl_rename_stderr(body: str, program_src: str, rmap: i64) -> str {
+fn rl_rename_stderr(body: str, program_src: str, ref rmap: RenameMap) -> str {
     let src_lines = rl_source_lines(program_src);
-    let lines = gm_split_lines(body);
     var out = "";
-    var i = 0;
-    while i < glist_len(lines) {
-        out = out + rl_rename_expectation(glist_get(lines, i), src_lines, rmap) + "\n";
-        i = i + 1;
+    for line in gm_split_lines(body) {
+        out = out + rl_rename_expectation(line, src_lines, rmap) + "\n";
     }
     return out;
 }
@@ -457,7 +448,7 @@ fn rl_rename_stderr(body: str, program_src: str, rmap: i64) -> str {
 /// Copies `<root>/<rel>` to `<sandbox_dir>/<rel>`, renaming identifiers in
 /// a `.pilot` file and the expectations of a `.stderr` file. Whether it was
 /// written.
-fn rl_copy_renamed_file(root: str, rel: str, sandbox_dir: str, rmap: i64, violations: i64) -> bool {
+fn rl_copy_renamed_file(root: str, rel: str, sandbox_dir: str, ref rmap: RenameMap, var ref violations: List<GateViolation>) -> bool {
     let path = gm_join_path(root, rel);
     let file_text = gate_fs_read_text(path);
     var out_text = file_text;
@@ -471,7 +462,7 @@ fn rl_copy_renamed_file(root: str, rel: str, sandbox_dir: str, rmap: i64, violat
     }
     let out_path = gm_join_path(sandbox_dir, rel);
     if gate_fs_write_text(out_path, out_text) { return true; }
-    let _ = glist_push(violations, rl_violation(out_path, out_path,
+    violations.push(rl_violation(out_path, out_path,
         "Failed to write a renamed file into the litmus sandbox",
         "Check write permissions for the TempDirGuard sandbox"));
     return false;
@@ -502,15 +493,11 @@ fn rl_failing_in(dir: str, ref programs: List<str>) -> List<str>? {
     var args: List<str> = ["test",];
     for p in programs { args.push(p); }
     let run = run_in(dir, current_exe() ?? "pilot", args, "");
-    let lines = gm_split_lines(run.stdout);
     var saw_result = false;
-    var i = 0;
-    while i < glist_len(lines) {
-        let line = glist_get(lines, i);
+    for line in gm_split_lines(run.stdout) {
         if gm_starts_with(line, "RESULT: ") { saw_result = true; }
         let name = rl_failed_program(line);
         if name.len() > 0 { out.push(name); }
-        i = i + 1;
     }
     if !saw_result { return none; }
     return out;
@@ -522,24 +509,25 @@ fn rl_failing_in(dir: str, ref programs: List<str>) -> List<str>? {
 /// built, so a program that only ran out of time under the corpus's load
 /// passes) and passes in the workspace itself (so only a change renaming
 /// caused is reported); or the run itself when it reports no result.
-fn rl_corpus_violations(root: str, sandbox_dir: str, run: LitmusRun, violations: i64) {
+fn rl_corpus_violations(root: str, sandbox_dir: str, run: LitmusRun, var ref violations: List<GateViolation>) {
     let lines = gm_split_lines(run.stdout);
     var saw_result = false;
     var failed: List<str> = [];
     var details: List<str> = [];
+    let n_lines = lines.len() as i64;
     var i = 0;
-    while i < glist_len(lines) {
-        let line = glist_get(lines, i);
+    while i < n_lines {
+        let line = lines[i];
         if gm_starts_with(line, "RESULT: ") { saw_result = true; }
         let name = rl_failed_program(line);
         if name.len() > 0 {
             failed.push(name);
-            details.push(if i + 1 < glist_len(lines) { gm_trim(glist_get(lines, i + 1)) } else { "" });
+            details.push(if i + 1 < n_lines { gm_trim(lines[i + 1]) } else { "" });
         }
         i = i + 1;
     }
     if !saw_result {
-        let _ = glist_push(violations, rl_violation(rl_conformance_dir(), "exit " + run.exit_code,
+        violations.push(rl_violation(rl_conformance_dir(), "exit " + run.exit_code,
             "`pilot test` in the renamed sandbox reported no result: " + gm_trim(run.stderr),
             "Run `pilot test` in the sandbox by hand to see where the toolchain stops"));
         return;
@@ -549,7 +537,7 @@ fn rl_corpus_violations(root: str, sandbox_dir: str, run: LitmusRun, violations:
     var k = 0;
     while k < failed.len() as i64 {
         if again.contains(failed[k]) && !unrenamed.contains(failed[k]) {
-            let _ = glist_push(violations, rl_violation(failed[k], details[k],
+            violations.push(rl_violation(failed[k], details[k],
                 "Program result changed after renaming core types: the toolchain or the program depends on a core type name",
                 "Derive the behaviour from layouts, field anatomy, syntax rules or method tables, not names; write a name as `nameof(..)`, not a string; compare printed source with a renamed fixture file, not a `.stdout` line"));
         }
@@ -559,15 +547,15 @@ fn rl_corpus_violations(root: str, sandbox_dir: str, run: LitmusRun, violations:
 
 /// A renamed sandbox: where it is, the guard that removes it, and the
 /// number of files copied into it.
-struct LitmusSandbox : IValue {
+struct LitmusSandbox : IAnyValue {
     pub dir: str;
     pub guard: TempDirGuard;
-    pub copied: usize;
+    pub copied: i64;
 }
 
 /// Builds the renamed sandbox for `rename_pairs`: every file of
 /// `rl_workspace_files(root)` copied from `root` with the names renamed.
-fn rl_build_sandbox(root: str, ref files: List<str>, rename_pairs: i64, violations: i64) -> LitmusSandbox {
+fn rl_build_sandbox(root: str, ref files: List<str>, ref rename_pairs: List<RenamePair>, var ref violations: List<GateViolation>) -> LitmusSandbox {
     let rmap = rl_pairs_to_map(rename_pairs);
     let sandbox_dir = "/tmp/pilot_litmus_" + gate_proc_pid() + "_" + gate_time_now_us();
     let guard = temp_guard_new(sandbox_dir);
@@ -576,7 +564,7 @@ fn rl_build_sandbox(root: str, ref files: List<str>, rename_pairs: i64, violatio
         if rl_copy_renamed_file(root, rel, sandbox_dir, rmap, violations) { copied = copied + 1; }
     }
     if files.len() == 0 {
-        let _ = glist_push(violations, rl_violation(root, root,
+        violations.push(rl_violation(root, root,
             "Nothing to copy into the litmus sandbox",
             "Run the gate from the workspace root"));
     }
@@ -584,10 +572,10 @@ fn rl_build_sandbox(root: str, ref files: List<str>, rename_pairs: i64, violatio
 }
 
 /// Removes the sandbox; one that is still there is a violation.
-fn rl_remove_sandbox(ref sb: LitmusSandbox, violations: i64) {
+fn rl_remove_sandbox(var ref sb: LitmusSandbox, var ref violations: List<GateViolation>) {
     let _ = temp_guard_cleanup(sb.guard);
     if gate_fs_exists(sb.dir) {
-        let _ = glist_push(violations, rl_violation(sb.dir, sb.dir,
+        violations.push(rl_violation(sb.dir, sb.dir,
             "TempDirGuard failed to unlink ephemeral litmus sandbox directory",
             "Ensure fs_remove_all cleans up /tmp/pilot_litmus_* on scope exit"));
     }
@@ -607,26 +595,26 @@ fn rl_finish_corpus(running: ProcessHandle) -> LitmusRun {
 
 /// One litmus pass: build the renamed sandbox, then run the corpus in it.
 /// Returns the number of files copied plus programs run.
-fn rl_run_pass(root: str, rename_pairs: i64, violations: i64) -> usize {
+fn rl_run_pass(root: str, ref rename_pairs: List<RenamePair>, var ref violations: List<GateViolation>) -> i64 {
     let files = rl_workspace_files(root);
-    let sb = rl_build_sandbox(root, files, rename_pairs, violations);
-    if glist_len(violations) == 0 {
+    var sb = rl_build_sandbox(root, files, rename_pairs, violations);
+    if violations.len() == 0 {
         rl_corpus_violations(root, sb.dir, rl_run_corpus(sb.dir), violations);
     }
     rl_remove_sandbox(sb, violations);
     return sb.copied;
 }
 
-pub fn execute_universal_rename_litmus(workspace_root: str, rename_pairs: i64) -> GateReport {
+pub fn execute_universal_rename_litmus(workspace_root: str, ref rename_pairs: List<RenamePair>) -> GateReport {
     let t0 = gate_time_now_us();
     let root = resolve_workspace_root(workspace_root);
-    let violations = glist_new();
+    var violations: List<GateViolation> = [];
     let scanned = rl_run_pass(root, rename_pairs, violations);
     let dt = gate_time_now_us() - t0;
     return GateReport {
         gate_id: "rename_litmus",
         category: GateCategoryId.Adaptability,
-        passed: glist_len(violations) == 0,
+        passed: violations.len() == 0,
         elapsed_us: if dt >= 0 { dt } else { 0 },
         items_scanned: scanned,
         violations: violations,
@@ -640,12 +628,12 @@ pub fn execute_universal_rename_litmus(workspace_root: str, rename_pairs: i64) -
 pub fn execute_dual_pass_rename_gate(workspace_root: str, ref opts: GateRunOptions) -> GateReport {
     let t0 = gate_time_now_us();
     let root = resolve_workspace_root(workspace_root);
-    let violations0 = glist_new();
-    let violations1 = glist_new();
+    var violations0: List<GateViolation> = [];
+    var violations1: List<GateViolation> = [];
     let files = rl_workspace_files(root);
-    let sb0 = rl_build_sandbox(root, files, build_canonical_litmus_pairs(), violations0);
-    let sb1 = rl_build_sandbox(root, files, build_seeded_litmus_pairs(opts.seed), violations1);
-    if glist_len(violations0) == 0 && glist_len(violations1) == 0 {
+    var sb0 = rl_build_sandbox(root, files, build_canonical_litmus_pairs(), violations0);
+    var sb1 = rl_build_sandbox(root, files, build_seeded_litmus_pairs(opts.seed), violations1);
+    if violations0.len() == 0 && violations1.len() == 0 {
         let run0 = rl_start_corpus(sb0.dir);
         let run1 = rl_start_corpus(sb1.dir);
         // Both runs finish before either's failures are run again, so the
@@ -657,14 +645,14 @@ pub fn execute_dual_pass_rename_gate(workspace_root: str, ref opts: GateRunOptio
     }
     rl_remove_sandbox(sb0, violations0);
     rl_remove_sandbox(sb1, violations1);
-    let combined = glist_new();
-    let _ = glist_extend(combined, violations0);
-    let _ = glist_extend(combined, violations1);
+    var combined: List<GateViolation> = [];
+    for v in violations0 { combined.push(v); }
+    for v in violations1 { combined.push(v); }
     let dt = gate_time_now_us() - t0;
     return GateReport {
         gate_id: "rename_litmus",
         category: GateCategoryId.Adaptability,
-        passed: glist_len(combined) == 0,
+        passed: combined.len() == 0,
         elapsed_us: if dt >= 0 { dt } else { 0 },
         items_scanned: sb0.copied + sb1.copied,
         violations: combined,

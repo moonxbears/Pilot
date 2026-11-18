@@ -1,0 +1,11 @@
+// Known bug seed.continue_bounds_masks_check. LOOP005: `continue a..b`
+// hands a `for` loop new bounds; a `while` has none to take.
+fn main() {
+    var i = 0;
+    while i < 3 {
+        i = i + 1;
+        // The `continue` is at line 8, column 21.
+        if i == 1 { continue 5..6; }
+        print(i);
+    }
+}

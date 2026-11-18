@@ -1,0 +1,4 @@
+warning[COND001]: Condition expression is a compile-time boolean constant; one branch is unreachable
+warn_constant_condition.pilot:5:8
+warning[COND001]: Condition expression is a compile-time boolean constant; one branch is unreachable
+warn_constant_condition.pilot:6:8

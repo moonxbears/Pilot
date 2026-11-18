@@ -1,0 +1,29 @@
+// `[NoHardcoding]` code that takes its values from `const`s and writes only
+// 0, 1, 0.0, 1.0 and "" is no HARD001, nor is a literal in a function
+// without the attribute; the program runs without an error.
+//
+// Expected output, worked by hand: fee prints LABEL + "" = "fee", then
+// fee(10) = 10 + SERVICE_FEE (50) +
+// 0 * 1 = 60; scale(2.0) = 2.0 * 1.0 + 0.0 = 2.0, printed "2"; plain() = 7.
+const SERVICE_FEE: i64 = 50;
+const LABEL: str = "fee";
+
+[NoHardcoding]
+fn fee(amount: i64) -> i64 {
+    let zero = 0;
+    let one = 1;
+    let note = "";
+    print(LABEL + note);
+    return amount + SERVICE_FEE + zero * one;
+}
+
+[NoHardcoding]
+fn scale(x: f64) -> f64 => x * 1.0 + 0.0;
+
+fn plain() -> i64 => 7;
+
+fn main() {
+    print(fee(10));
+    print(scale(2.0));
+    print(plain());
+}

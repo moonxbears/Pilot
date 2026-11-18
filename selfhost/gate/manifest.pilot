@@ -36,13 +36,12 @@ let GateSeverityId = [
     Advisory: 2,
 ];
 
-[Layout(c_abi)]
-pub struct SeedTokenRegistry : IValue {
-    pub tokens: slice<str>;
-    pub tokens_len: usize;
-    pub lookup: i64;
+/// The seed tokens in registration order, and the same words as a set.
+pub struct SeedTokenRegistry : IObject {
+    pub tokens: List<str>;
+    pub lookup: Map<str, bool>;
 
-    pub pure fn count() -> usize => .tokens_len;
+    pub pure fn count() -> i64 => .tokens.len() as i64;
 }
 
 [Layout(c_abi)]
@@ -68,8 +67,8 @@ pub struct GateReport : IObject {
     pub gate_id: str;
     pub category: GateCategory;
     pub passed: bool;
-    pub elapsed_us: u64;
-    pub items_scanned: usize;
+    pub elapsed_us: i64;
+    pub items_scanned: i64;
     pub violations: List<GateViolation>;
     /// Empty when the gate ran its check. Otherwise the id of the registered
     /// seam (`selfhost/gate/ledger/seams.pilot`) the check stops at: the gate
@@ -160,12 +159,12 @@ pub fn temp_guard_new(dir_path: str) -> TempDirGuard {
     };
 }
 
-pub fn temp_guard_cleanup(ref guard: TempDirGuard) -> bool {
+pub fn temp_guard_cleanup(var ref guard: TempDirGuard) -> bool {
     if guard.active == true && guard.dir_path.len() > 4 {
         if gate_fs_exists(guard.dir_path) {
             let _ = gate_fs_remove_all(guard.dir_path);
         }
-        __engine("map_set", guard, "active", false);
+        guard.active = false;
         return true;
     }
     return false;
@@ -188,7 +187,7 @@ pub fn gate_seam_open(seam_id: str) -> bool {
 }
 
 /// The report of a gate that stops at `seam_id`: not passed, no violations.
-pub fn gate_at_seam_report(gate_id: str, cat: GateCategory, seam_id: str, t0: i64, scanned: usize) -> GateReport {
+pub fn gate_at_seam_report(gate_id: str, cat: GateCategory, seam_id: str, t0: i64, scanned: i64) -> GateReport {
     let dt = gate_time_now_us() - t0;
     return GateReport {
         gate_id: gate_id,
@@ -196,7 +195,7 @@ pub fn gate_at_seam_report(gate_id: str, cat: GateCategory, seam_id: str, t0: i6
         passed: false,
         elapsed_us: if dt >= 0 { dt } else { 0 },
         items_scanned: scanned,
-        violations: glist_new(),
+        violations: [],
         at_seam: seam_id,
     };
 }
@@ -221,60 +220,41 @@ pub fn resolve_workspace_root(hint: str) -> str {
 // Dynamic Open-Registry Collection & String Helpers (Zero Magic Counts)
 // ------------------------------------------------------------------------------
 
-pub fn glist_new() -> i64 {
-    let m = __engine("map_new");
-    __engine("map_set", m, "count", 0);
-    return m;
+// The `glist_*` and `gset_*` names are kept for the gate files that still
+// call them (airlock_abi, bootstrap_parity, keyword_gate, lex_table_gate,
+// seam_gate, seed_audit) and for the Pilot snippets the milestone-1 Rust
+// test runs. New code uses `List<T>` and `Map<K, V>` methods directly.
+
+pub fn glist_new<T: IAnyValue>() -> List<T> => [];
+
+pub pure fn glist_len<T: IAnyValue>(ref list: List<T>) -> i64 => list.len() as i64;
+
+/// Appends `item`; the new length.
+pub fn glist_push<T: IAnyValue>(var ref list: List<T>, item: T) -> i64 {
+    list.push(item);
+    return list.len() as i64;
 }
 
-pub fn glist_len(list: i64) -> usize {
-    return (__engine("map_get", list, "count") ?? 0);
+pub pure fn glist_get<T: IAnyValue>(ref list: List<T>, idx: i64) -> T => list[idx];
+
+/// Appends every item of `src` to `dst`; the new length of `dst`.
+pub fn glist_extend<T: IAnyValue>(var ref dst: List<T>, ref src: List<T>) -> i64 {
+    for item in src { dst.push(item); }
+    return dst.len() as i64;
 }
 
-pub fn glist_push(list: i64, item: any) -> usize {
-    let idx = glist_len(list);
-    __engine("map_set", list, idx, item);
-    __engine("map_set", list, "count", idx + 1);
-    return idx + 1;
-}
+pub fn gset_new() -> Map<str, bool> => Map<str, bool>();
 
-pub fn glist_get(list: i64, idx: usize) -> any {
-    return __engine("map_get", list, idx);
-}
-
-pub fn glist_extend(dst: i64, src: i64) -> usize {
-    let n = glist_len(src);
-    var i = 0;
-    while i < n {
-        let _ = glist_push(dst, glist_get(src, i));
-        i = i + 1;
-    }
-    return glist_len(dst);
-}
-
-pub fn gset_new() -> i64 {
-    let m = __engine("map_new");
-    __engine("map_set", m, "__count__", 0);
-    return m;
-}
-
-pub fn gset_insert(s: i64, key: str) -> bool {
-    if __engine("map_get", s, key) == true {
-        return false;
-    }
-    let cnt = (__engine("map_get", s, "__count__") ?? 0);
-    __engine("map_set", s, key, true);
-    __engine("map_set", s, "__count__", cnt + 1);
+/// Adds `key`; false when it was already there.
+pub fn gset_insert(var ref s: Map<str, bool>, key: str) -> bool {
+    if s.has(key) { return false; }
+    s.set(key, true);
     return true;
 }
 
-pub pure fn gset_contains(s: i64, key: str) -> bool {
-    return __engine("map_get", s, key) == true;
-}
+pub pure fn gset_contains(ref s: Map<str, bool>, key: str) -> bool => s.has(key);
 
-pub pure fn gset_len(s: i64) -> usize {
-    return (__engine("map_get", s, "__count__") ?? 0);
-}
+pub pure fn gset_len(ref s: Map<str, bool>) -> i64 => s.keys().len() as i64;
 
 pub pure fn gm_join_path(root: str, rel: str) -> str {
     if root == "." || root.len() == 0 {
@@ -331,7 +311,7 @@ pub pure fn gm_trim(s: str) -> str {
     return s.slice(a, e);
 }
 
-pub pure fn gm_count_lines(s: str) -> usize {
+pub pure fn gm_count_lines(s: str) -> i64 {
     let n = s.len();
     if n == 0 { return 0; }
     var lines = 0;
@@ -347,8 +327,8 @@ pub pure fn gm_count_lines(s: str) -> usize {
     return lines;
 }
 
-pub fn gm_split_lines(s: str) -> i64 {
-    let out = glist_new();
+pub fn gm_split_lines(s: str) -> List<str> {
+    var out: List<str> = [];
     let n = s.len();
     if n == 0 { return out; }
     var p = 0;
@@ -356,7 +336,7 @@ pub fn gm_split_lines(s: str) -> i64 {
         let nx = gm_find(s, "\n", p);
         if nx < 0 {
             let tail = s.slice(p, n);
-            if tail.len() > 0 { let _ = glist_push(out, tail); }
+            if tail.len() > 0 { out.push(tail); }
             return out;
         }
         var end_pos = nx;
@@ -364,7 +344,7 @@ pub fn gm_split_lines(s: str) -> i64 {
             end_pos = end_pos - 1;
         }
         let seg = s.slice(p, end_pos);
-        if seg.len() > 0 { let _ = glist_push(out, seg); }
+        if seg.len() > 0 { out.push(seg); }
         p = nx + 1;
     }
     return out;
@@ -405,14 +385,15 @@ pub pure fn gate_category_name(cat: GateCategory) -> str {
 // Canonical Seed Token Registry (Count Derived Dynamically via `.tokens_len`)
 // ------------------------------------------------------------------------------
 
-fn gm_push_seed(tokens: i64, lookup: i64, word: str) -> usize {
+fn gm_push_seed(var ref tokens: List<str>, var ref lookup: Map<str, bool>, word: str) -> i64 {
     let _ = gset_insert(lookup, word);
-    return glist_push(tokens, word);
+    tokens.push(word);
+    return tokens.len() as i64;
 }
 
 pub fn seed_token_registry_new() -> SeedTokenRegistry {
-    let toks = glist_new();
-    let lkp = gset_new();
+    var toks: List<str> = [];
+    var lkp = Map<str, bool>();
     let _ = gm_push_seed(toks, lkp, nameof(__engine));
     let _ = gm_push_seed(toks, lkp, nameof(struct));
     let _ = gm_push_seed(toks, lkp, nameof(interface));
@@ -429,224 +410,212 @@ pub fn seed_token_registry_new() -> SeedTokenRegistry {
     let _ = gm_push_seed(toks, lkp, nameof(asm));
     return SeedTokenRegistry {
         tokens: toks,
-        tokens_len: glist_len(toks),
         lookup: lkp,
     };
 }
 
-pub pure fn seed_registry_count(ref reg: SeedTokenRegistry) -> usize {
-    return reg.tokens_len + 0;
+pub pure fn seed_registry_count(ref reg: SeedTokenRegistry) -> i64 {
+    return reg.tokens.len() as i64;
 }
 
 pub pure fn seed_registry_contains(ref reg: SeedTokenRegistry, word: str) -> bool {
     return gset_contains(reg.lookup, word);
 }
 
-pub pure fn seed_registry_at(ref reg: SeedTokenRegistry, idx: usize) -> str {
-    return glist_get(reg.tokens, idx);
+pub pure fn seed_registry_at(ref reg: SeedTokenRegistry, idx: i64) -> str {
+    return reg.tokens[idx];
 }
 
 // ------------------------------------------------------------------------------
 // Crate LOC Ratchet Registry, File Caps & Retired Artifact Registries
 // ------------------------------------------------------------------------------
 
-fn gm_reg_crate(reg: i64, keys: i64, path: str, cap: usize, absent: bool) -> usize {
-    let rule = CrateCeilingRule {
+fn gm_reg_crate(var ref reg: Map<str, CrateCeilingRule>, path: str, cap: usize, absent: bool) {
+    reg.set(path, CrateCeilingRule {
         crate_path: path,
         max_loc: cap,
         must_be_absent: absent,
-    };
-    __engine("map_set", reg, path, rule);
-    return glist_push(keys, path);
+    });
 }
 
+/// Every registered crate directory and its rule, by path; `.keys()` lists
+/// the paths in sorted order.
 pub fn build_crate_ceiling_registry() -> Map<str, CrateCeilingRule> {
-    let reg = __engine("map_new");
-    let keys = glist_new();
+    var reg = Map<str, CrateCeilingRule>();
 
     // Surviving bootstrap crates (ratchet ceilings: LOC may shrink to 0, never grow)
-    let _ = gm_reg_crate(reg, keys, "crates/pilot-lexer", 860, false);
-    let _ = gm_reg_crate(reg, keys, "crates/pilot-ast", 450, false);
-    let _ = gm_reg_crate(reg, keys, "crates/pilot-parser", 1100, false);
-    let _ = gm_reg_crate(reg, keys, "crates/pilot-analysis", 780, false);
-    let _ = gm_reg_crate(reg, keys, "crates/pilot-vm", 650, false);
-    let _ = gm_reg_crate(reg, keys, "crates/pilot-cli", 100, false);
-    let _ = gm_reg_crate(reg, keys, "crates/pilot-intern", 300, false);
-    let _ = gm_reg_crate(reg, keys, "crates/pilot-span", 250, false);
+    gm_reg_crate(reg, "crates/pilot-lexer", 860, false);
+    gm_reg_crate(reg, "crates/pilot-ast", 450, false);
+    gm_reg_crate(reg, "crates/pilot-parser", 1100, false);
+    gm_reg_crate(reg, "crates/pilot-analysis", 780, false);
+    gm_reg_crate(reg, "crates/pilot-vm", 650, false);
+    gm_reg_crate(reg, "crates/pilot-cli", 100, false);
+    gm_reg_crate(reg, "crates/pilot-intern", 300, false);
+    gm_reg_crate(reg, "crates/pilot-span", 250, false);
 
     // Retired crates (must remain permanently absent)
-    let _ = gm_reg_crate(reg, keys, "crates/pilot-codegen", 0, true);
-    let _ = gm_reg_crate(reg, keys, "crates/pilot-rt", 0, true);
-    let _ = gm_reg_crate(reg, keys, "crates/pilot-arena", 0, true);
-    let _ = gm_reg_crate(reg, keys, "crates/pilot-ffi", 0, true);
-    let _ = gm_reg_crate(reg, keys, "crates/pilot-syntax", 0, true);
-    let _ = gm_reg_crate(reg, keys, "crates/pilot-fmt", 0, true);
-    let _ = gm_reg_crate(reg, keys, "crates/pilot-perceus", 0, true);
-    let _ = gm_reg_crate(reg, keys, "crates/pilot-transpile", 0, true);
-    let _ = gm_reg_crate(reg, keys, "crates/pilot-polyglot", 0, true);
-    let _ = gm_reg_crate(reg, keys, "crates/pilot-dap", 0, true);
-    let _ = gm_reg_crate(reg, keys, "crates/pilot-lsp", 0, true);
-    let _ = gm_reg_crate(reg, keys, "crates/pilot-lsp-macros", 0, true);
-    let _ = gm_reg_crate(reg, keys, "crates/pilot-db", 0, true);
-    let _ = gm_reg_crate(reg, keys, "crates/pilot-incremental", 0, true);
-    let _ = gm_reg_crate(reg, keys, "crates/pilot-pkg", 0, true);
-    let _ = gm_reg_crate(reg, keys, "crates/pilot-perf", 0, true);
-    let _ = gm_reg_crate(reg, keys, "crates/pilot-bench", 0, true);
-
-    __engine("map_set", reg, "__keys__", keys);
+    gm_reg_crate(reg, "crates/pilot-codegen", 0, true);
+    gm_reg_crate(reg, "crates/pilot-rt", 0, true);
+    gm_reg_crate(reg, "crates/pilot-arena", 0, true);
+    gm_reg_crate(reg, "crates/pilot-ffi", 0, true);
+    gm_reg_crate(reg, "crates/pilot-syntax", 0, true);
+    gm_reg_crate(reg, "crates/pilot-fmt", 0, true);
+    gm_reg_crate(reg, "crates/pilot-perceus", 0, true);
+    gm_reg_crate(reg, "crates/pilot-transpile", 0, true);
+    gm_reg_crate(reg, "crates/pilot-polyglot", 0, true);
+    gm_reg_crate(reg, "crates/pilot-dap", 0, true);
+    gm_reg_crate(reg, "crates/pilot-lsp", 0, true);
+    gm_reg_crate(reg, "crates/pilot-lsp-macros", 0, true);
+    gm_reg_crate(reg, "crates/pilot-db", 0, true);
+    gm_reg_crate(reg, "crates/pilot-incremental", 0, true);
+    gm_reg_crate(reg, "crates/pilot-pkg", 0, true);
+    gm_reg_crate(reg, "crates/pilot-perf", 0, true);
+    gm_reg_crate(reg, "crates/pilot-bench", 0, true);
     return reg;
 }
 
-fn gm_reg_fcap(reg: i64, keys: i64, path: str, cap: usize) -> usize {
-    __engine("map_set", reg, path, cap);
-    return glist_push(keys, path);
-}
-
-pub fn build_file_ceiling_registry() -> i64 {
-    let reg = __engine("map_new");
-    let keys = glist_new();
-    let _ = gm_reg_fcap(reg, keys, "crates/pilot-analysis/src/types.rs", 250);
-    let _ = gm_reg_fcap(reg, keys, "crates/pilot-analysis/src/infer.rs", 440);
-    let _ = gm_reg_fcap(reg, keys, "crates/pilot-analysis/src/pipeline.rs", 80);
-    let _ = gm_reg_fcap(reg, keys, "crates/pilot-analysis/src/lib.rs", 60);
-    let _ = gm_reg_fcap(reg, keys, "crates/pilot-cli/src/main.rs", 100);
-    let _ = gm_reg_fcap(reg, keys, "selfhost/ide/vscode_gen.pilot", 1000);
-    let _ = gm_reg_fcap(reg, keys, "selfhost/lsp/handlers.pilot", 1000);
-    __engine("map_set", reg, "__keys__", keys);
+/// The files with a LOC ceiling of their own, by path.
+pub fn build_file_ceiling_registry() -> Map<str, i64> {
+    var reg = Map<str, i64>();
+    reg.set("crates/pilot-analysis/src/types.rs", 250);
+    reg.set("crates/pilot-analysis/src/infer.rs", 440);
+    reg.set("crates/pilot-analysis/src/pipeline.rs", 80);
+    reg.set("crates/pilot-analysis/src/lib.rs", 60);
+    reg.set("crates/pilot-cli/src/main.rs", 100);
+    reg.set("selfhost/ide/vscode_gen.pilot", 1000);
+    reg.set("selfhost/lsp/handlers.pilot", 1000);
     return reg;
 }
 
-pub fn build_retired_files_registry() -> i64 {
-    let list = glist_new();
-    let _ = glist_push(list, "crates/pilot-analysis/src/autodiff.rs");
-    let _ = glist_push(list, "crates/pilot-analysis/src/contracts.rs");
-    let _ = glist_push(list, "crates/pilot-analysis/src/dimensions.rs");
-    let _ = glist_push(list, "crates/pilot-analysis/src/loops.rs");
-    let _ = glist_push(list, "crates/pilot-analysis/src/macros.rs");
-    let _ = glist_push(list, "crates/pilot-analysis/src/patterns.rs");
-    let _ = glist_push(list, "crates/pilot-analysis/src/quoting.rs");
-    let _ = glist_push(list, "crates/pilot-analysis/src/null_error.rs");
-    let _ = glist_push(list, "selfhost/scope_header.pilot");
-    let _ = glist_push(list, "selfhost/emitter.pilot");
-    let _ = glist_push(list, "selfhost/ide_sync.pilot");
-    let _ = glist_push(list, "crates/pilot-vm/src/compiler.rs");
-    let _ = glist_push(list, "crates/pilot-codegen/src/c_target.rs");
-    let _ = glist_push(list, "crates/pilot-codegen/src/gpu.rs");
-    let _ = glist_push(list, "crates/pilot-codegen/src/llvm.rs");
-    let _ = glist_push(list, "crates/pilot-codegen/src/wasm.rs");
-    let _ = glist_push(list, "crates/pilot-codegen/src/asm.rs");
-    let _ = glist_push(list, "crates/pilot-codegen/src/driver.rs");
-    let _ = glist_push(list, "crates/pilot-codegen/src/physics.rs");
-    let _ = glist_push(list, "crates/pilot-rt/src/crypto.rs");
-    let _ = glist_push(list, "crates/pilot-rt/src/memory.rs");
-    let _ = glist_push(list, "crates/pilot-rt/src/concurrency.rs");
-    let _ = glist_push(list, "crates/pilot-rt/src/net.rs");
-    let _ = glist_push(list, "crates/pilot-cli/src/commands.rs");
-    let _ = glist_push(list, "scripts/gate1_check.py");
-    let _ = glist_push(list, "scripts/gate2_check.py");
-    let _ = glist_push(list, "scripts/gate3_check.py");
-    let _ = glist_push(list, "scripts/gate4_selfhost_contraction.py");
-    let _ = glist_push(list, "scripts/convert_dunders.py");
-    return list;
-}
+/// Retired files and scripts that must stay deleted.
+pub const RETIRED_FILES: List<str> = [
+    "crates/pilot-analysis/src/autodiff.rs",
+    "crates/pilot-analysis/src/contracts.rs",
+    "crates/pilot-analysis/src/dimensions.rs",
+    "crates/pilot-analysis/src/loops.rs",
+    "crates/pilot-analysis/src/macros.rs",
+    "crates/pilot-analysis/src/patterns.rs",
+    "crates/pilot-analysis/src/quoting.rs",
+    "crates/pilot-analysis/src/null_error.rs",
+    "selfhost/scope_header.pilot",
+    "selfhost/emitter.pilot",
+    "selfhost/ide_sync.pilot",
+    "crates/pilot-vm/src/compiler.rs",
+    "crates/pilot-codegen/src/c_target.rs",
+    "crates/pilot-codegen/src/gpu.rs",
+    "crates/pilot-codegen/src/llvm.rs",
+    "crates/pilot-codegen/src/wasm.rs",
+    "crates/pilot-codegen/src/asm.rs",
+    "crates/pilot-codegen/src/driver.rs",
+    "crates/pilot-codegen/src/physics.rs",
+    "crates/pilot-rt/src/crypto.rs",
+    "crates/pilot-rt/src/memory.rs",
+    "crates/pilot-rt/src/concurrency.rs",
+    "crates/pilot-rt/src/net.rs",
+    "crates/pilot-cli/src/commands.rs",
+    "scripts/gate1_check.py",
+    "scripts/gate2_check.py",
+    "scripts/gate3_check.py",
+    "scripts/gate4_selfhost_contraction.py",
+    "scripts/convert_dunders.py",
+];
 
-pub fn build_allowed_infer_strings() -> i64 {
-    let s = gset_new();
-    let _ = gset_insert(s, "ast_node_count");
-    let _ = gset_insert(s, "ast_node_kind");
-    let _ = gset_insert(s, "ast_orig_kind");
-    let _ = gset_insert(s, "ast_node_flags");
-    let _ = gset_insert(s, "ast_decl_flags");
-    let _ = gset_insert(s, "ast_parent");
-    let _ = gset_insert(s, "ast_node_sym");
-    let _ = gset_insert(s, "ast_node_lit_kind");
-    let _ = gset_insert(s, "ast_node_unit");
-    let _ = gset_insert(s, "ast_node_raw_bits");
-    let _ = gset_insert(s, "ast_child_count");
-    let _ = gset_insert(s, "ast_child_at");
-    let _ = gset_insert(s, "ast_attr_count");
-    let _ = gset_insert(s, "ast_attr_arg");
-    let _ = gset_insert(s, "ast_attr_decl_count");
-    let _ = gset_insert(s, "ast_attr_name");
-    let _ = gset_insert(s, "ast_attr_decl_arg_count");
-    let _ = gset_insert(s, "ast_attr_decl_arg");
-    let _ = gset_insert(s, "ast_base_count");
-    let _ = gset_insert(s, "ast_base_at");
-    let _ = gset_insert(s, "layout_hw_header");
-    let _ = gset_insert(s, "layout_scalar");
-    let _ = gset_insert(s, "layout_ptr");
-    let _ = gset_insert(s, "layout_aggregate_begin");
-    let _ = gset_insert(s, "layout_aggregate_field");
-    let _ = gset_insert(s, "layout_aggregate_end");
-    let _ = gset_insert(s, "layout_union");
-    let _ = gset_insert(s, "layout_fn_abi");
-    let _ = gset_insert(s, "layout_metrics");
-    let _ = gset_insert(s, "layout_field_offset");
-    let _ = gset_insert(s, "layout_physically_equal");
-    let _ = gset_insert(s, "ast_bind_layout");
-    let _ = gset_insert(s, "ast_get_bound_layout");
-    let _ = gset_insert(s, "ast_bind_target");
-    let _ = gset_insert(s, "ast_get_bound_target");
-    let _ = gset_insert(s, "ast_emit_diag");
-    let _ = gset_insert(s, "sym_str");
-    let _ = gset_insert(s, "sym_lookup");
-    let _ = gset_insert(s, "str_len");
-    let _ = gset_insert(s, "str_byte_at");
-    let _ = gset_insert(s, "ast_span_start");
-    let _ = gset_insert(s, "ast_span_end");
-    let _ = gset_insert(s, "source_slice");
-    let _ = gset_insert(s, "register_keyword_category");
-    let _ = gset_insert(s, "register_keyword");
-    let _ = gset_insert(s, "query_registered_symbols");
-    let _ = gset_insert(s, "mount_unit");
-    let _ = gset_insert(s, "lsp_query_method");
-    let _ = gset_insert(s, "lsp_query_offset");
-    let _ = gset_insert(s, "lsp_set_result");
-    let _ = gset_insert(s, "selfhost/analyzer.pilot");
-    let _ = gset_insert(s, "../../../selfhost/analyzer.pilot");
-    let _ = gset_insert(s, "selfhost/.pilc-cache");
-    let _ = gset_insert(s, "selfhost/.pilc-cache/analyzer.pilc");
-    let _ = gset_insert(s, "selfhost/.pilc-cache/analyzer.pilc.tmp");
+/// The string literals `crates/pilot-analysis/src/infer.rs` may hold.
+pub fn build_allowed_infer_strings() -> Map<str, bool> {
+    var s = Map<str, bool>();
+    for w in GM_ALLOWED_INFER_STRINGS { s.set(w, true); }
     return s;
 }
 
-pub fn build_banned_analysis_idents() -> i64 {
-    let list = glist_new();
-    let _ = glist_push(list, "TypeInferenceEngine");
-    let _ = glist_push(list, "TypeArena");
-    let _ = glist_push(list, "TypeKind");
-    let _ = glist_push(list, "CollectionKind");
-    let _ = glist_push(list, "LangItem");
-    let _ = glist_push(list, "ReceptorSlot");
-    let _ = glist_push(list, "StructuralShape");
-    return list;
-}
+const GM_ALLOWED_INFER_STRINGS: List<str> = [
+    "ast_node_count",
+    "ast_node_kind",
+    "ast_orig_kind",
+    "ast_node_flags",
+    "ast_decl_flags",
+    "ast_parent",
+    "ast_node_sym",
+    "ast_node_lit_kind",
+    "ast_node_unit",
+    "ast_node_raw_bits",
+    "ast_child_count",
+    "ast_child_at",
+    "ast_attr_count",
+    "ast_attr_arg",
+    "ast_attr_decl_count",
+    "ast_attr_name",
+    "ast_attr_decl_arg_count",
+    "ast_attr_decl_arg",
+    "ast_base_count",
+    "ast_base_at",
+    "layout_hw_header",
+    "layout_scalar",
+    "layout_ptr",
+    "layout_aggregate_begin",
+    "layout_aggregate_field",
+    "layout_aggregate_end",
+    "layout_union",
+    "layout_fn_abi",
+    "layout_metrics",
+    "layout_field_offset",
+    "layout_physically_equal",
+    "ast_bind_layout",
+    "ast_get_bound_layout",
+    "ast_bind_target",
+    "ast_get_bound_target",
+    "ast_emit_diag",
+    "sym_str",
+    "sym_lookup",
+    "str_len",
+    "str_byte_at",
+    "ast_span_start",
+    "ast_span_end",
+    "source_slice",
+    "register_keyword_category",
+    "register_keyword",
+    "query_registered_symbols",
+    "mount_unit",
+    "lsp_query_method",
+    "lsp_query_offset",
+    "lsp_set_result",
+    "selfhost/analyzer.pilot",
+    "../../../selfhost/analyzer.pilot",
+    "selfhost/.pilc-cache",
+    "selfhost/.pilc-cache/analyzer.pilc",
+    "selfhost/.pilc-cache/analyzer.pilc.tmp",
+];
 
-pub fn build_banned_stdlib_rs_tokens() -> i64 {
-    let list = glist_new();
-    let _ = glist_push(list, "pandas");
-    let _ = glist_push(list, "matplotlib");
-    let _ = glist_push(list, "scikit");
-    let _ = glist_push(list, "MODULE_MAP");
-    return list;
-}
+pub const BANNED_ANALYSIS_IDENTS: List<str> = [
+    "TypeInferenceEngine",
+    "TypeArena",
+    "TypeKind",
+    "CollectionKind",
+    "LangItem",
+    "ReceptorSlot",
+    "StructuralShape",
+];
 
-pub fn build_banned_cli_lsp_tokens() -> i64 {
-    let list = glist_new();
-    let _ = glist_push(list, "BUILTIN_DOCS");
-    let _ = glist_push(list, "KEYWORD_DOCS");
-    let _ = glist_push(list, "STR_METHOD_DOCS");
-    let _ = glist_push(list, "LIST_METHOD_DOCS");
-    let _ = glist_push(list, "INT_METHOD_DOCS");
-    let _ = glist_push(list, "TypeInferenceEngine");
-    let _ = glist_push(list, "TypeArena");
-    let _ = glist_push(list, "TypeId");
-    let _ = glist_push(list, "*Pilot Language*");
-    let _ = glist_push(list, "Custom(\"any\"");
-    let _ = glist_push(list, "secret_audit");
-    let _ = glist_push(list, "seed_kws");
-    return list;
-}
+pub const BANNED_STDLIB_RS_TOKENS: List<str> = [
+    "pandas",
+    "matplotlib",
+    "scikit",
+    "MODULE_MAP",
+];
+
+pub const BANNED_CLI_LSP_TOKENS: List<str> = [
+    "BUILTIN_DOCS",
+    "KEYWORD_DOCS",
+    "STR_METHOD_DOCS",
+    "LIST_METHOD_DOCS",
+    "INT_METHOD_DOCS",
+    "TypeInferenceEngine",
+    "TypeArena",
+    "TypeId",
+    "*Pilot Language*",
+    "Custom(\"any\"",
+    "secret_audit",
+    "seed_kws",
+];
 
 pub pure fn max_total_rust_loc() -> usize => 5900;
 
@@ -696,16 +665,14 @@ pub fn stage_a_host_natives() -> List<str> => ["host_op"];
 /// Counts are lexer-aware non-comment/non-string `__engine(` occurrences and may only shrink to 0.
 pub fn legacy_engine_ratchet() -> Map<str, i64> {
     let m = Map<str, i64>();
-    m.set("selfhost/analyzer.pilot", 394);
-    m.set("selfhost/ast_bridge.pilot", 20);
-    m.set("selfhost/ast.pilot", 105);
+    m.set("selfhost/ast_bridge.pilot", 17);
+    m.set("selfhost/ast.pilot", 101);
     m.set("selfhost/attr_weaver.pilot", 26);
-    m.set("selfhost/bench/bench.pilot", 12);
-    m.set("selfhost/check/main.pilot", 2);
-    m.set("selfhost/check/program.pilot", 2);
-    m.set("selfhost/check/snapshot.pilot", 2);
+    m.set("selfhost/bench/bench.pilot", 11);
+    m.set("selfhost/check/main.pilot", 1);
+    m.set("selfhost/check/snapshot.pilot", 1);
     m.set("selfhost/cli/host.pilot", 12);
-    m.set("selfhost/cli/test_runner.pilot", 8);
+    m.set("selfhost/cli/test_runner.pilot", 7);
     m.set("selfhost/codegen/asm_emitter.pilot", 109);
     m.set("selfhost/codegen/c_emitter.pilot", 80);
     m.set("selfhost/codegen/gpu_c_dialects.pilot", 73);
@@ -714,54 +681,42 @@ pub fn legacy_engine_ratchet() -> Map<str, i64> {
     m.set("selfhost/codegen/llvm_emitter.pilot", 109);
     m.set("selfhost/codegen/physics.pilot", 66);
     m.set("selfhost/codegen/wasm_emitter.pilot", 120);
-    m.set("selfhost/cst/cst.pilot", 20);
-    m.set("selfhost/dap/inspector.pilot", 5);
-    m.set("selfhost/dap/repl_eval.pilot", 20);
+    m.set("selfhost/cst/cst.pilot", 17);
+    m.set("selfhost/dap/inspector.pilot", 4);
+    m.set("selfhost/dap/repl_eval.pilot", 19);
     m.set("selfhost/dap/vm_controller.pilot", 9);
-    m.set("selfhost/db/cache_io.pilot", 3);
-    m.set("selfhost/db/engine.pilot", 85);
+    m.set("selfhost/db/cache_io.pilot", 2);
+    m.set("selfhost/db/engine.pilot", 81);
     m.set("selfhost/diagnostics.pilot", 20);
+    m.set("selfhost/gate/seed_audit.pilot", 9);
     m.set("selfhost/ffi_bindgen.pilot", 56);
-    m.set("selfhost/gate/manifest.pilot", 22);
-    m.set("selfhost/gate/rename_litmus.pilot", 15);
-    m.set("selfhost/gate/runner.pilot", 20);
-    m.set("selfhost/gate/seed_audit.pilot", 12);
-    m.set("selfhost/ide/vscode_gen.pilot", 30);
+    m.set("selfhost/ide/vscode_gen.pilot", 29);
     m.set("selfhost/ir/fault.pilot", 1);
-    m.set("selfhost/ir/lower.pilot", 2);
-    m.set("selfhost/ir/main.pilot", 2);
-    m.set("selfhost/lexer.pilot", 65);
-    m.set("selfhost/loader/pragma_filter.pilot", 20);
-    m.set("selfhost/lsp/handlers.pilot", 228);
-    m.set("selfhost/lsp/ide_db.pilot", 4);
-    m.set("selfhost/lsp/server.pilot", 12);
-    m.set("selfhost/parser.pilot", 180);
+    m.set("selfhost/ir/main.pilot", 1);
+    m.set("selfhost/lexer.pilot", 64);
+    m.set("selfhost/lsp/handlers.pilot", 222);
+    m.set("selfhost/lsp/ide_db.pilot", 3);
+    m.set("selfhost/lsp/server.pilot", 10);
+    m.set("selfhost/parser.pilot", 178);
     m.set("selfhost/perceus/escape.pilot", 90);
     m.set("selfhost/perceus/lattice.pilot", 40);
     m.set("selfhost/perceus/optimizer.pilot", 15);
-    m.set("selfhost/perceus/realtime.pilot", 12);
-    m.set("selfhost/perf/optimizer.pilot", 25);
-    m.set("selfhost/perf/profiler.pilot", 15);
-    m.set("selfhost/perf/wcet.pilot", 18);
-    m.set("selfhost/pkg/archive.pilot", 10);
-    m.set("selfhost/pkg/exclusions.pilot", 20);
-    m.set("selfhost/pkg/manifest.pilot", 30);
-    m.set("selfhost/pkg/resolver.pilot", 48);
-    m.set("selfhost/preprocessor.pilot", 48);
-    m.set("selfhost/transpile/ingest.pilot", 30);
+    m.set("selfhost/perceus/realtime.pilot", 11);
+    m.set("selfhost/perf/optimizer.pilot", 23);
+    m.set("selfhost/perf/profiler.pilot", 14);
+    m.set("selfhost/perf/wcet.pilot", 17);
+    m.set("selfhost/pkg/manifest.pilot", 6);
     m.set("selfhost/vm/compiler.pilot", 341);
-    m.set("selfhost/vm/pilc_writer.pilot", 16);
-    m.set("stdlib/core/effects.pilot", 45);
+    m.set("selfhost/vm/pilc_writer.pilot", 15);
+    m.set("stdlib/core/effects.pilot", 43);
     m.set("stdlib/core/keywords.pilot", 8);
-    m.set("stdlib/core/primitives/ast.pilot", 22);
-    m.set("stdlib/core/primitives/map.pilot", 10);
-    m.set("stdlib/core/reactive.pilot", 55);
-    m.set("stdlib/core/reflect.pilot", 55);
-    m.set("stdlib/crypto/ed25519.pilot", 168);
-    m.set("stdlib/crypto/hash.pilot", 156);
-    m.set("stdlib/db/sql_engine.pilot", 55);
-    m.set("stdlib/http/http.pilot", 10);
-    m.set("stdlib/pkg/licensing.pilot", 40);
-    m.set("stdlib/polyglot/marshal.pilot", 42);
+    m.set("stdlib/core/primitives/ast.pilot", 21);
+    m.set("stdlib/core/primitives/map.pilot", 5);
+    m.set("stdlib/core/reactive.pilot", 51);
+    m.set("stdlib/core/reflect.pilot", 52);
+    m.set("stdlib/db/sql_engine.pilot", 52);
+    m.set("stdlib/http/http.pilot", 9);
+    m.set("stdlib/pkg/licensing.pilot", 37);
+    m.set("stdlib/polyglot/marshal.pilot", 40);
     return m;
 }

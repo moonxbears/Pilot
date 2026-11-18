@@ -1,0 +1,13 @@
+// KW001: a declaration may not take a word the linked program registers as
+// a keyword with `[KeywordDefAttr]` (stdlib/core/keywords.pilot, linked by
+// the `use` below, registers `call` and `res`). The diagnostic points at
+// the declaration: the `let` at line 9, column 5, and the parameter at line
+// 13, column 10.
+use Pilot.Core.Keywords;
+
+fn main() {
+    let call = 1;
+    print(call + twice(2));
+}
+
+fn twice(res: i64) -> i64 => res * 2;

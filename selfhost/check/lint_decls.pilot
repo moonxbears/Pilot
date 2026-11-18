@@ -1,0 +1,309 @@
+// ==============================================================================
+// FILE: selfhost/check/lint_decls.pilot
+// Declaration and statement lints moved out of selfhost/analyzer.pilot:
+// [EnforceCoreNaming], KW001, FLOW002-FLOW004, DECL002, DECL004 (`let`) and
+// VAR001 at the uses of a binding.
+// ==============================================================================
+//   EnforceCoreNaming  in a file that carries `[EnforceCoreNaming]`, the names
+//                      of AGENTS.md §3: an interface is `I` + PascalCase; a
+//                      `[Lang]` primitive is lowercase; any other struct is
+//                      PascalCase, does not take the interface prefix, and
+//                      ends in `Attr` (an attribute), `Guard`/`Scope`/`Lease`
+//                      (a scoped guard) or `View`/`Lens`/`Cursor`/`Enumerator`
+//                      (a reference view). A `partial` struct is exempt.
+//   KW001              a declaration named with a keyword: a word some linked
+//                      declaration registers with `[KeywordDefAttr]`, unless
+//                      the word is one the grammar also reads as a name.
+//   FLOW002            `return value` in a constructor.
+//   FLOW003, FLOW004   `break` with no loop or switch, `continue` with no
+//                      loop, inside the innermost function or closure.
+//   DECL002            two fields of one struct with the same name.
+//   DECL004            an assignment to a local `let` binding.
+//   VAR001             a use of a `let`/`var` written with neither a type nor
+//                      a value (the declaration itself is VAR001 in
+//                      selfhost/analyzer.pilot until it moves here too).
+// The lattice of a struct declared `: IValue` that has `~self()` is COMP005
+// (selfhost/types/bundle_splice.pilot through selfhost/check/methods.pilot).
+pub lvl(0) pkg selfhost.check;
+
+
+/// Runs every lint of this file over the user's files.
+pub fn check_decl_lints(var ref inf: Infer, var ref sink: DiagSink) {
+    let p = inf.p;
+    let s = p.s;
+    let keywords = registered_keywords(s);
+    let naming = naming_units(s);
+    let bases = naming_bases(s, naming);
+    var n = s.user_lo;
+    while n < s.user_hi {
+        if in_user_file(s, n) {
+            let k = kind(s, n);
+            if k == nk_struct() || k == nk_interface() { check_naming(p, sink, naming, bases, n); }
+            if k == nk_struct() { check_duplicate_fields(s, sink, n); }
+            check_keyword_name(p, sink, keywords, n);
+            if k == nk_return() { check_ctor_return(p, sink, n); }
+            if k == nk_break() || k == nk_continue() { check_jump(p, sink, n); }
+            if k == nk_assign() { check_let_assign(inf, sink, n); }
+            if k == nk_ident() { check_untyped_use(inf, sink, n); }
+        }
+        n = n + 1;
+    }
+}
+
+// ------------------------------------------------------------------------------
+// EnforceCoreNaming
+// ------------------------------------------------------------------------------
+
+/// Unit -> 1 when the file carries `[EnforceCoreNaming]`, else 0.
+fn naming_units(ref s: Snap) -> List<i64> {
+    let out = filled(s.files.len(), 0);
+    for row in s.attrs {
+        let name = sym_text(s, row.1);
+        if name == nameof(EnforceCoreNaming) || name == nameof(EnforceCoreNamingAttr) {
+            let u = unit_of(s, row.0);
+            if u >= 0 && u < out.len() { out[u] = 1; }
+        }
+    }
+    return out;
+}
+
+/// Declaration node -> its base type nodes, for the declarations of the
+/// files `naming_units` marks (the only ones whose bases a rule reads).
+fn naming_bases(ref s: Snap, ref naming: List<i64>) -> NodeLists {
+    var out = nl_new();
+    for b in s.bases {
+        let u = unit_of(s, b[0]);
+        if b[1] >= 0 && u >= 0 && u < naming.len() && naming[u] == 1 { nl_add(out, f"{b[0]}", b[1]); }
+    }
+    return out;
+}
+
+fn is_upper(c: i64) -> bool => c >= 65 && c <= 90;
+
+/// Whether `name` is the interface prefix (`I`) followed by an uppercase letter.
+fn has_interface_prefix(name: str) -> bool => name.len() >= 2 && name.byte_at(0) == 73 && is_upper(name.byte_at(1));
+
+/// Whether every byte of `name` is a lowercase letter, a digit or `_`.
+fn is_lowercase_word(name: str) -> bool {
+    if name.len() == 0 { return false; }
+    var i = 0;
+    while i < name.len() {
+        let c = name.byte_at(i);
+        if !(c >= 97 && c <= 122) && !(c >= 48 && c <= 57) && c != 95 { return false; }
+        i = i + 1;
+    }
+    return true;
+}
+
+fn check_naming(ref p: Program, var ref sink: DiagSink, ref naming: List<i64>, ref bases: NodeLists, n: i64) {
+    let s = p.s;
+    let u = unit_of(s, n);
+    if u < 0 || u >= naming.len() || naming[u] == 0 { return; }
+    let name = node_name(s, n);
+    if name.len() == 0 || name.byte_at(0) == 36 { return; }
+    if kind(s, n) == nk_interface() {
+        if !has_interface_prefix(name) {
+            sink_error(sink, n, nameof(EnforceCoreNaming), "[InterfacePrefix] Interface '" + name + "' must begin with 'I' + PascalCase");
+        }
+        return;
+    }
+    if is_partial_decl(s, n) { return; }
+    if some _ = prog_attr_nodes(p, n, nameof(Lang)) {
+        if !is_lowercase_word(name) {
+            sink_error(sink, n, nameof(EnforceCoreNaming), "[LangPrimitiveLowercase] [" + nameof(Lang) + "] primitive struct '" + name + "' must be lowercase");
+        }
+        return;
+    }
+    if !is_upper(name.byte_at(0)) {
+        sink_error(sink, n, nameof(EnforceCoreNaming), "[StructPascalCase] Core struct '" + name + "' must be PascalCase");
+        return;
+    }
+    if has_interface_prefix(name) {
+        sink_error(sink, n, nameof(EnforceCoreNaming), "[ReservedInterfacePrefix] Struct '" + name + "' cannot begin with reserved interface prefix 'I' + uppercase");
+        return;
+    }
+    var is_attr = false;
+    var is_ref = false;
+    var is_obj = false;
+    var is_guard = false;
+    for b in nl_get(bases, f"{n}") {
+        let bn = node_name(s, b);
+        if bn == nameof(IReference) { is_ref = true; }
+        else if bn == nameof(IObject) { is_obj = true; }
+        else if bn == nameof(IGuard) { is_guard = true; }
+        else if bn == nameof(IAttribute) || bn == nameof(IInheritedAttribute) || bn == nameof(IInterceptor)
+            || bn == nameof(IEcsRule) || bn.ends_with("Attribute") { is_attr = true; }
+    }
+    if is_attr {
+        if !name.ends_with("Attr") {
+            sink_error(sink, n, nameof(EnforceCoreNaming), "[AttributeSuffix] Attribute struct '" + name + "' must end with 'Attr'");
+        }
+    } else if (is_guard || (is_ref && is_obj)) && !name.ends_with("Guard") && !name.ends_with("Scope") && !name.ends_with("Lease") {
+        sink_error(sink, n, nameof(EnforceCoreNaming), "[ScopedGuardSuffix] " + nameof(IGuard) + " struct '" + name + "' must end with 'Guard', 'Scope', or 'Lease'");
+    } else if is_ref && !name.ends_with("View") && !name.ends_with("Lens") && !name.ends_with("Cursor") && !name.ends_with("Enumerator") {
+        sink_error(sink, n, nameof(EnforceCoreNaming), "[ReferenceViewSuffix] " + nameof(IReference) + " struct '" + name + "' must end with 'View', 'Lens', 'Cursor', or 'Enumerator'");
+    }
+}
+
+// ------------------------------------------------------------------------------
+// KW001
+// ------------------------------------------------------------------------------
+
+fn is_keyword_attr(name: str) -> bool => name == nameof(KeywordDef) || name == nameof(KeywordDefAttr);
+
+/// Every word a declaration of the linked program registers as a keyword
+/// (`[KeywordDefAttr(category, doc)] word {}` in stdlib/core/keywords.pilot,
+/// the 14 seed words among them).
+fn registered_keywords(ref s: Snap) -> Map<str, i64> {
+    let out = Map<str, i64>();
+    for row in s.attrs {
+        if is_keyword_attr(sym_text(s, row.1)) && in_linked_file(s, row.0) {
+            let word = node_name(s, row.0);
+            if word.len() > 0 { out.set(word, 1); }
+        }
+    }
+    return out;
+}
+
+/// Words the grammar reads as keywords in one place and as names in others.
+fn is_contextual_word(name: str) -> bool {
+    if name == nameof(self) || name == nameof(field) || name == nameof(value) || name == nameof(type) || name == nameof(unit) || name == nameof(nameof) || name == nameof(__engine) || name == nameof(op) || name == nameof(pkg) || name == nameof(state) { return true; }
+    if name == nameof(get) || name == nameof(set) || name == nameof(open) || name == nameof(role) || name == nameof(route) || name == nameof(connect) || name == nameof(exit) || name == nameof(delete) || name == nameof(values) || name == nameof(update) { return true; }
+    if name == nameof(from) || name == nameof(where) || name == nameof(select) || name == nameof(insert) || name == nameof(order) || name == nameof(context) || name == nameof(quote) || name == nameof(partial) || name == nameof(blueprint) || name == nameof(cue) { return true; }
+    return false;
+}
+
+/// Whether node kind `k` declares a name KW001 reads.
+fn names_declaration(k: i64) -> bool =>
+    k == nk_struct() || k == nk_interface() || k == nk_fn() || k == nk_let() || k == nk_var() || k == nk_const()
+    || k == nk_param() || k == nk_adt() || k == nk_variant() || k == nk_pat_bind();
+
+/// Whether declaration `n` declares the language's own words: a keyword,
+/// a keyword category or a `[Lang]` primitive.
+fn declares_language(ref p: Program, n: i64) -> bool {
+    for row_index in nl_get(p.attrs, f"{n}") {
+        let name = sym_text(p.s, p.s.attrs[row_index].1);
+        if is_keyword_attr(name) || name == nameof(KeywordCategoryDef) || name == nameof(KeywordCategoryDefAttr) || name == nameof(Lang) { return true; }
+    }
+    return false;
+}
+
+/// Whether struct `n` is the `fn` form a syntax declaration writes (its
+/// first member a `return`, a block or an expression statement).
+fn is_fn_form(ref s: Snap, n: i64) -> bool {
+    if kind(s, n) != nk_struct() || node_name(s, n) != nameof(fn) { return false; }
+    let body = rhs(s, n);
+    if body < 0 || kind(s, body) != nk_block() { return false; }
+    let members = children(s, body);
+    if members.len() == 0 { return false; }
+    let k = kind(s, members[0]);
+    return k == nk_return() || k == nk_block() || k == nk_expr_stmt();
+}
+
+fn check_keyword_name(ref p: Program, var ref sink: DiagSink, ref keywords: Map<str, i64>, n: i64) {
+    let s = p.s;
+    if !names_declaration(kind(s, n)) { return; }
+    let name = node_name(s, n);
+    if name.len() == 0 || name.byte_at(0) == 36 || !keywords.has(name) || is_contextual_word(name) { return; }
+    if declares_language(p, n) || is_fn_form(s, n) { return; }
+    sink_error(sink, n, "KW001", "Identifier '" + name + "' is a keyword and cannot be used as an identifier name");
+}
+
+// ------------------------------------------------------------------------------
+// FLOW002, FLOW003, FLOW004
+// ------------------------------------------------------------------------------
+
+fn is_function_like(k: i64) -> bool =>
+    k == nk_fn() || k == nk_ctor() || k == nk_dtor() || k == nk_indexer() || k == nk_operator() || k == nk_lambda();
+
+/// The innermost function, constructor, indexer, operator or closure around
+/// node `n`, or -1.
+fn enclosing_function(ref p: Program, n: i64) -> i64 {
+    var cur = p.parents[n];
+    while cur >= 0 {
+        if is_function_like(kind(p.s, cur)) { return cur; }
+        cur = p.parents[cur];
+    }
+    return -1;
+}
+
+fn check_ctor_return(ref p: Program, var ref sink: DiagSink, n: i64) {
+    if lhs(p.s, n) < 0 { return; }
+    let f = enclosing_function(p, n);
+    if f >= 0 && kind(p.s, f) == nk_ctor() {
+        sink_error(sink, n, "FLOW002", "Constructor 'self()' cannot return a value; constructors initialize state in-place");
+    }
+}
+
+/// A `break` needs a loop or a switch, a `continue` a loop, between it and
+/// the innermost function or closure around it.
+fn check_jump(ref p: Program, var ref sink: DiagSink, n: i64) {
+    let s = p.s;
+    let is_break = kind(s, n) == nk_break();
+    var cur = p.parents[n];
+    var root = n;
+    while cur >= 0 {
+        let k = kind(s, cur);
+        if k == nk_while() || k == nk_for() || (is_break && k == nk_match()) { return; }
+        if is_function_like(k) { break; }
+        root = cur;
+        cur = p.parents[cur];
+    }
+    // A node a `syntax` rule parsed and then left out of the tree (its
+    // parent chain ends short of the program) is not part of the program.
+    if cur < 0 && kind(s, root) != nk_program() { return; }
+    if is_break {
+        sink_error(sink, n, "FLOW003", "'break' statement outside loop or switch construct");
+    } else {
+        sink_error(sink, n, "FLOW004", "'continue' statement outside loop iteration construct");
+    }
+}
+
+// ------------------------------------------------------------------------------
+// DECL002
+// ------------------------------------------------------------------------------
+
+/// Two fields (or bindings) of struct `n` with the same name: the later one
+/// is DECL002. Fields a `*Bundle` splices in are checked by COMP004.
+fn check_duplicate_fields(ref s: Snap, var ref sink: DiagSink, n: i64) {
+    let seen = Map<str, i64>();
+    for m in type_members(s, n) {
+        let k = kind(s, m);
+        if k != nk_param() && k != nk_let() && k != nk_var() && k != nk_const() { continue; }
+        let name = node_name(s, m);
+        if seen.has(name) {
+            sink_error(sink, m, "DECL002", "Duplicate member declaration '" + name + "' in struct scope");
+        } else {
+            seen.set(name, m);
+        }
+    }
+}
+
+// ------------------------------------------------------------------------------
+// DECL004 (`let`) and VAR001 (uses)
+// ------------------------------------------------------------------------------
+
+/// The `let`/`var` node local identifier `n` names, or -1.
+fn local_site(ref inf: Infer, n: i64) -> i64 {
+    let b = inf.r.ref_of[n];
+    if b < 0 || b >= inf.r.site.len() || inf.r.bind_kind[b] != BindKind::Local { return -1; }
+    return inf.r.site[b];
+}
+
+fn check_let_assign(ref inf: Infer, var ref sink: DiagSink, n: i64) {
+    let s = inf.p.s;
+    let target = lhs(s, n);
+    if target < 0 || kind(s, target) != nk_ident() { return; }
+    let site = local_site(inf, target);
+    if site < 0 || kind(s, site) != nk_let() { return; }
+    sink_error(sink, n, "DECL004", "Cannot reassign to immutable 'let' binding '" + node_name(s, site) + "'; declare with 'var' to permit mutation");
+}
+
+fn check_untyped_use(ref inf: Infer, var ref sink: DiagSink, n: i64) {
+    let s = inf.p.s;
+    let site = local_site(inf, n);
+    if site < 0 || site == n { return; }
+    let k = kind(s, site);
+    if (k != nk_let() && k != nk_var()) || rhs(s, site) >= 0 || annot(s, site) >= 0 { return; }
+    sink_error(sink, n, "VAR001", "Variable '" + node_name(s, site) + "' requires an explicit type annotation or initial value");
+}

@@ -1,0 +1,2 @@
+error[DECL002]: Duplicate member declaration 'y' in struct scope
+err_duplicate_field_group.pilot:8:9

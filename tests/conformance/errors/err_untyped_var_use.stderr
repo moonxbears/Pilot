@@ -1,0 +1,6 @@
+error[VAR001]: Variable 'x' requires an explicit type annotation or initial value
+err_untyped_var_use.pilot:6:9
+error[VAR001]: Variable 'x' requires an explicit type annotation or initial value
+err_untyped_var_use.pilot:7:5
+error[VAR001]: Variable 'x' requires an explicit type annotation or initial value
+err_untyped_var_use.pilot:8:11

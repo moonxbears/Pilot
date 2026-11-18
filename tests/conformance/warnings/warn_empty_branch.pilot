@@ -1,0 +1,10 @@
+// An `if` whose first branch is an empty block is a warning (COND002): the
+// branch does nothing. The program still runs: 3 > 5 is false, so the
+// `else` prints 3.
+fn main() {
+    let x = 3;
+    if x > 5 {
+    } else {
+        print(x);
+    }
+}

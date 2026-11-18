@@ -1,0 +1,17 @@
+// A `str` built from the numbers of a borrowed `List<i64>` is a new string:
+// it cannot point into the list, so returning it is not an escape.
+fn digits(ref xs: List<i64>) -> str {
+    var out = "";
+    for x in xs { out = out + f"{x}"; }
+    return out;
+}
+
+fn make() -> str {
+    var xs: List<i64> = [1, 2, 3];
+    return digits(xs);
+}
+
+fn main() {
+    // Expected (by hand): the digits 1, 2, 3 joined: "123".
+    print(make());
+}

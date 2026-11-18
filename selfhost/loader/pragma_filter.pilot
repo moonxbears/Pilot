@@ -5,59 +5,22 @@
 // ==============================================================================
 pub lvl(0) pkg selfhost.loader;
 
-[Layout(c_abi)]
-pub struct PragmaInterval : IValue {
-    pub start_offset: usize;
-    pub end_offset: usize;
+/// One stretch of source, `start_offset` to `end_offset` (bytes, end
+/// excluded), where a `#pragma ... disable` turned off the diagnostic `code`,
+/// or every warning when `is_all_warnings`.
+pub struct PragmaInterval {
+    pub start_offset: i64;
+    pub end_offset: i64;
     pub code: str;
     pub is_all_warnings: bool;
 }
 
-// ------------------------------------------------------------------------------
-// Internal dynamic list helpers built on VM map primitives
-// ------------------------------------------------------------------------------
-
-pub fn glist_new() -> i64 {
-    let m = __engine("map_new");
-    __engine("map_set", m, "count", 0);
-    return m;
-}
-
-pub fn glist_len(list: i64) -> i64 {
-    return (__engine("map_get", list, "count") ?? 0);
-}
-
-pub fn glist_push(list: i64, item: any) -> i64 {
-    let idx = glist_len(list);
-    __engine("map_set", list, idx, item);
-    __engine("map_set", list, "count", idx + 1);
-    return idx + 1;
-}
-
-pub fn glist_get(list: i64, idx: i64) -> any {
-    return __engine("map_get", list, idx);
-}
-
-pub fn glist_get_str(list: i64, idx: i64) -> str {
-    return __engine("map_get", list, idx);
-}
-
-pub fn glist_get_int(list: i64, idx: i64) -> i64 {
-    return __engine("map_get", list, idx) as i64;
-}
-
-pub fn glist_set_str(list: i64, idx: i64, val: str) -> i64 {
-    __engine("map_set", list, idx, val);
-    return list;
-}
-
-pub fn pragma_interval_new(st: i64, en: i64, code: str, is_all: bool) -> i64 {
-    let m = __engine("map_new");
-    __engine("map_set", m, "start_offset", st);
-    __engine("map_set", m, "end_offset", en);
-    __engine("map_set", m, "code", code);
-    __engine("map_set", m, "is_all_warnings", if is_all { 1 } else { 0 });
-    return m;
+/// A `#pragma ... disable` not yet restored: the key it opened (a code, or
+/// `__ALL__`) and the offset of its line.
+struct PragmaOpen {
+    pub key: str;
+    pub start: i64;
+    pub closed: bool;
 }
 
 // ------------------------------------------------------------------------------
@@ -106,12 +69,11 @@ pub pure fn pf_find(haystack: str, needle: str, start: i64) -> i64 {
     return -1;
 }
 
-pub fn pragma_solve_intervals(src: str) -> i64 {
-    let list = glist_new();
+pub fn pragma_solve_intervals(src: str) -> List<PragmaInterval> {
+    var list: List<PragmaInterval> = [];
     // Every interval starts at a `#pragma` line: none, no scan.
     if pf_find(src, "#pragma", 0) < 0 { return list; }
-    let open_keys = glist_new();
-    let open_starts = glist_new();
+    var opened: List<PragmaOpen> = [];
     let sl = src.len();
     var cur: i64 = 0;
 
@@ -151,18 +113,20 @@ pub fn pragma_solve_intervals(src: str) -> i64 {
         if is_pragma {
             let key = if is_all { "__ALL__" } else { code_arg };
             if is_disable {
-                let _ = glist_push(open_keys, key);
-                let _ = glist_push(open_starts, cur as i64);
+                opened.push(PragmaOpen { key: key, start: cur, closed: false });
             } else if is_restore {
-                let count = glist_len(open_keys);
+                let count = opened.len() as i64;
                 var k: i64 = 0;
                 while k < count {
-                    let ok = glist_get_str(open_keys, k);
-                    if ok == key {
-                        let st = glist_get_int(open_starts, k) as i64;
-                        let interval = pragma_interval_new(st, cur + line_len, code_arg, is_all);
-                        let _ = glist_push(list, interval);
-                        let _ = glist_set_str(open_keys, k, "__CLOSED__");
+                    let o = opened[k];
+                    if !o.closed && o.key == key {
+                        list.push(PragmaInterval {
+                            start_offset: o.start,
+                            end_offset: cur + line_len,
+                            code: code_arg,
+                            is_all_warnings: is_all,
+                        });
+                        opened[k] = PragmaOpen { key: o.key, start: o.start, closed: true };
                         break;
                     }
                     k = k + 1;
@@ -174,40 +138,30 @@ pub fn pragma_solve_intervals(src: str) -> i64 {
     }
 
     // Flush unclosed intervals to EOF
-    let open_count = glist_len(open_keys);
-    var idx: i64 = 0;
-    while idx < open_count {
-        let k = glist_get_str(open_keys, idx);
-        if k != "__CLOSED__" {
-            let st = glist_get_int(open_starts, idx) as i64;
-            let is_all = (k == "__ALL__");
-            let c = if is_all { "" } else { k };
-            let interval = pragma_interval_new(st, sl, c, is_all);
-            let _ = glist_push(list, interval);
+    for o in opened {
+        if !o.closed {
+            let whole = o.key == "__ALL__";
+            list.push(PragmaInterval {
+                start_offset: o.start,
+                end_offset: sl,
+                code: if whole { "" } else { o.key },
+                is_all_warnings: whole,
+            });
         }
-        idx = idx + 1;
     }
 
     return list;
 }
 
-pub fn pragma_is_suppressed(intervals: i64, offset: i64, diag_code: str, is_error: bool) -> bool {
-    let count = glist_len(intervals);
-    var i: i64 = 0;
-    while i < count {
-        let item = glist_get(intervals, i);
-        let st = __engine("map_get", item, "start_offset") as i64;
-        let en = __engine("map_get", item, "end_offset") as i64;
-        let is_all = __engine("map_get", item, "is_all_warnings") as i64 == 1;
-        let c = __engine("map_get", item, "code");
-        if offset >= st && offset < en {
-            if is_all {
+pub fn pragma_is_suppressed(ref intervals: List<PragmaInterval>, offset: i64, diag_code: str, is_error: bool) -> bool {
+    for iv in intervals {
+        if offset >= iv.start_offset && offset < iv.end_offset {
+            if iv.is_all_warnings {
                 if !is_error { return true; }
-            } else if c == diag_code {
+            } else if iv.code == diag_code {
                 return true;
             }
         }
-        i = i + 1;
     }
     return false;
 }

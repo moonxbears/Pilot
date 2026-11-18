@@ -11,54 +11,6 @@ pub pkg selfhost.transpile;
 
 use std.text;
 
-[Layout(c_abi)]
-pub struct IngestedPilotModule : IValue {
-    pub source_lang: str;
-    pub pilot_code: str;
-    pub is_canonical: bool;
-}
-
-// Emits a canonical Pilot function declaration (`pub fn <name>(<params>) -> <ret> { return <body>; }`).
-pub pure fn emit_canonical_pilot_fn(
-    fn_name: str,
-    params_sig: str,
-    ret_ty: str,
-    body_expr: str
-) -> str {
-    return nameof(pub) + " " + nameof(fn) + " " + fn_name + "(" + params_sig + ") -> " + ret_ty + " {\n"
-        + "    " + nameof(return) + " " + body_expr + ";\n"
-        + "}\n";
-}
-
-// Emits a canonical Pilot struct declaration with `self(...)` constructor.
-pub pure fn emit_canonical_pilot_struct(
-    struct_name: str,
-    field_name: str,
-    field_ty: str
-) -> str {
-    return nameof(pub) + " " + nameof(struct) + " " + struct_name + " {\n"
-        + "    " + nameof(pub) + " " + field_name + ": " + field_ty + ";\n"
-        + "    " + nameof(pub) + " " + nameof(self) + "(" + field_name + ": " + field_ty + ") {\n"
-        + "        ." + field_name + " = " + field_name + ";\n"
-        + "    }\n"
-        + "}\n";
-}
-
-pub fn ingest_foreign_function(
-    source_lang: str,
-    fn_name: str,
-    params_sig: str,
-    ret_ty: str,
-    body_expr: str
-) -> IngestedPilotModule {
-    let code = emit_canonical_pilot_fn(fn_name, params_sig, ret_ty, body_expr);
-    return IngestedPilotModule {
-        source_lang: source_lang,
-        pilot_code: code,
-        is_canonical: true,
-    };
-}
-
 pub pure fn ing_is_ident_byte(b: i64) -> bool {
     return (b >= 97 && b <= 122) || (b >= 65 && b <= 90) || (b >= 48 && b <= 57) || b == 95;
 }
@@ -199,11 +151,10 @@ pub fn ing_strip_line_comment(line: str, c0: i64, c1: i64) -> str {
     return line;
 }
 
-// Splits `src_s` on `\n` into map `lm` (`cnt`, `line_0`, ...).
-pub fn ing_split_lines(src_s: str) -> i64 {
-    let lm = __engine("map_new");
+// Splits `src_s` on `\n` (dropping a `\r` before it) into its lines.
+pub fn ing_split_lines(src_s: str) -> List<str> {
+    var lines: List<str> = [];
     let n = src_s.len();
-    var cnt = 0;
     var l_start = 0;
     var i = 0;
     while i <= n {
@@ -214,14 +165,12 @@ pub fn ing_split_lines(src_s: str) -> i64 {
             if l_end > l_start && src_s.byte_at(l_end - 1) == 13 {
                 l_end = l_end - 1;
             }
-            __engine("map_set", lm, "line_" + cnt, src_s.slice(l_start, l_end));
-            cnt = cnt + 1;
+            lines.push(src_s.slice(l_start, l_end));
             l_start = i + 1;
         }
         i = i + 1;
     }
-    __engine("map_set", lm, "cnt", cnt);
-    return lm;
+    return lines;
 }
 
 pub pure fn ing_map_foreign_type(raw_ty: str) -> str {
@@ -304,7 +253,7 @@ pub fn ing_norm_py_expr(expr_s: str) -> str {
     return ing_trim(s);
 }
 
-pub fn ing_py_params_to_pilot(raw_params: str, seen_vars: i64) -> str {
+pub fn ing_py_params_to_pilot(raw_params: str, var ref seen_vars: Map<str, bool>) -> str {
     let t = ing_trim(raw_params);
     if t.len() == 0 { return ""; }
     let n = t.len();
@@ -324,7 +273,7 @@ pub fn ing_py_params_to_pilot(raw_params: str, seen_vars: i64) -> str {
                     let mapped = ing_map_foreign_type(ing_trim(seg.slice(colon_idx + 1, seg.len())));
                     if mapped.len() > 0 { pty = mapped; }
                 }
-                __engine("map_set", seen_vars, "v_" + pname, 1);
+                seen_vars.set(pname, true);
                 if out.len() > 0 { out = out + ", "; }
                 out = out + pname + ": " + pty;
             }
@@ -336,18 +285,18 @@ pub fn ing_py_params_to_pilot(raw_params: str, seen_vars: i64) -> str {
 }
 
 pub fn ing_ingest_python(foreign_src: str) -> str {
-    let lm = ing_split_lines(foreign_src);
-    let cnt = (__engine("map_get", lm, "cnt") ?? 0);
-    let st = __engine("map_new");
-    __engine("map_set", st, "ind_0", 0);
+    let lines = ing_split_lines(foreign_src);
+    let cnt = lines.len();
+    // Indentation of each open block; `top` is the innermost one's index.
+    var indents: List<i64> = [0];
     var top = 0;
     var expect_indent = 0;
-    var seen_vars = __engine("map_new");
+    var seen_vars = Map<str, bool>();
     var out: List<str> = [];
 
     var li = 0;
     while li < cnt {
-        let raw_line = "" + __engine("map_get", lm, "line_" + li);
+        let raw_line = lines[li];
         let uncommented = ing_strip_line_comment(raw_line, 35, 0);
         let tline = ing_trim(uncommented);
         if tline.len() > 0 {
@@ -360,16 +309,17 @@ pub fn ing_ingest_python(foreign_src: str) -> str {
                 }
             }
 
-            if expect_indent == 1 && cur_ind > ((__engine("map_get", st, "ind_" + top) ?? 0)) {
+            if expect_indent == 1 && cur_ind > indents[top] {
                 top = top + 1;
-                __engine("map_set", st, "ind_" + top, cur_ind);
+                indents.push(cur_ind);
                 expect_indent = 0;
             } else {
                 expect_indent = 0;
                 let is_else_hdr = tline == "else:" || ing_starts_with(tline, "elif ");
-                while top > 0 && cur_ind < ((__engine("map_get", st, "ind_" + top) ?? 0)) {
+                while top > 0 && cur_ind < indents[top] {
+                    let _ = indents.pop();
                     top = top - 1;
-                    let at_target = cur_ind == ((__engine("map_get", st, "ind_" + top) ?? 0));
+                    let at_target = cur_ind == indents[top];
                     if !(is_else_hdr && at_target) {
                         out.push(ing_indent(top) + "}\n");
                     }
@@ -380,7 +330,7 @@ pub fn ing_ingest_python(foreign_src: str) -> str {
             let fn_kw_def = "d" + "ef ";
             let elif_kw = "el" + "if ";
             if ing_starts_with(tline, fn_kw_def) && ing_ends_with(tline, ":") {
-                seen_vars = __engine("map_new");
+                seen_vars = Map<str, bool>();
                 let hdr = ing_trim(tline.slice(4, tline.len() - 1));
                 let lp = ing_find_byte(hdr, 40, 0);
                 let rp = ing_find_byte(hdr, 41, lp + 1);
@@ -434,8 +384,8 @@ pub fn ing_ingest_python(foreign_src: str) -> str {
                     let rhs_e = ing_norm_py_expr(tline.slice(eq_pos + 1, tline.len()));
                     let dot_p = ing_find_byte(vname, 46, 0);
                     let brk_p = ing_find_byte(vname, 91, 0);
-                    if dot_p < 0 && brk_p < 0 && ((__engine("map_get", seen_vars, "v_" + vname) ?? 0)) == 0 {
-                        __engine("map_set", seen_vars, "v_" + vname, 1);
+                    if dot_p < 0 && brk_p < 0 && !seen_vars.has(vname) {
+                        seen_vars.set(vname, true);
                         out.push(pad + nameof(var) + " " + vname + " = " + rhs_e + ";\n");
                     } else {
                         out.push(pad + vname + " = " + rhs_e + ";\n");
@@ -460,13 +410,13 @@ pub fn ing_ingest_python(foreign_src: str) -> str {
 // ============================================================================
 
 pub fn ing_ingest_rust(foreign_src: str) -> str {
-    let lm = ing_split_lines(foreign_src);
-    let cnt = (__engine("map_get", lm, "cnt") ?? 0);
+    let lines = ing_split_lines(foreign_src);
+    let cnt = lines.len();
     let rust_let_mut = "let " + "mut ";
     var out: List<str> = [];
     var li = 0;
     while li < cnt {
-        let raw_line = "" + __engine("map_get", lm, "line_" + li);
+        let raw_line = lines[li];
         let uncommented = ing_strip_line_comment(raw_line, 47, 47);
         let tline = ing_trim(uncommented);
         if tline.len() > 0 {
@@ -486,13 +436,13 @@ pub fn ing_ingest_rust(foreign_src: str) -> str {
 // ============================================================================
 
 pub fn ing_ingest_js(foreign_src: str) -> str {
-    let lm = ing_split_lines(foreign_src);
-    let cnt = (__engine("map_get", lm, "cnt") ?? 0);
+    let lines = ing_split_lines(foreign_src);
+    let cnt = lines.len();
     var depth = 0;
     var out: List<str> = [];
     var li = 0;
     while li < cnt {
-        let raw_line = "" + __engine("map_get", lm, "line_" + li);
+        let raw_line = lines[li];
         let uncommented = ing_strip_line_comment(raw_line, 47, 47);
         var tline = ing_trim(uncommented);
         if tline.len() > 0 {
@@ -587,26 +537,26 @@ pub fn ing_c_params_to_pilot(raw_params: str) -> str {
 }
 
 pub fn ing_ingest_c_family(foreign_src: str) -> str {
-    let lm = ing_split_lines(foreign_src);
-    let cnt = (__engine("map_get", lm, "cnt") ?? 0);
-    let st = __engine("map_new");
-    var wrap_cnt = 0;
+    let lines = ing_split_lines(foreign_src);
+    let cnt = lines.len();
+    // Brace depth at each open `class`/`namespace` wrapper, which emits no braces.
+    var wraps: List<i64> = [];
     var brace_depth = 0;
     var out: List<str> = [];
 
     var li = 0;
     while li < cnt {
-        let raw_line = "" + __engine("map_get", lm, "line_" + li);
+        let raw_line = lines[li];
         let uncommented = ing_strip_line_comment(raw_line, 47, 47);
         let tline = ing_trim(uncommented);
         if tline.len() > 0 && !ing_starts_with(tline, "#") && !(ing_starts_with(tline, "using ") && ing_ends_with(tline, ";")) {
-            let eff_indent = if brace_depth > wrap_cnt { brace_depth - wrap_cnt } else { 0 };
+            let eff_indent = if brace_depth > wraps.len() { brace_depth - wraps.len() } else { 0 };
             if tline == "}" || tline == "};" {
                 if brace_depth > 0 { brace_depth = brace_depth - 1; }
-                if wrap_cnt > 0 && ((__engine("map_get", st, "wrap_" + (wrap_cnt - 1)) ?? 0)) == brace_depth {
-                    wrap_cnt = wrap_cnt - 1;
+                if wraps.len() > 0 && wraps[wraps.len() - 1] == brace_depth {
+                    let _ = wraps.pop();
                 } else {
-                    let close_ind = if brace_depth > wrap_cnt { brace_depth - wrap_cnt } else { 0 };
+                    let close_ind = if brace_depth > wraps.len() { brace_depth - wraps.len() } else { 0 };
                     out.push(ing_indent(close_ind) + "}\n");
                 }
             } else if ing_starts_with(tline, "} else") {
@@ -616,8 +566,7 @@ pub fn ing_ingest_c_family(foreign_src: str) -> str {
                 let clean = ing_strip_c_modifiers(tline);
                 let class_kw = "cl" + "ass ";
                 if (ing_starts_with(clean, class_kw) || ing_starts_with(clean, "namespace ")) && ing_ends_with(clean, "{") {
-                    __engine("map_set", st, "wrap_" + wrap_cnt, brace_depth);
-                    wrap_cnt = wrap_cnt + 1;
+                    wraps.push(brace_depth);
                     brace_depth = brace_depth + 1;
                 } else if (ing_starts_with(clean, "while ") || ing_starts_with(clean, "while(") || ing_starts_with(clean, "if ") || ing_starts_with(clean, "if(") || ing_starts_with(clean, "else")) && ing_ends_with(clean, "{") {
                     out.push(ing_indent(eff_indent) + clean + "\n");
@@ -675,8 +624,8 @@ pub fn ing_norm_lua_expr(expr_s: str) -> str {
 }
 
 pub fn ing_ingest_lua(foreign_src: str) -> str {
-    let lm = ing_split_lines(foreign_src);
-    let cnt = (__engine("map_get", lm, "cnt") ?? 0);
+    let lines = ing_split_lines(foreign_src);
+    let cnt = lines.len();
     var depth = 0;
     var out: List<str> = [];
     let lua_local_fn = "local " + "function ";
@@ -686,7 +635,7 @@ pub fn ing_ingest_lua(foreign_src: str) -> str {
 
     var li = 0;
     while li < cnt {
-        let raw_line = "" + __engine("map_get", lm, "line_" + li);
+        let raw_line = lines[li];
         let uncommented = ing_strip_line_comment(raw_line, 45, 45);
         var tline = ing_trim(uncommented);
         if tline.len() > 0 {

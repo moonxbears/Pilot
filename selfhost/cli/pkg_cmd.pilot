@@ -112,17 +112,17 @@ fn remove_dep_from_manifest_json(json_src: str, pkg_name: str) -> str {
         s_pos = s_pos - 1;
     }
 
-    var res = json_src.slice(0, s_pos) + json_src.slice(e_pos, json_src.len());
+    var out = json_src.slice(0, s_pos) + json_src.slice(e_pos, json_src.len());
     // Clean up trailing comma if any
-    let trailing_comma = p_find(res, ",\n  }", 0);
+    let trailing_comma = p_find(out, ",\n  }", 0);
     if trailing_comma >= 0 {
-        res = res.slice(0, trailing_comma) + "\n  }" + res.slice(trailing_comma + 5, res.len());
+        out = out.slice(0, trailing_comma) + "\n  }" + out.slice(trailing_comma + 5, out.len());
     }
-    let tc2 = p_find(res, ",\n\n  }", 0);
+    let tc2 = p_find(out, ",\n\n  }", 0);
     if tc2 >= 0 {
-        res = res.slice(0, tc2) + "\n  }" + res.slice(tc2 + 6, res.len());
+        out = out.slice(0, tc2) + "\n  }" + out.slice(tc2 + 6, out.len());
     }
-    return res;
+    return out;
 }
 
 pub fn handle_pkg_cmd(subcmd: str, args_str: str, manifest_json: str, lock_json: str) -> str {
@@ -193,9 +193,9 @@ pub fn handle_pkg_cmd(subcmd: str, args_str: str, manifest_json: str, lock_json:
         let name = manifest_get_name(mf);
         let ver = manifest_get_version(mf);
 
-        let res = resolve_package_dependencies(manifest_json, "");
-        let summary = format_resolution_summary(res);
-        let new_lock = generate_resolved_lockfile_json(name, ver, res);
+        let resolution = resolve_package_dependencies(manifest_json);
+        let summary = format_resolution_summary(resolution);
+        let new_lock = generate_resolved_lockfile_json(name, ver, resolution);
         let _ = File.write_text("pilot.lock", new_lock);
 
         return "Resolving dependencies for " + name + " (v" + ver + "):\n\n" +
@@ -212,9 +212,9 @@ pub fn handle_pkg_cmd(subcmd: str, args_str: str, manifest_json: str, lock_json:
         let name = manifest_get_name(mf);
         let ver = manifest_get_version(mf);
 
-        let res = resolve_package_dependencies(manifest_json, "");
-        let summary = format_resolution_summary(res);
-        let new_lock = generate_resolved_lockfile_json(name, ver, res);
+        let resolution = resolve_package_dependencies(manifest_json);
+        let summary = format_resolution_summary(resolution);
+        let new_lock = generate_resolved_lockfile_json(name, ver, resolution);
         let _ = File.write_text("pilot.lock", new_lock);
 
         return "Updating package dependencies to latest SemVer constraints:\n\n" +
@@ -263,8 +263,8 @@ pub fn handle_pkg_cmd(subcmd: str, args_str: str, manifest_json: str, lock_json:
         let mf = parse_manifest_json(updated_json);
         let root_name = manifest_get_name(mf);
         let root_ver = manifest_get_version(mf);
-        let res = resolve_package_dependencies(updated_json, "");
-        let new_lock = generate_resolved_lockfile_json(root_name, root_ver, res);
+        let resolution = resolve_package_dependencies(updated_json);
+        let new_lock = generate_resolved_lockfile_json(root_name, root_ver, resolution);
         let _ = File.write_text("pilot.json", updated_json);
         let _ = File.write_text("pilot.lock", new_lock);
 
@@ -286,8 +286,8 @@ pub fn handle_pkg_cmd(subcmd: str, args_str: str, manifest_json: str, lock_json:
         let mf = parse_manifest_json(updated_json);
         let root_name = manifest_get_name(mf);
         let root_ver = manifest_get_version(mf);
-        let res = resolve_package_dependencies(updated_json, "");
-        let new_lock = generate_resolved_lockfile_json(root_name, root_ver, res);
+        let resolution = resolve_package_dependencies(updated_json);
+        let new_lock = generate_resolved_lockfile_json(root_name, root_ver, resolution);
         let _ = File.write_text("pilot.json", updated_json);
         let _ = File.write_text("pilot.lock", new_lock);
 
@@ -305,9 +305,8 @@ pub fn handle_pkg_cmd(subcmd: str, args_str: str, manifest_json: str, lock_json:
         }
         let target_pkg = p_trim(args);
         let mf = parse_manifest_json(manifest_json);
-        let root_name = manifest_get_name(mf);
-        let res = resolve_package_dependencies(manifest_json, "");
-        return explain_package_resolution(res, target_pkg, root_name);
+        let resolution = resolve_package_dependencies(manifest_json);
+        return explain_package_resolution(resolution, target_pkg, mf);
     }
 
     // 9. AUDIT
