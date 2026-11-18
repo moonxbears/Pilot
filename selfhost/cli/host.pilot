@@ -48,9 +48,6 @@ fn host_diags(ref raw: List<HostDiagRow>) -> List<HostDiag> {
 /// Links, parses and compiles `path` without running it.
 pub fn host_check(path: str) -> List<HostDiag> => host_diags(__engine("cli_check", path, cli_checker_files(), cli_checker_decls()));
 
-/// The self-hosted analyzer's diagnostics for the file `path`.
-pub fn host_analyze(path: str) -> List<HostDiag> => host_diags(__engine("cli_analyze", path));
-
 /// What a step of a function's chain does (`StepAction` in
 /// selfhost/cli/comptime_tool.pilot, which runs in the type checker's VM and
 /// is not linked here): the same variants in the same order, so the codes
@@ -100,17 +97,14 @@ pub fn host_program_tool(path: str, ref files: List<str>, ref decls: List<str>, 
 
 /// `host_program_tool` for a tool that checks the program itself
 /// (`checked_program` in selfhost/check/main.pilot): the host reports the
-/// analyzer's and the checker's diagnostics through `report_pending_diags`
+/// checker's diagnostics through `report_pending_diags`
 /// before the tool goes on.
 pub fn host_checked_tool(path: str, ref files: List<str>, ref decls: List<str>, entry: str) -> i64 =>
     __engine("cli_checked_tool", path, files, decls, entry);
 
-/// The diagnostics a checking tool is waiting on (`host_checked_tool`): the
-/// analyzer's, then the checker's.
-pub fn host_pending_diags() -> List<List<HostDiag>> {
-    let raw: (List<HostDiagRow>, List<HostDiagRow>) = __engine("cli_pending_diags");
-    return [host_diags(raw.0), host_diags(raw.1)];
-}
+/// The type checker's diagnostics a checking tool is waiting on
+/// (`host_checked_tool`).
+pub fn host_pending_diags() -> List<HostDiag> => host_diags(__engine("cli_pending_diags"));
 
 /// Runs the tool made of `files`, calling `entry`, over the program at
 /// `path` linked with `decls`, as `host_program_tool` does; gives the value
