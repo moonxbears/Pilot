@@ -1,7 +1,8 @@
 // ==============================================================================
 // FILE: selfhost/adapter/rules.pilot
-// Milestone 11.1: First-Class `adapter` Blueprint Engine & Transformation Rules
-// Open table-driven AdapterRuleRegistry and IAdapterTransform protocol
+// `adapter` blueprint rules: AdapterRuleRegistry and IAdapterTransform (used by
+// compiler.pilot).
+// Reached only by the milestone11 Rust test; no `pilot` command runs it.
 // ==============================================================================
 pub lvl(0) pkg selfhost.adapter;
 

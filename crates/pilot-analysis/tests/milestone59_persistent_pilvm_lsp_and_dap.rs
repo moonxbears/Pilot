@@ -1,6 +1,7 @@
 //! Milestone 59 Rigorous Uncheatable Verification Suite:
-//! Persistent `PilVM` LSP & `VmHook`-Stepped DAP — Retire `pilot-dap`,
-//! `pilot-lsp`, `pilot-lsp-macros`, `pilot-db` & `pilot-incremental`.
+//! Persistent `PilVM` LSP & `VmHook`-Stepped DAP.
+//! What runs: `test_59_2` runs contracts 3 and 4 below. Contracts 1, 2 and 5
+//! are checked only by the file audit (`ANTICHEAT_SPEC`), not run by any test.
 //!
 //! ============================================================================
 //! FROZEN-RUST RUNNER CONTRACT (DO NOT MODIFY THIS TEST FILE OR RUST CRATES)
@@ -21,7 +22,7 @@
 //!    All 4 outputs MUST parse strictly via `python3 json.loads`.
 //!
 //! 2. `selfhost/lsp/handlers.pilot` (`<= 1,000` LOC):
-//!    - Uses `nameof(...)` for all seed keyword comparisons and passes `scripts/gate3_check.py`.
+//!    - Uses `nameof(...)` for all seed keyword comparisons.
 //!    - Responds via `__engine("lsp_query_method")`, `__engine("lsp_query_offset")`,
 //!      and `__engine("lsp_set_result", payload)` for:
 //!      - `"textDocument/hover"`: includes doc comments and declaration signature.

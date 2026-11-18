@@ -180,7 +180,8 @@ pub fn lower_dto_projection(
 /// Emits a cascade lowering into the current PilIR function: the receiver is
 /// evaluated once into a block parameter, a `none` test branches past the
 /// actions when `guards_receiver` is set, and each action is a call on that
-/// parameter. The typed SSA function builder does not exist yet.
+/// parameter. Typed PilIR exists (selfhost/ir/model.pilot, `IrFunction`,
+/// `ir_add_block`), but this lowering is not connected to it.
 pub fn emit_cascade_ir(lowering: CascadeLowering) -> i64 {
-    return seam("each_cascade.emit_ir", "typed PilIR function builder arrives in F5");
+    return seam("each_cascade.emit_ir", "cascade lowering is not connected to typed PilIR (selfhost/ir/model.pilot); nothing emits the cascade blocks");
 }

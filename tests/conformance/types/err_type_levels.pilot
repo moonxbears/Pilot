@@ -1,0 +1,28 @@
+// PROP-019: the type-position operators group by the levels declared in
+// stdlib/core/operators/levels.pilot (`TypeLevel`, loosest first:
+// Fallible `!`, Arrow `->` `=>`, Union `|`, Intersect `&`, Postfix `?` `[]`
+// and prefix `*`). Each binding below gives an `i64` where a pointer type is
+// expected, so TYPE001 prints the grouped type.
+//
+// Expected, worked by hand from that order:
+//   i64 -> bool -> str   `->` is right-associative: fn<i64, fn<bool, str>>
+//   i64 ! str | bool     `|` binds tighter than `!`: result<i64, str | bool>
+//                        (a union prints its members sorted: `bool | str`)
+//   i64? | str           postfix binds tighter than `|`: option<i64> | str,
+//                        printed sorted as `str | option<i64>`
+//   (i64) => bool | str  `|` binds tighter than `=>`: fn<i64, bool | str>
+//   i64 -> bool ! str    `!` is looser than `->`: result<fn<i64, bool>, str>
+//   i64[]?               postfix forms apply left to right: option<slice<i64>>
+//   i64 | str -> bool    `|` binds tighter than `->`: fn<i64 | str, bool>
+//   *i64?                prefix `*` takes its operand at the postfix level:
+//                        ptr<option<i64>>
+fn main() {
+    let b: *(i64 -> bool -> str) = 1;
+    let c: *(i64 ! str | bool) = 1;
+    let d: *(i64? | str) = 1;
+    let f: *((i64) => bool | str) = 1;
+    let g: *(i64 -> bool ! str) = 1;
+    let h: *(i64[]?) = 1;
+    let i: *(i64 | str -> bool) = 1;
+    let j: *i64? = 1;
+}

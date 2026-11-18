@@ -1,8 +1,9 @@
 // ==============================================================================
 // FILE: selfhost/adapter/compiler.pilot
-// Milestone 11.2: Adapter Declaration Compiler & Zero-Cost PilIR Idiom Lifter
+// Adapter declaration compiler.
 // Applies an `AdapterBlueprint` to real foreign signatures and plans the
 // 0-allocation thunk of every adapted method as a sequence of PilIR opcodes.
+// Reached only by the milestone11 Rust test; no `pilot` command runs it.
 // ==============================================================================
 pub lvl(0) pkg selfhost.adapter;
 
@@ -357,9 +358,10 @@ pub fn verify_and_compile_blueprint(
 }
 
 /// Hands the planned thunks to the PilIR module and the target type's
-/// `MethodTable`. Neither an `IrFunction` model nor a `MethodTable` install
-/// point exists yet, so the adapted methods cannot be called.
+/// `MethodTable`. `IrFunction` (selfhost/ir/model.pilot) and `MethodTable`
+/// (selfhost/types/method_table.pilot) exist, but nothing connects the planned
+/// thunks to them, so the adapted methods cannot be called.
 pub fn install_adapter_thunks(ref report: AdapterCompilationReport) -> usize {
     return seam("adapter.install_thunks",
-        "PilIR IrFunction emission and MethodTable install arrive in F5");
+        "planned adapter thunks are not emitted as IrFunctions nor installed in the target MethodTable");
 }

@@ -1,7 +1,11 @@
 // ==============================================================================
 // FILE: stdlib/std/polyglot/rust.pilot
-// Milestone 16.3: Native Rust Crate Adapter - Zero-Copy Runtime & Cross-Allocator RAII
+// Milestone 16.3: Rust crate adapter types
 // RustPanicErr, DynTraitFatPtr, RustVec<T> (0b10), RustString (0b10), RST001
+// Records only; addresses are plain i64 (stand-in `ffi.int_address`). The
+// 4 runtime steps are seams: rust.vec_view, rust.string_view (borrowing
+// the foreign buffer), rust.call_dealloc (the destructor) and
+// rust.call_bridge (calling a Rust function and catching its panic).
 // ==============================================================================
 pub lvl(0) pkg std.polyglot.rust;
 

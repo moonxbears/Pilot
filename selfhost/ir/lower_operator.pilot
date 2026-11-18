@@ -1,0 +1,137 @@
+// ==============================================================================
+// FILE: selfhost/ir/lower_operator.pilot
+// An operator on a register value lowered through its declaration
+// (PROP-022 slice 22B).
+// ==============================================================================
+// `a + b` on an `i64` means the `op +` the type declares
+// (stdlib/core/builtins/builtins.pilot: `op + (rhs: TSelf) -> TSelf =>
+// __ssa(MachineOp::Add, self, rhs)`), not a fixed operator code. When the
+// declaration's body is a machine-operation template over `self` and its
+// parameter, PilIR emits that template in place, with `self` as `a` and the
+// parameter as `b`. So the instruction, its signedness (`SLt` or `ULt`) and the
+// operand order come from the Pilot declaration, at no run-time cost.
+//
+// A template is, recursively:
+//   - `asm(MachineOp::X, operands..)` (written `__ssa(..)` in the source),
+//     where PilIR has an instruction for `X` on the operands' register class
+//     (selfhost/ir/lower_asm.pilot `machine_op_lowers`);
+//   - `!t` over a template;
+//   - a block holding one expression statement that is a template;
+//   - `self`, or the operator's one parameter.
+// Anything else (a call, a struct literal, a literal) is not a template, and
+// the operator keeps the lowering `lower_binary` gave it before; nothing is
+// emitted until the whole template has been checked, so each operand is
+// lowered exactly once.
+pub lvl(0) pkg selfhost.ir;
+
+use selfhost.check.*;
+
+/// The operator declaration `name` of type `t` taking `arity` parameters, or
+/// -1. A type may declare a binary and a prefix operator under one name
+/// (`op - (rhs)` and `op - ()`); the method table keeps one member per name,
+/// so the declaration with the right arity is looked for beside it.
+fn operator_decl(ref lw: Lowerer, t: i64, name: str, arity: i64) -> i64 {
+    let p = lw.inf.p;
+    let s = p.s;
+    guard some m = prog_member(p, t, name) else { return -1; };
+    if kind(s, m.decl) != nk_operator() { return -1; }
+    if method_params(s, m.decl).len() == arity { return m.decl; }
+    let owner = p.parents[m.decl];
+    if owner < 0 { return -1; }
+    for c in children(s, owner) {
+        if c >= 0 && kind(s, c) == nk_operator() && node_name(s, c) == name && method_params(s, c).len() == arity {
+            return c;
+        }
+    }
+    return -1;
+}
+
+/// The expression a template node `e` stands for once blocks and expression
+/// statements holding one expression are looked through.
+fn template_core(ref s: Snap, e: i64) -> i64 {
+    var at = e;
+    loop {
+        let k = kind(s, at);
+        if k != nk_block() && k != nk_expr_stmt() { return at; }
+        var inner = -1;
+        var count = 0;
+        for c in children(s, at) {
+            if c >= 0 {
+                inner = c;
+                count = count + 1;
+            }
+        }
+        if count != 1 { return -1; }
+        at = inner;
+    }
+    return -1;
+}
+
+/// Whether `e` is a template over `self` and `param` whose machine
+/// operations PilIR lowers on operands of register class `rc`.
+fn is_template(ref s: Snap, e: i64, param: str, rc: u8) -> bool {
+    let at = template_core(s, e);
+    if at < 0 { return false; }
+    let k = kind(s, at);
+    if k == nk_ident() {
+        let word = node_text(s, at);
+        return word == nameof(self) || word == param;
+    }
+    if k == nk_unary() { return flags(s, at) == unary_not() && is_template(s, lhs(s, at), param, rc); }
+    if k != nk_call() || !is_asm_call(s, at) { return false; }
+    guard some o = asm_op_of(s, at) else { return false; };
+    if !machine_op_lowers(o.name, rc) { return false; }
+    let ch = children(s, at);
+    if ch.len() < 3 { return false; }
+    var i = 2;
+    while i < ch.len() {
+        if !is_template(s, ch[i], param, rc) { return false; }
+        i = i + 1;
+    }
+    return true;
+}
+
+/// Emits template `e` (checked by `is_template`) with `self` as `a` and
+/// `param` as `b`; `phy` is the physics of the operator's result.
+fn emit_template(var ref lw: Lowerer, e: i64, param: str, a: u32, b: u32, phy: IrTypePhysics, n: i64) -> u32 {
+    let s = lw.inf.p.s;
+    let at = template_core(s, e);
+    let k = kind(s, at);
+    if k == nk_ident() { return if node_text(s, at) == nameof(self) { a } else { b }; }
+    if k == nk_unary() {
+        let x = emit_template(lw, lhs(s, at), param, a, b, phy, n);
+        return emit_machine_op(lw, "Not", [x], phy, n);
+    }
+    guard some o = asm_op_of(s, at) else { return unsupported(lw, n); };
+    let ch = children(s, at);
+    var vals: List<u32> = [];
+    var i = 2;
+    while i < ch.len() {
+        vals.push(emit_template(lw, ch[i], param, a, b, phy, n));
+        i = i + 1;
+    }
+    return emit_machine_op(lw, o.name, vals, phy, n);
+}
+
+/// `a <name> b` (binary node `n`) where `a` is a register value whose type
+/// declares `op <name>` with a template body: that template, emitted here;
+/// none when the operator is not one, so the caller lowers it as before.
+pub fn lower_declared_operator(var ref lw: Lowerer, n: i64, name: str) -> u32? {
+    let s = lw.inf.p.s;
+    let lt = value_type(lw, lhs(s, n));
+    let rt = value_type(lw, rhs(s, n));
+    let lp = layout_of(lw.ls, lt);
+    let rp = layout_of(lw.ls, rt);
+    if !in_register(lp) || !in_register(rp) { return none; }
+    let decl = operator_decl(lw, lt, name, 1);
+    if decl < 0 { return none; }
+    let body = fn_body(s, decl);
+    if body < 0 { return none; }
+    let param = node_name(s, method_params(s, decl)[0]);
+    if !is_template(s, body, param, lp.reg_class) { return none; }
+    // Each side is lowered against the other's type, so a literal takes the
+    // other operand's width (`b < 4` with `b: u8`).
+    let a = lower_hinted(lw, lhs(s, n), rt);
+    let b = lower_hinted(lw, rhs(s, n), lt);
+    return emit_template(lw, body, param, a, b, physics_of(lw, n), n);
+}

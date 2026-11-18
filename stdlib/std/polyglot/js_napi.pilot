@@ -1,6 +1,9 @@
 // ==============================================================================
 // stdlib/std/polyglot/js_napi.pilot
-// Milestone 18: In-Process Node-API v9 (napi_*) Host & Addon Adapter
+// Milestone 18: Node-API v9 (napi_*) adapter types (planned in-process,
+// not built). Every call into a JS runtime is a seam: 14 seams `js.*`
+// (js.call_function, js.open_handle_scope, js.promise_new, ...), since no
+// JS runtime is loaded yet.
 // Package: std.polyglot.js (Ring 2 Standard Library)
 // ==============================================================================
 

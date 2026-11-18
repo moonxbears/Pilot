@@ -1,7 +1,8 @@
 // =========================================================================
 // FILE: selfhost/cli/test_runner.pilot
-// Milestone 60.3: Self-Hosted Test Runner & JSON Telemetry Emitter
-// Replaces cmd_test in crates/pilot-cli/src/commands.rs.
+// Test outcome parsing, test discovery and JSON event/summary text. The live
+// `pilot test` is selfhost/cli/test_cmd.pilot, not this file.
+// Reached only by the milestone60 Rust test; no `pilot` command runs it.
 // =========================================================================
 pub pkg selfhost.cli;
 

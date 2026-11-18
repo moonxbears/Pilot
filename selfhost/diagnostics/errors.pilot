@@ -889,6 +889,13 @@ pub let ERRORS = [
         reference: "proposals.md PROP-018 §2",
     },
     ErrorDef {
+        code: "GRAM012",
+        title: "Type Rule Without a Level",
+        description: "A `syntax type_construct` rule's operator symbol has no type level (`TypeInfix`, `TypePrefix`, `TypePostfix`), so the rule would never apply",
+        category: "Grammar",
+        reference: "proposals.md PROP-019",
+    },
+    ErrorDef {
         code: "LIT001",
         title: "Not a Number",
         description: "A number literal's text is not one number as the number patterns declare it (stdlib/core/lex/numbers.pilot), plus at most a type suffix: a digit separator that does not stand between two digits (`1__000`, `1000_`, `0x_FF`, `1_.5`, `100_u8`)",

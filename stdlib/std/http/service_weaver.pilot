@@ -1,11 +1,20 @@
 // ==============================================================================
 // FILE: stdlib/std/http/service_weaver.pilot
 // Milestone 30: Self-Generating HTTP/RPC Service & OpenAPI 3.1 ([Service])
-// Generates static radix routers, typed client SDKs, RFC 9457 Problem JSON,
-// and live bidirectional OpenAPI 3.1 JSON specs.
-// Enforces:
+// What exists: a hand-built `HttpServiceDef` with route checks, route
+// matching by a linear scan of the routes (http_service_match_route),
+// RFC 9457 problem responses for 404/405, and one-way OpenAPI 3.1 JSON
+// output (http_service_generate_openapi). No radix router, no client SDK,
+// no OpenAPI import. Calling a matched route's handler is seam
+// `http.invoke_handler`; building a service from a `[Service]` struct
+// (service_weave_struct) is seam `http.weave_service`.
+// Codes used:
 //   GEN001: Invalid [Route] Path Parameter Syntax or Unmatched Method Arg
 //   GEN002: [Service] Payload Type Missing [Json] Serialization Contract
+// Code clash: GEN001-GEN003 are registered in selfhost/diagnostics/errors.pilot
+// as generator errors, and GEN004-GEN006 are not registered. The checker
+// emits none of the codes below; they appear only in the strings the
+// format_genNNN helpers here return.
 // ==============================================================================
 
 pub pkg std.http.service;

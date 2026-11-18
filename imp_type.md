@@ -311,9 +311,9 @@ let bad_val = __engine("map_get", bad_map, "count"); // ANTI-PATTERN
 If a value is known before the program runs, declare it as data. The compiler can then fold it, check it and show it in `pilot inspect`, and the running program never recomputes it.
 - **One known value:** `const NAME: T = value;`. When it takes computing, `const NAME = comptime f(args);` runs `f` once while compiling.
 - **A known, closed set of named values:** an `enum` (Rule 1), never a family of `fn x_kind() -> i64 => 3;` functions or `0`/`1`/`2` integers.
-- **Preset data** (keyword lists, token tables, catalogs, lookup maps): a `const` list, map or `array<T, N>` of records (Rule 2), built once. Read it by index or pass it as `ref`. Using a constant list or map *by value* (binding it, passing it to a plain parameter, returning it) gives a copy (`tests/conformance/runtime/const_values`), so do not move it around by value in hot code.
+- **Preset data** (keyword lists, token tables, catalogs, lookup maps): a `const` list, map or `array<T, N>` of records (Rule 2), built once. Read it by index or pass it as `ref`. Using a constant list or map *by value* (binding it, passing it to a plain parameter, returning it) gives a copy (`tests/conformance/runtime/const_values.pilot`), so do not move it around by value in hot code.
 - **Do not** write a function whose body is a literal (`pub pure fn newline_byte() -> i64 => 10;`). It hides data behind a call: a reader cannot see it is constant, and an engine that does not inline it pays for a call on every use.
-- **Exception:** a file that must be readable by the 14 seed words alone (`stdlib/core/genesis.pilot`, `PROP-021` §2.6) cannot use `const`, because `const` is not a seed word. Such a file says so in its header. Every other file uses `const`.
+- **Exception:** a file that must be readable by the 14 seed words alone (the planned `stdlib/core/genesis.pilot`, `PROP-021` §2.6; not written yet) cannot use `const`, because `const` is not a seed word. Such a file says so in its header. Every other file uses `const`.
 
 ```pilot
 // GOOD: data the compiler sees

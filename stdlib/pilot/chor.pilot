@@ -1,7 +1,8 @@
 // ==============================================================================
 // FILE: stdlib/pilot/chor.pilot
 // Milestone 24: Ring-3 .pchor Introspection & Architecture Visualizer
-// Provides public query API and Mermaid flowchart export for .pchor blueprints.
+// One function: export_mermaid_diagram turns a parsed .pchor `BlueprintDef`
+// (selfhost/chor) into Mermaid flowchart text. No query API yet.
 // ==============================================================================
 
 pub pkg pilot.chor;

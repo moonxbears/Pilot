@@ -1,7 +1,7 @@
 // ==============================================================================
 // selfhost/adapter/wit_abi.pilot
-// Ring 3 / Self-Host Compiler: WebAssembly Canonical ABI & Resource Lifter/Lowerer
-// Package: selfhost.adapter (Milestone 19)
+// WebAssembly Canonical ABI lifting and lowering, resource tables.
+// Reached only by the milestone19 Rust test; no `pilot` command runs it.
 // ==============================================================================
 
 pub lvl(0) pkg selfhost.adapter;

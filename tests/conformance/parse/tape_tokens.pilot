@@ -1,0 +1,29 @@
+// PROP-025 building block 1: the token tape (stdlib/pilot/parse/tape.pilot),
+// lexed by the table the seed runs. Spaces and comments are left out, a
+// newline is a flag on the token after it, and an f-string with its holes
+// is one token, as the seed reads it.
+//
+// The source below, worked by hand:
+//   line 1: `a` `=` `f"x{b + 1}y"` `;`     then a comment
+//   line 2: `c` `(` `2` `)` `;`             `/* .. */` is left out
+// so 9 tokens; only `c` (index 4) has a newline before it; token 2 is the
+// whole f-string; token 6 is `2` and token 7 is `)`.
+use pilot.parse.tape;
+
+fn main() {
+    let src = "a = f\"x{b + 1}y\"; // note\nc( /* gap */ 2);";
+    guard some t = seed_tape(src) else {
+        print("no table");
+        return;
+    };
+    print(t.len());
+    var i = 0;
+    while i < t.len() {
+        if t.nl_before[i] { print(i); }
+        i = i + 1;
+    }
+    print(t.text_of(2) == "f\"x{b + 1}y\"");
+    print(t.text_of(6) == "2");
+    print(t.text_of(7) == ")");
+    print(t.text_of(9) == "");
+}

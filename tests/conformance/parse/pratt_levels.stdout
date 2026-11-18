@@ -1,0 +1,6 @@
+(- (+ a (* b c)) d)
+(* (^ x (^ y z)) 2)
+(- (^ p q))
+([] (?. (call f 1 (k: (? g))) h) 0)
+(tuple (?? u (?? v w)) (list 1 16))
+not built: generic arguments after a name

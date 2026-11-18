@@ -23,6 +23,6 @@ pub partial struct f128 : INumber<f128>, INegOperator<f128> {
         op != (rhs: f128) -> bool => !(__ssa(MachineOp::FEq, self, rhs));
         op <  (rhs: f128) -> bool => __ssa(MachineOp::FLt,  self, rhs);
         op <= (rhs: f128) -> bool => __ssa(MachineOp::FLe,  self, rhs);
-        op >  (rhs: f128) -> bool => !(__ssa(MachineOp::FLe, self, rhs));
-        op >= (rhs: f128) -> bool => !(__ssa(MachineOp::FLt, self, rhs));
+        op >  (rhs: f128) -> bool => __ssa(MachineOp::FLt, rhs, self);
+        op >= (rhs: f128) -> bool => __ssa(MachineOp::FLe, rhs, self);
 }

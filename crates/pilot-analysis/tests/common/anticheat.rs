@@ -2,11 +2,10 @@
 //! crates/pilot-analysis/tests/common/anticheat.rs
 //! Universal 10-Pass Anti-Cheat, Tamper-Seal & Architectural Integrity Engine
 //!
-//! Shared across `pilot-analysis`, `pilot-parser`, and `pilot-lexer` integration
-//! suites via `#[path = ...]` with zero external crate dependencies (`std` only).
-//! Every `#[test]` across all 13 milestone suites arms an `AntiCheatGuard` on
-//! entry and must complete `guard.finish()` on exit (enforced both by RAII `Drop`
-//! and by static self-inspection of all 13 test files).
+//! Shared by the `pilot-analysis` and `pilot-parser` milestone suites via
+//! `#[path = ...]` (`std` only). Every test in `MILESTONE_TEST_MANIFEST` arms an
+//! `AntiCheatGuard` on entry and must complete `guard.finish()` on exit
+//! (enforced by RAII `Drop` and by static inspection of the listed test files).
 //! ==============================================================================
 
 use std::collections::{HashMap, HashSet};
@@ -254,7 +253,7 @@ const MILESTONE_TEST_MANIFEST: &[(&str, usize)] = &[
     ("crates/pilot-analysis/tests/milestone58_runtime_crypto_wire_db_and_polyglot.rs", 6),
     ("crates/pilot-analysis/tests/milestone59_persistent_pilvm_lsp_and_dap.rs", 1),
     ("crates/pilot-analysis/tests/milestone60_selfhost_cli_pkg_perf_and_bench.rs", 1),
-    ("crates/pilot-analysis/tests/milestone61_stage3_fixed_point_and_universal_rename_gate.rs", 2),
+    ("crates/pilot-analysis/tests/milestone61_stage3_fixed_point_and_universal_rename_gate.rs", 1),
 ];
 
 const GLOBAL_BANNED_LEAK_SUBSTRINGS: &[&str] = &[

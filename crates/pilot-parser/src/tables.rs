@@ -8,7 +8,7 @@ pub enum TypePostfixKind {
     BracketDotDot,
     BracketColon,
     BracketArgs(usize),
-    Sym(String, bool),
+    Sym(String),
 }
 #[derive(Clone, Debug)]
 pub enum TypeConstructRule {
@@ -22,10 +22,9 @@ pub enum TypeConstructRule {
         params: Vec<String>,
         template: TemplateNode,
     },
+    /// `T1 | T2`; also `T @ N`, a declared postfix symbol with an argument.
     Infix {
         op: String,
-        bp: u8,
-        right_assoc: bool,
         lhs_param: String,
         rhs_param: String,
         template: TemplateNode,
@@ -51,7 +50,7 @@ pub(crate) enum ModAct {
     Unbuilt,
 }
 /// An infix operator: its binding power, associativity, native `BinaryOp`
-/// code (until PROP-008 step 3 lowers operators to their owners) and parse
+/// code (until `PROP-022` §3 lowers operators to their owners) and parse
 /// shape (an ordinal of the shape enum, `SHAPE_*`).
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct PrattEntry {
@@ -71,6 +70,8 @@ pub(crate) struct GrammarEntry {
     pub(crate) level: String,
     pub(crate) assoc: String,
     pub(crate) word: String,
+    /// Declared for a type-position rule: its level is a type level (PROP-019).
+    pub(crate) for_type: bool,
 }
 
 /// The variant names, in declaration order, of the three enums named by
@@ -81,6 +82,8 @@ pub(crate) struct GrammarEnums {
     pub(crate) levels: Vec<String>,
     pub(crate) assocs: Vec<String>,
     pub(crate) shapes: Vec<String>,
+    /// The type-position levels, loosest first (PROP-019).
+    pub(crate) type_levels: Vec<String>,
 }
 
 pub(crate) const HOOK_GRAMMAR_ENTRY: &str = "grammar_entry";
@@ -88,6 +91,8 @@ pub(crate) const HOOK_REGISTER_GRAMMAR: &str = "register_grammar";
 pub(crate) const HOOK_REGISTER_MACHINE_OPS: &str = "register_machine_ops";
 pub(crate) const HOOK_REGISTER_HOLE_KINDS: &str = "register_hole_kinds";
 pub(crate) const HOOK_REGISTER_CORE_FORMS: &str = "register_core_forms";
+/// The receptor kind of the `type_construct` word.
+pub(crate) const RECEPTOR_TYPE_CONSTRUCT: u8 = 5;
 
 /// Parse shapes by position in the shape enum (PROP-008 §4; closed in the
 /// seed, append-only under B+).
@@ -148,6 +153,11 @@ pub struct ParserTables {
     /// Syntax classes (`syntax Name { head; .. }`): each class's arms.
     pub(crate) syntax_classes: HashMap<String, Vec<Vec<crate::rule_arms::HeadItem>>>,
     pub type_rules: Vec<TypeConstructRule>,
+    /// Type-position symbols by shape, with their power (and, for infix,
+    /// right associativity), from the declared type levels (PROP-019).
+    pub(crate) type_prefix: HashMap<String, u8>,
+    pub(crate) type_infix: HashMap<String, (u8, bool)>,
+    pub(crate) type_postfix: HashMap<String, u8>,
     pub(crate) const_maps: HashMap<String, CVal>,
     /// Attribute functions by name (see `attr_hooks`).
     pub(crate) attr_hooks: HashMap<String, attr_hooks::AttrHook>,
@@ -189,15 +199,27 @@ impl ParserTables {
     }
 
     /// `register_grammar(levels, assocs, shapes)`: the enums whose variant
-    /// order places every operator.
+    /// order places every operator. Naming the `type_construct` word as
+    /// `shapes` registers the type-position levels instead (PROP-019).
     fn register_grammar(&mut self, levels: &str, assocs: &str, shapes: &str) {
         let get = |n: &str| self.adt_variants.get(n).cloned().unwrap_or_default();
-        self.grammar_enums = GrammarEnums {
-            levels: get(levels),
-            assocs: get(assocs),
-            shapes: get(shapes),
-        };
+        if self.is_type_construct_word(shapes) {
+            self.grammar_enums.type_levels = get(levels);
+        } else {
+            self.grammar_enums.levels = get(levels);
+            self.grammar_enums.assocs = get(assocs);
+            self.grammar_enums.shapes = get(shapes);
+        }
         self.rebuild_grammar();
+    }
+
+    fn is_type_construct_word(&self, w: &str) -> bool {
+        self.receptors.get(w).map(|r| r.0) == Some(RECEPTOR_TYPE_CONSTRUCT)
+    }
+
+    /// The power of the tightest type level: postfix forms bind at it.
+    pub(crate) fn type_tight_bp(&self) -> u8 {
+        Self::level_bp(self.grammar_enums.type_levels.len().saturating_sub(1))
     }
 
     /// The operator maps, rebuilt from the declared entries.
@@ -206,6 +228,9 @@ impl ParserTables {
         self.prefix_ops.clear();
         self.postfix_ops.clear();
         self.prefix_words.clear();
+        self.type_prefix.clear();
+        self.type_infix.clear();
+        self.type_postfix.clear();
         for e in self.grammar.clone() {
             self.apply_grammar_entry(&e);
         }
@@ -222,12 +247,26 @@ impl ParserTables {
     /// adds nothing.
     fn apply_grammar_entry(&mut self, e: &GrammarEntry) {
         let pos = |names: &[String], n: &str| names.iter().position(|x| x == n);
-        let Some(level) = pos(&self.grammar_enums.levels, &e.level) else {
+        let levels = match e.for_type {
+            true => &self.grammar_enums.type_levels,
+            false => &self.grammar_enums.levels,
+        };
+        let Some(level) = pos(levels, &e.level) else {
             return;
         };
         let Some(shape) = pos(&self.grammar_enums.shapes, &e.shape) else {
             return;
         };
+        if e.for_type {
+            let (s, bp) = (e.symbol.clone(), Self::level_bp(level));
+            let right = pos(&self.grammar_enums.assocs, &e.assoc) == Some(ASSOC_RIGHT);
+            match shape {
+                SHAPE_PREFIX => self.type_prefix.insert(s, bp),
+                SHAPE_POSTFIX => self.type_postfix.insert(s, bp),
+                _ => self.type_infix.insert(s, (bp, right)).map(|x| x.0),
+            };
+            return;
+        }
         if is_structural_symbol(&e.symbol) || (!e.word.is_empty() && is_structural_symbol(&e.word))
         {
             return;
@@ -591,6 +630,7 @@ impl ParserTables {
                     level: s_arg(3),
                     assoc: s_arg(4),
                     word: s_arg(5),
+                    for_type: self.is_type_construct_word(&target),
                 };
                 if !e.symbol.is_empty() && !self.grammar.contains(&e) {
                     self.apply_grammar_entry(&e);
@@ -641,7 +681,7 @@ pub(crate) fn is_structural_symbol(sym: &str) -> bool {
 }
 
 /// The native `BinaryOp` code of infix symbol or word `sym` (0 when it has
-/// none), until PROP-008 step 3 lowers operators to their owner methods.
+/// none), until `PROP-022` §3 lowers operators to their owner methods.
 /// A word's code is found from `BinaryOp::symbol`, so no word is written here.
 pub(crate) fn binop_code(sym: &str) -> u16 {
     let c = map_binop_sym(sym);
@@ -793,11 +833,11 @@ pub(crate) fn same_type_trigger(a: &TypeConstructRule, b: &TypeConstructRule) ->
         ) => x == y,
         (
             TypeConstructRule::Postfix {
-                kind: TypePostfixKind::Sym(x, _),
+                kind: TypePostfixKind::Sym(x),
                 ..
             },
             TypeConstructRule::Postfix {
-                kind: TypePostfixKind::Sym(y, _),
+                kind: TypePostfixKind::Sym(y),
                 ..
             },
         ) => x == y,
@@ -832,7 +872,7 @@ pub(crate) fn compile_type_rule(
             template,
         });
     }
-    if pat.len() == 2 && matches!(pat[0].0, TokenKind::Star | TokenKind::At) {
+    if pat.len() == 2 && !is_word_tok(pat[0].0) {
         return Some(TypeConstructRule::Prefix {
             op: pat[0].1.clone(),
             param: pat[1].1.clone(),
@@ -874,17 +914,10 @@ pub(crate) fn compile_type_rule(
             template,
         });
     }
-    if pat.len() == 2 && matches!(pat[1].0, TokenKind::Question | TokenKind::Caret) {
+    if pat.len() == 2 && !is_word_tok(pat[1].0) {
         return Some(TypeConstructRule::Postfix {
-            kind: TypePostfixKind::Sym(pat[1].1.clone(), false),
+            kind: TypePostfixKind::Sym(pat[1].1.clone()),
             params: vec![pat[0].1.clone()],
-            template,
-        });
-    }
-    if pat.len() == 3 && pat[1].0 == TokenKind::At {
-        return Some(TypeConstructRule::Postfix {
-            kind: TypePostfixKind::Sym("@".into(), true),
-            params: vec![pat[0].1.clone(), pat[2].1.clone()],
             template,
         });
     }
@@ -892,18 +925,9 @@ pub(crate) fn compile_type_rule(
         .iter()
         .filter(|(k, _)| !matches!(k, TokenKind::LParen | TokenKind::RParen))
         .collect();
-    if clean.len() == 3 {
-        let (bp, ra) = match clean[1].0 {
-            TokenKind::Amper => (20, false),
-            TokenKind::Vbar => (15, false),
-            TokenKind::FatArrow | TokenKind::Arrow => (10, true),
-            TokenKind::Exclamation => (5, false),
-            _ => return None,
-        };
+    if clean.len() == 3 && !is_word_tok(clean[1].0) {
         return Some(TypeConstructRule::Infix {
             op: clean[1].1.clone(),
-            bp,
-            right_assoc: ra,
             lhs_param: clean[0].1.clone(),
             rhs_param: clean[2].1.clone(),
             template,

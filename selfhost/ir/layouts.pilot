@@ -120,7 +120,8 @@ pub fn is_tag_enum(ref s: Snap, d: i64) -> bool {
 pub fn variant_tag(var ref p: Program, t: i64, name: str) -> i64? {
     if !ty_is_named(p.tt, t) || !is_tag_enum(p.s, ty_decl(p.tt, t)) { return none; }
     // A text enum (PROP-032) is tagged in declaration order; its texts
-    // are read from a table by tag (`text_enum_table`).
+    // are read by tag through a jump table of constants (`lower_enum_text`,
+    // `enum_text_by_tag` in selfhost/ir/lower_switch.pilot).
     let text = is_text_enum(p.s, ty_decl(p.tt, t));
     var next = 0;
     for v in children(p.s, ty_decl(p.tt, t)) {

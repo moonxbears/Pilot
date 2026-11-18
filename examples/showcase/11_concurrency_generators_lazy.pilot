@@ -2,8 +2,8 @@
 // Concept 11: Generators & Collecting `for` Expressions
 // ==============================================================================
 // Runs with `pilot run` and on the PilIR interpreter (`pilot ir run`).
-// Tasks, channels, `select` and lazy values are not built yet; see
-// docs/concepts/11-concurrency-generators-lazy.md.
+// Tasks, channels, `select` and lazy values are not built yet; their status
+// is in docs/keyword_matrix.md and docs/concept_matrix.md.
 
 // --- 1. A generator runs only as items are asked for ---
 

@@ -1,7 +1,6 @@
 // ============================================================================
 // FILE: stdlib/polyglot/marshal.pilot
 // Milestone 58.4: Recursive-Descent JSON Parser, Query & Serializer Engine
-// Replaces `crates/pilot-polyglot/src/marshal.pilot` in pure Pilot.
 // ============================================================================
 
 use std.text;

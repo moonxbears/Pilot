@@ -22,7 +22,6 @@ let DiagHooks = {
     ast_attr_name: "ast_attr_name",
     ast_base_count: "ast_base_count",
     ast_base_at: "ast_base_at",
-    ast_emit_diag: "ast_emit_diag",
     sym_str: "sym_str",
 };
 
@@ -258,7 +257,7 @@ pub fn verify_decl_naming_and_lattice(nid: i64, enforce_naming: bool) -> i64 {
                     "InterfacePrefix",
                     "Interface '" + name + "' must begin with 'I' followed by PascalCase"
                 );
-                __engine(DiagHooks.ast_emit_diag, nid, 1, msg);
+                seam("analysis.diag_sink", msg);
                 return 1;
             }
         }
@@ -293,7 +292,7 @@ pub fn verify_decl_naming_and_lattice(nid: i64, enforce_naming: bool) -> i64 {
     if has_ivalue {
         if has_dtor {
             let lmsg = format_lattice_contract_mismatch(name, nameof(IValue), 0, 2, "declares ~self() destructor");
-            __engine(DiagHooks.ast_emit_diag, nid, 1, lmsg);
+            seam("analysis.diag_sink", lmsg);
             return 1;
         }
     }
@@ -306,7 +305,7 @@ pub fn verify_decl_naming_and_lattice(nid: i64, enforce_naming: bool) -> i64 {
                         "LangPrimitiveLowercase",
                         "[Lang] primitive struct '" + name + "' must use lowercase identifier characters"
                     );
-                    __engine(DiagHooks.ast_emit_diag, nid, 1, lprim_msg);
+                    seam("analysis.diag_sink", lprim_msg);
                     return 1;
                 }
             } else {
@@ -315,7 +314,7 @@ pub fn verify_decl_naming_and_lattice(nid: i64, enforce_naming: bool) -> i64 {
                         "StructPascalCase",
                         "Core struct '" + name + "' must use PascalCase unless [Lang] or partial"
                     );
-                    __engine(DiagHooks.ast_emit_diag, nid, 1, pmsg);
+                    seam("analysis.diag_sink", pmsg);
                     return 1;
                 }
                 if c0 == 73 && nlen >= 2 {
@@ -325,7 +324,7 @@ pub fn verify_decl_naming_and_lattice(nid: i64, enforce_naming: bool) -> i64 {
                             "ReservedInterfacePrefix",
                             "Struct '" + name + "' cannot begin with reserved interface prefix 'I' + uppercase"
                         );
-                        __engine(DiagHooks.ast_emit_diag, nid, 1, imsg);
+                        seam("analysis.diag_sink", imsg);
                         return 1;
                     }
                 }
@@ -335,7 +334,7 @@ pub fn verify_decl_naming_and_lattice(nid: i64, enforce_naming: bool) -> i64 {
                             "AttributeSuffix",
                             "Attribute struct '" + name + "' must end with 'Attr'"
                         );
-                        __engine(DiagHooks.ast_emit_diag, nid, 1, amsg);
+                        seam("analysis.diag_sink", amsg);
                         return 1;
                     }
                 } else if has_iguard || (has_iref && has_iobj) {
@@ -344,7 +343,7 @@ pub fn verify_decl_naming_and_lattice(nid: i64, enforce_naming: bool) -> i64 {
                             "ScopedGuardSuffix",
                             "0b11 IGuard struct '" + name + "' must end with 'Guard', 'Scope', or 'Lease'"
                         );
-                        __engine(DiagHooks.ast_emit_diag, nid, 1, gmsg);
+                        seam("analysis.diag_sink", gmsg);
                         return 1;
                     }
                 } else if has_iref {
@@ -353,7 +352,7 @@ pub fn verify_decl_naming_and_lattice(nid: i64, enforce_naming: bool) -> i64 {
                             "ReferenceViewSuffix",
                             "0b01 IReference struct '" + name + "' must end with 'View', 'Lens', 'Cursor', or 'Enumerator'"
                         );
-                        __engine(DiagHooks.ast_emit_diag, nid, 1, rmsg);
+                        seam("analysis.diag_sink", rmsg);
                         return 1;
                     }
                 }

@@ -62,39 +62,38 @@ fn asm_seam(var ref lw: Lowerer, name: str, why: str, n: i64) -> u32 {
     return unit_value(lw, n);
 }
 
-/// `asm(op, operands..)` (ASM001/ASM002 have been checked).
-pub fn lower_asm(var ref lw: Lowerer, n: i64) -> u32 {
-    let s = lw.inf.p.s;
-    let ch = children(s, n);
-    guard some o = asm_op_of(s, n) else { return unsupported(lw, n); };
-    var low = row("", 0, -1, ::Any);
-    for r in asm_lowerings() { if r.name == o.name { low = r; } }
-    if low.name == "" { return asm_seam(lw, o.name, "", n); }
-    var vals: List<u32> = [];
-    var i = 2;
-    while i < ch.len() {
-        vals.push(lower_expr(lw, ch[i]));
-        i = i + 1;
-    }
+/// The lowering of machine operation `name`, when PilIR has one.
+fn lowering_of(name: str) -> AsmLowering? {
+    for r in asm_lowerings() { if r.name == name { return r; } }
+    return none;
+}
+
+/// Whether PilIR lowers machine operation `name` on operands of register
+/// class `rc` to an instruction of its own.
+pub fn machine_op_lowers(name: str, rc: u8) -> bool {
+    guard some low = lowering_of(name) else { return false; };
+    return has_class(low.needs, rc);
+}
+
+/// Machine operation `name` over the operand values `vals`, with result
+/// physics `phy` (`machine_op_lowers` has said yes for the first operand).
+pub fn emit_machine_op(var ref lw: Lowerer, name: str, ref vals: List<u32>, phy: IrTypePhysics, n: i64) -> u32 {
+    guard some low = lowering_of(name) else { return asm_seam(lw, name, "", n); };
     let x = vals[0];
     let xp = lw.f.value_physics[x];
-    if !has_class(low.needs, xp.reg_class) {
-        return asm_seam(lw, o.name, f" on operands of register class `{reg_class_name(xp.reg_class)}`", n);
-    }
-    let phy = physics_of(lw, n);
     if vals.len() == 1 {
-        if o.name == "Not" {
+        if name == "Not" {
             // `!x` is `x == false`.
             let f_val = emit(lw, op_const_bits(), 0, xp, [pool_int(lw, 0)], n);
             return emit(lw, op_cmp(), 0, phy, [x, f_val], n);
         }
-        if o.name == "BitNot" {
+        if name == "BitNot" {
             let mask = emit(lw, op_const_bits(), 0, xp, [pool_int(lw, -1)], n);
             return emit(lw, op_bit_xor(), 0, phy, [x, mask], n);
         }
         // A float negates as `-0.0 - x`, which flips the sign of zero too
         // (IEEE 754-2019 section 6.3); an integer as `0 - x`.
-        let zero = if o.name == "FNeg" {
+        let zero = if name == "FNeg" {
             emit(lw, op_const_float(), 0, xp, [pool_float(lw, -9223372036854775807 - 1)], n)
         } else {
             emit(lw, op_const_bits(), 0, xp, [pool_int(lw, 0)], n)
@@ -103,4 +102,23 @@ pub fn lower_asm(var ref lw: Lowerer, n: i64) -> u32 {
     }
     if low.pred >= 0 { return emit(lw, op_cmp(), low.pred, phy, vals, n); }
     return emit(lw, low.ir_op, 0, phy, vals, n);
+}
+
+/// `asm(op, operands..)` (ASM001/ASM002 have been checked).
+pub fn lower_asm(var ref lw: Lowerer, n: i64) -> u32 {
+    let s = lw.inf.p.s;
+    let ch = children(s, n);
+    guard some o = asm_op_of(s, n) else { return unsupported(lw, n); };
+    if lowering_of(o.name) == none { return asm_seam(lw, o.name, "", n); }
+    var vals: List<u32> = [];
+    var i = 2;
+    while i < ch.len() {
+        vals.push(lower_expr(lw, ch[i]));
+        i = i + 1;
+    }
+    let xp = lw.f.value_physics[vals[0]];
+    if !machine_op_lowers(o.name, xp.reg_class) {
+        return asm_seam(lw, o.name, f" on operands of register class `{reg_class_name(xp.reg_class)}`", n);
+    }
+    return emit_machine_op(lw, o.name, vals, physics_of(lw, n), n);
 }

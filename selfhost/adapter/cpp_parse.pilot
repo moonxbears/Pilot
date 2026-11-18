@@ -1,7 +1,7 @@
 // ==============================================================================
 // FILE: selfhost/adapter/cpp_parse.pilot
-// Milestone 15.3: Native C++ Class, RAII, Vtable & Exception Boundary Adapter
-// Pure-Pilot C++ Header Parser: namespaces, classes, virtuals, std::string_view
+// C++ header parser: namespaces, classes, virtual methods.
+// Reached only by the milestone15 Rust test; no `pilot` command runs it.
 // ==============================================================================
 pub lvl(0) pkg selfhost.adapter;
 

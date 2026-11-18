@@ -1,7 +1,7 @@
 // =========================================================================
 // FILE: selfhost/dap/repl_eval.pilot
-// Milestone 59.3: On-the-Fly Debug Console REPL Expression Evaluator
-// Evaluates watch expressions against active PilVM register environment map.
+// Debugger watch-expression evaluator over a register environment map.
+// Reached only by the milestone59 Rust test; no `pilot` command runs it.
 // =========================================================================
 pub pkg selfhost.dap;
 

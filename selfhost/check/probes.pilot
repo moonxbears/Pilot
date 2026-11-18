@@ -3,7 +3,7 @@
 // The compile-time attributes `[Debug]`, `[Live]` and `[Generate]`: their
 // arguments are checked here, and `[Debug]`'s trace is planned here.
 // ==============================================================================
-// Checking (`check_comptime_attrs`, run by `check_program`):
+// Checking (`check_comptime_attrs`, run by `check_all`):
 //   - `[Debug(level, changed_only)]`: `level` is a variant of `DebugLevel`
 //     (stdlib/core/debug.pilot), `changed_only` is `true` or `false`; an
 //     argument goes by position or by name (ATTR003).

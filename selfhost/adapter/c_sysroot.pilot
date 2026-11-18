@@ -1,7 +1,7 @@
 // ==============================================================================
 // FILE: selfhost/adapter/c_sysroot.pilot
-// Milestone 12.3: Headerless C11/C23 Semantic Absorber - Cross-Platform Sysroot
-// Cross-platform include-path & library discovery: Linux, macOS, Win32, pkg-config
+// Include-path and library discovery for Linux, macOS, Windows and pkg-config.
+// Reached only by the milestone12 Rust test; no `pilot` command runs it.
 // ==============================================================================
 pub lvl(0) pkg selfhost.adapter;
 

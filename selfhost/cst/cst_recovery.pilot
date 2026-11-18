@@ -1,9 +1,12 @@
 // ============================================================================
 // FILE: selfhost/cst/cst_recovery.pilot
-// Milestone 53.2: Live-Keyword Damerau-Levenshtein Typo Recovery & Sync Sets
-// Fixes the legacy Rust u128 TokenSet bitmask truncation bug and queries the
-// live Pilot.Core.Keywords registry dynamically via __engine across core & user
-// categories without any 128-symbol ceiling.
+// Keyword typo suggestions (Damerau-Levenshtein distance) and parser sync
+// sets. Keywords come from the registered-symbol categories
+// (`query_registered_symbols`), with the 14 seed words as fallback.
+// History: written to avoid the u128 TokenSet truncation of the former Rust
+// parser.
+// Reached only by the milestone27 and milestone53 Rust tests; no `pilot`
+// command runs it.
 // ============================================================================
 
 pub pkg selfhost.cst;

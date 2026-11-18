@@ -399,7 +399,6 @@ pub struct {
         pub static fn parent(nid: i64) -> i64 => __engine("ast_parent", nid);
         pub static fn span_start(nid: i64) -> i64 => __engine("ast_span_start", nid);
         pub static fn span_end(nid: i64) -> i64 => __engine("ast_span_end", nid);
-        pub static fn emit_diag(nid: i64, sev: i64, msg: str) => __engine("ast_emit_diag", nid, sev, msg);
         pub static fn attr_count(nid: i64) -> i64 => __engine("ast_attr_count", nid);
         pub static fn attr_arg(nid: i64, idx: i64) -> i64 => __engine("ast_attr_arg", nid, idx);
         pub static fn attr_decl_count(nid: i64) -> i64 => __engine("ast_attr_decl_count", nid);

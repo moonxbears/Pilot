@@ -1,4 +1,6 @@
-//! Register-Based `PilVM` v3, `.pilc` v3 Zero-Copy Format & Debug-Span Compiler (`pilot-vm`).
+//! The seed VM crate (`pilot-vm`): `BytecodeCompiler` (AST to PilVM
+//! bytecode), the register VM, `.pilc` reading and writing, and the host
+//! airlock (`bridge.rs`).
 //!
 //! `BytecodeCompiler` lowers a parsed `AstArena` into PilVM bytecode. Every
 //! AST node kind either lowers to code with its meaning or records a

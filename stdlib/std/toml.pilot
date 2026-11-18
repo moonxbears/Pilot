@@ -1,6 +1,10 @@
 // ==============================================================================
 // FILE: stdlib/std/toml.pilot
-// Ring 2: Standard Memory-Safe TOML Parser (pub pkg std.toml;)
+// Ring 2: TOML document record (pub pkg std.toml;)
+// Data types only: a flat list of string key/value entries with get/set
+// (a linear scan; `set` appends, so a repeated key keeps its first value
+// for `get`). No parser or emitter yet; see
+// stdlib/std/polyglot/transport/toml.pilot for the transport-layer one.
 // ==============================================================================
 pub pkg std.toml;
 

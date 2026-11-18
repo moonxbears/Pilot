@@ -37,7 +37,7 @@ pub fn report_diagnostics(ref diags: List<HostDiag>) -> i64 {
 
 /// The diagnostics of `diags` at least as severe as `severity` (errors are
 /// the most severe). `pilot run` shows errors and warnings, not the
-/// analyzer's info and hint notes.
+/// checker's info and hint notes.
 pub fn report_at_least(ref diags: List<HostDiag>, severity: u8) -> List<HostDiag> {
     var out: List<HostDiag> = [];
     for d in diags {

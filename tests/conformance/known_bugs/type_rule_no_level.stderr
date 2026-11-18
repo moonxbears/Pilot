@@ -1,0 +1,2 @@
+error[GRAM012]: this `type_construct` rule uses `<~>`, which has no type level, so the rule would never apply; declare its level beside it in a `comptime` block with `TypeInfix`, `TypePrefix` or `TypePostfix`
+type_rule_no_level.pilot:8:5

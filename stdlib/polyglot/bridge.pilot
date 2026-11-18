@@ -1,7 +1,9 @@
 // ============================================================================
 // FILE: stdlib/polyglot/bridge.pilot
-// Milestone 58.4: Out-of-Process & In-Memory Polyglot Runtime Bridge
-// Replaces `crates/pilot-polyglot/src/bridge.rs` in pure Pilot.
+// Milestone 58.4: out-of-process polyglot evaluation. Each call starts a
+// new host process (python3, node, lua or sh) through `Process.spawn_eval`
+// with the JSON bindings baked into the script text, and returns its stdout.
+// There is no in-memory or in-process runtime here.
 // ============================================================================
 
 use Pilot.Core.Env;

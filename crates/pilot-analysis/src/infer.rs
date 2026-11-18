@@ -1,3 +1,7 @@
+//! The legacy engine bridge: `flatten_ast` turns the seed AST into a
+//! `RawAstArena`, and `PhysicsRegistry` serves the `ast_*` / `layout_*` /
+//! `sym_*` `__engine` hooks over it.
+
 use crate::types::{CapabilityBits, HwScalarHeader, LayoutId, LayoutTable, PhysicsGeometry};
 use pilot_ast::{AstArena, NodeId, NodeKind};
 use pilot_intern::SymbolId;
@@ -55,20 +59,12 @@ pub struct CategoryRecord {
 }
 
 #[derive(Clone, Debug)]
-pub struct PhysicsDiagnostic {
-    pub node_id: u32,
-    pub severity: u8,
-    pub message: String,
-}
-
-#[derive(Clone, Debug)]
 pub struct PhysicsRegistry {
     pub arena: RawAstArena,
     pub layouts: LayoutTable,
     pub node_layouts: Vec<Option<LayoutId>>,
     pub node_targets: Vec<Option<u32>>,
     pub symbol_strings: HashMap<u32, String>,
-    pub diagnostics: Vec<PhysicsDiagnostic>,
     pub source_text: String,
     pub lsp_method: String,
     pub lsp_offset: u32,
@@ -88,7 +84,6 @@ impl PhysicsRegistry {
             node_layouts: vec![None; count],
             node_targets: vec![None; count],
             symbol_strings,
-            diagnostics: Vec::new(),
             source_text: String::new(),
             lsp_method: String::new(),
             lsp_offset: 0,
@@ -853,14 +848,6 @@ fn engine_intrinsic_in(
                 .and_then(|x| *x)
                 .map_or(u32::MAX as i64, |t| t as i64),
         )),
-        "ast_emit_diag" => {
-            registry.diagnostics.push(PhysicsDiagnostic {
-                node_id: nid as u32,
-                severity: arg_i(1) as u8,
-                message: arg_s(2),
-            });
-            Ok(PilotVal::NULL)
-        }
         "sym_str" => Ok(PilotVal::from_str(
             registry
                 .symbol_strings

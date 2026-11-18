@@ -1,7 +1,7 @@
 // ==============================================================================
 // FILE: selfhost/syntax/pattern_dsl.pilot
-// Milestone 27: Scoped User Sublanguage Builder - Pattern DSL Parser & Parselet Compiler
-// Compiles declarative `pub syntax Name { ... }` pattern arms into fast LL/Pratt parselets.
+// Parses `pub syntax Name { ... }` pattern arms into parselets.
+// Reached only by the milestone27 Rust test; no `pilot` command runs it.
 // Enforces:
 //   SYN001: Ambiguous Overlapping syntax Pattern Arms
 //   SYN002: Direct/Indirect Left Recursion in Custom syntax Rule

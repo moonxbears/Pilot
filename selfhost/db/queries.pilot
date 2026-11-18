@@ -1,8 +1,9 @@
 // ==============================================================================
 // FILE: selfhost/db/queries.pilot
-// Milestone 5.2: The 8 Canonical Incremental Compiler Queries
+// The 8 PilotDb query stages:
 // SourceText -> LexTokens -> LosslessCst -> ItemSignature -> ExpandedAst
 //   -> ImportScope -> DefTypesAndLattice -> FileDiagnostics
+// Reached only by the milestone05 Rust test; no `pilot` command runs it.
 // ==============================================================================
 pub lvl(0) pkg selfhost.db;
 

@@ -293,44 +293,6 @@ pub enum CallQuoteKind {
     EffectDryRun = 6,
 }
 
-#[repr(u8)]
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum ExprPrecedence {
-    Lowest = 0,
-    Cascade = 1,
-    Assign = 2,
-    LambdaTernary = 4,
-    CatchRecovery = 6,
-    Pipe = 8,
-    Coalesce = 10,
-    LogicalOr = 12,
-    LogicalAnd = 14,
-    LogicalNot = 16,
-    Comparison = 18,
-    ArrowDto = 20,
-    Range = 22,
-    BitOr = 24,
-    BitXor = 26,
-    BitAnd = 28,
-    Shift = 30,
-    AddSub = 32,
-    MulDivRem = 34,
-    UnaryPrefix = 36,
-    Power = 38,
-    PostfixLed = 40,
-}
-
-#[repr(u8)]
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum TypePrecedence {
-    Lowest = 0,
-    Fallible = 5,
-    FnArrow = 10,
-    Union = 15,
-    Intersection = 20,
-    PostfixOptional = 30,
-}
-
 #[repr(u16)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum BinaryOp {
@@ -891,13 +853,5 @@ mod tests {
     #[test]
     fn ast_node_is_strictly_16_bytes() {
         assert_eq!(core::mem::size_of::<AstNode>(), 16);
-        assert!(
-            TypePrecedence::PostfixOptional > TypePrecedence::Intersection
-                && TypePrecedence::Union > TypePrecedence::Fallible
-        );
-        assert!(
-            ExprPrecedence::Cascade < ExprPrecedence::Assign
-                && ExprPrecedence::Pipe < ExprPrecedence::PostfixLed
-        );
     }
 }

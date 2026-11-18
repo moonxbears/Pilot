@@ -1,0 +1,11 @@
+// toml_parse does not read floats yet: `ratio = 1.5` stops at the seam
+// `toml.value_kinds` instead of storing a made-up value. Expected: "before"
+// is printed, then SEAM001; "after" is not printed.
+use std.polyglot.transport.toml;
+
+fn main() {
+    print("before");
+    let doc = toml_parse("ratio = 1.5\n");
+    print("after");
+    print(doc.get("ratio").int_val);
+}

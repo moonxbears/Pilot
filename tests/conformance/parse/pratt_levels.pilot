@@ -1,0 +1,56 @@
+// PROP-025 building blocks 2-4: the Pilot parser's arena, operator table and
+// Pratt loop (stdlib/pilot/parse/{arena,grammar,expr,dump}.pilot). The table
+// here is declared by the test, so the grouping follows from it alone:
+//   level 0 `??` right-associative; level 1 `+` `-`; level 2 `*`;
+//   level 3 prefix `-`; level 4 `^` right-associative; postfix `?` at 5.
+// Expected, worked by hand from those levels:
+//   a + b * c - d      -> (- (+ a (* b c)) d)          `-` and `+` group left
+//   x ^ y ^ z * 2      -> (* (^ x (^ y z)) 2)          `^` groups right
+//   -p ^ q             -> (- (^ p q))                  prefix binds looser than `^`
+//   f(1, k: g?)?.h[0]  -> ([] (?. (call f 1 (k: (? g))) h) 0)
+//                         (`?.` is one token, safe navigation, not `?` then `.`)
+//   (u ?? v ?? w, [1, 0x10])
+//                      -> (tuple (?? u (?? v w)) (list 1 16))
+//   a < b > (c)        -> `<` opens generic arguments: not built yet
+use pilot.lex.modes;
+use pilot.lex.seed;
+use pilot.parse.tape;
+use pilot.parse.arena;
+use pilot.parse.grammar;
+use pilot.parse.expr;
+use pilot.parse.dump;
+
+fn show(ref m: ModalLexer, ref g: OpTable, src: str) {
+    let t = tape_of(m, src);
+    var a = arena_new();
+    var st = parse_state_at(0);
+    let n = parse_expr_bp(t, g, a, st, 0);
+    if n < 0 {
+        print(f"not built: {st.unbuilt}");
+        return;
+    }
+    print(sexpr(a, n));
+}
+
+fn main() {
+    guard some m = read_seed_table() else {
+        print("no table");
+        return;
+    };
+    var g = op_table_new();
+    declare(g, "??", "", nameof(Binary), 0, true);
+    declare(g, "+", "", nameof(Binary), 1, false);
+    declare(g, "-", "", nameof(Binary), 1, false);
+    declare(g, "*", "", nameof(Binary), 2, false);
+    declare(g, "<", "", nameof(Binary), 1, false);
+    declare(g, ">", "", nameof(Binary), 1, false);
+    declare(g, "-", "", nameof(Prefix), 3, true);
+    declare(g, "^", "", nameof(Binary), 4, true);
+    declare(g, "?", "", nameof(Postfix), 5, false);
+    show(m, g, "a + b * c - d");
+    show(m, g, "x ^ y ^ z * 2");
+    show(m, g, "-p ^ q");
+    show(m, g, "f(1, k: g?)?.h[0]");
+    show(m, g, "(u ?? v ?? w, [1, 0x10])");
+    show(m, g, "a < b > (c)");
+}

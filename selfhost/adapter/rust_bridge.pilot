@@ -1,7 +1,7 @@
 // ==============================================================================
 // FILE: selfhost/adapter/rust_bridge.pilot
-// Milestone 16.2: Native Rust Crate Adapter - Bridge Synthesizer & Lifetime Verifier
-// Direct 0 ns FFI bindings, catch_unwind panic safety, DynTraitFatPtr, RST003
+// Rust crate absorber: generates bridge crates and dyn-trait vtables, checks lifetimes.
+// Reached only by the milestone16 Rust test; no `pilot` command runs it.
 // ==============================================================================
 pub lvl(0) pkg selfhost.adapter;
 

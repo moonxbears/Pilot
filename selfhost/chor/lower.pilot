@@ -1,8 +1,8 @@
 // ==============================================================================
 // FILE: selfhost/chor/lower.pilot
-// Milestone 24: .pchor Sublanguage Choreographer - Lowering Engine
-// Compiles .pchor topology graph into runtime dispatch plans without modifying
-// domain .pilot functions.
+// Lowers a .pchor topology graph to dispatch plans; emitting them as PilIR
+// stops at seam chor.emit_dispatchers.
+// Reached only by the milestone24 Rust test; no `pilot` command runs it.
 // ==============================================================================
 
 pub lvl(0) pkg selfhost.chor;
@@ -90,7 +90,8 @@ pub fn lower_topology(ref bp: BlueprintDef) -> LoweredTopologyPlan {
 
 /// Emits one PilIR dispatcher function per lowered route (direct call, ring
 /// buffer push/pop, work-stealing submit or shared-memory channel) into the
-/// program being built. The typed SSA function builder does not exist yet.
+/// program being built. Typed PilIR exists (selfhost/ir/model.pilot,
+/// `IrFunction`, `ir_add_block`), but this lowering is not connected to it.
 pub fn emit_topology_ir(ref plan: LoweredTopologyPlan) -> i64 {
-    return seam("chor.emit_dispatchers", "typed PilIR function builder arrives in F5");
+    return seam("chor.emit_dispatchers", "topology lowering is not connected to typed PilIR (selfhost/ir/model.pilot); nothing emits the dispatcher functions");
 }

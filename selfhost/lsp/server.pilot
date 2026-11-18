@@ -1,7 +1,8 @@
 // =========================================================================
 // FILE: selfhost/lsp/server.pilot
-// Milestone 59.2: Persistent PilVM LSP Server & Content-Length Framing
-// Replaces crates/pilot-lsp and crates/pilot-lsp-macros in Pure Pilot.
+// LSP message loop and Content-Length framing. `pilot lsp` has no handler
+// (seam cli.command_handler).
+// Reached only by the milestone59 Rust test; no `pilot` command runs it.
 // =========================================================================
 pub pkg selfhost.lsp;
 

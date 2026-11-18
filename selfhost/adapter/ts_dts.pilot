@@ -1,7 +1,7 @@
 // ==============================================================================
 // selfhost/adapter/ts_dts.pilot
-// Milestone 18: Pure-Pilot .d.ts TypeScript Declaration Absorber & N-API Adapter
-// Package: selfhost.adapter (Name-Blind Compiler Layer)
+// TypeScript .d.ts declaration absorber and N-API binding plans.
+// Reached only by the milestone18 Rust test; no `pilot` command runs it.
 // ==============================================================================
 
 pub lvl(0) pkg selfhost.adapter;

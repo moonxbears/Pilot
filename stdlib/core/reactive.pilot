@@ -1,8 +1,17 @@
 // ============================================================================
 // FILE: stdlib/core/reactive.pilot
-// Milestone 58.3: Glitch-Free Push-Pull Reactive Signal Nodes (`!^`)
-// Implements a glitch-free push-pull reactive dependency DAG with epoch
-// memoization and diamond-sink single-evaluation guarantees in pure Pilot.
+// Milestone 58.3: pull-only reactive signal graph over `i64` values.
+// A graph is an engine map (the `map_*` engine ops; about 51 `__engine`
+// calls on the legacy ratchet). Nodes are sources (rx_source) or derived
+// nodes of at most two dependencies (rx_derived). rx_set changes a source
+// and bumps the graph epoch; nothing is pushed. rx_read recomputes a derived
+// node lazily, at most once per epoch (the `seen_` mark), and only when a
+// dependency's version changed, so a diamond's sink evaluates once per read
+// epoch. Nothing here is wired to `!^` / `sig`, and no other file calls it.
+// Map keys per node id N: kind_N (op kind, 0 = source), val_N, ver_N (epoch
+// of the last value change), seen_N (epoch last read), da_N / db_N
+// (dependency ids, 0 = none), ca_N (constant argument), dver_N (dependency
+// version hash), recomp_N (recompute count).
 // ============================================================================
 
 pub struct ReactiveSignalNode {
@@ -33,6 +42,9 @@ pub fn update_reactive_signal(sig: ReactiveSignalNode, next_val: i64) -> Reactiv
     };
 }
 
+// op_kind: 1 = a * const, 2 = a + const, 3 = a + b, 4 = a - b, 5 = a * b;
+// any other kind (0 is a source, which rx_read never evaluates) gives
+// a + const.
 pub pure fn rx_eval_op(op_kind: i64, va: i64, vb: i64, const_arg: i64) -> i64 {
     if op_kind == 1 { return va * const_arg; }
     if op_kind == 2 { return va + const_arg; }
@@ -80,6 +92,9 @@ pub fn rx_read(g: i64, node_id: i64) -> i64 {
 
     let vera = if da > 0 { (__engine("map_get", g, "ver_" + da) ?? 0) } else { 0 };
     let verb = if db > 0 { (__engine("map_get", g, "ver_" + db) ?? 0) } else { 0 };
+    // One number for both dependency versions: ver_a * 1000003 + ver_b.
+    // Two different version pairs can give the same number (a collision),
+    // in which case the node is not recomputed when it should be.
     let dep_ver = (vera * 1000003) + verb;
     let prev_dep_ver = (__engine("map_get", g, "dver_" + node_id) ?? 0);
 

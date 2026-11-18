@@ -1,0 +1,12 @@
+// A fixture read as text by parse/type_rule_arms.pilot; never run.
+pub syntax type_construct {
+    (T[])          => quote { slice<$T> };
+    (T?)           => quote { option<$T> };
+    (*T)           => quote { ptr<$T> };
+    (T @ N)        => quote { simd<$T, $N> };
+    // a comment between arms
+    ((A) => R)     => quote { fn<$A, $R> };
+    (A ~>
+        B)         => quote { fn<$A, $B> };
+    (opt<T>)       => quote { option<$T> };
+}

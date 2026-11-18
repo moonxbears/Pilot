@@ -1,0 +1,22 @@
+// PROP-019: `->` is right-associative at its declared level (`TypeLevel`
+// in stdlib/core/operators/levels.pilot), so `i64 -> i64 -> i64` is a
+// function returning a function, and a curried closure fits it.
+// A return type `-> (i64, str)` stops before the body's `=>` (the arrow's
+// declared power + 1), and `(i64) => i64` is a function type.
+//
+// Expected, worked by hand:
+//   add(1)(2)    = 1 + 2  = 3
+//   adder(10)(5) = 10 + 5 = 15
+//   twice(4)     = 4 * 2  = 8
+//   pair()       = (1, "b"), so pair().0 = 1 and pair().1 = b
+fn pair() -> (i64, str) => (1, "b");
+fn adder(p: i64) -> i64 -> i64 => (q) => p + q;
+fn main() {
+    let add: i64 -> i64 -> i64 = (p) => (q) => p + q;
+    print(add(1)(2));
+    print(adder(10)(5));
+    let twice: (i64) => i64 = (n) => n * 2;
+    print(twice(4));
+    print(pair().0);
+    print(pair().1);
+}

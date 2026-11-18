@@ -1,4 +1,5 @@
-//! Milestone 28.2 & 52.3: Zero-Copy Arena String Interner (`pilot-intern`).
+//! Arena string interner (`pilot-intern`): strings live in one byte pool; a
+//! repeat lookup allocates nothing.
 //!
 //! Stores all interned UTF-8 strings in a single contiguous byte buffer (`Vec<u8>`) indexed by
 //! `ByteSpan`, using an open-addressed hash table so repeated identifier lookups allocate

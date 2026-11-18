@@ -1,7 +1,11 @@
 // ==============================================================================
 // FILE: stdlib/core/stream.pilot
-// Milestone 23: Zero-Allocation Pipeline Fusion & Pull-Cursor Stream Combinators
-// Freestanding Ring-1 zero-allocation pull-cursor stream primitives (0b01 : IReference)
+// Milestone 23: pull-cursor streams over `slice<i64>` (Ring 1, freestanding)
+// `SliceStream` reads a slice; `TakeStream` and `StepStream` each wrap one
+// `SliceStream` (they do not wrap each other, so there is no general
+// combinator chain or fusion). Elements are `i64` only. Pulling items
+// allocates nothing; `stream_sum` and `stream_count` allocate nothing;
+// `stream_collect` builds a `List<i64>` on the heap.
 // ==============================================================================
 
 pub lvl(0) pkg core.stream;

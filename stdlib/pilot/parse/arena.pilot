@@ -1,0 +1,79 @@
+// ==============================================================================
+// FILE: stdlib/pilot/parse/arena.pilot
+// Ring 3: the flat AST arena the Pilot parser builds (pub pkg
+// pilot.parse.arena;) — PROP-025 step 2, building block 2.
+// ==============================================================================
+// One row per node: its kind, flags, span (byte offsets in its file), name
+// (an identifier, a member, a named argument, an operator's spelling), the
+// value of a number literal, and its children in source order. The arena is
+// owned (`0b10`) and List-backed; nodes are numbered from 0 in the order
+// they are made, so a child is always numbered below its parent.
+//
+// The kind numbers are the ones the seed's AST uses (crates/pilot-ast
+// `NodeKind`, read by selfhost/check/snapshot.pilot), so the two parsers'
+// trees can be compared node by node (PROP-025 §4 step 2). They become this
+// parser's own once the seed's parser is deleted.
+pub pkg pilot.parse.arena;
+
+/// Node kinds (crates/pilot-ast `NodeKind`).
+pub const NK_EXPR_STMT: i64 = 110;
+pub const NK_BINARY: i64 = 205;
+pub const NK_UNARY: i64 = 206;
+pub const NK_CALL: i64 = 207;
+pub const NK_CALL_ARG: i64 = 208;
+pub const NK_MEMBER: i64 = 209;
+pub const NK_INDEX: i64 = 210;
+pub const NK_TRY_PROPAGATE: i64 = 213;
+pub const NK_TUPLE: i64 = 217;
+pub const NK_LIST: i64 = 218;
+pub const NK_IDENT: i64 = 300;
+pub const NK_INT: i64 = 301;
+pub const NK_FLOAT: i64 = 302;
+pub const NK_BOOL: i64 = 303;
+pub const NK_STR: i64 = 304;
+pub const NK_NONE: i64 = 305;
+
+/// The arena. Node `n`'s children are `kids[kid_lo[n] .. kid_hi[n]]`.
+pub struct ParseArena : IObject {
+    pub kinds: List<i64>;
+    pub flags: List<i64>;
+    pub starts: List<i64>;
+    pub ends: List<i64>;
+    pub names: List<str>;
+    pub values: List<i64>;
+    pub kid_lo: List<i64>;
+    pub kid_hi: List<i64>;
+    pub kids: List<i64>;
+
+    pub fn len(ref self) -> i64 => self.kinds.len() as i64;
+
+    /// The children of node `n`, in source order.
+    pub fn children(ref self, n: i64) -> List<i64> {
+        var out: List<i64> = [];
+        var i = self.kid_lo[n];
+        while i < self.kid_hi[n] {
+            out.push(self.kids[i]);
+            i = i + 1;
+        }
+        return out;
+    }
+}
+
+pub fn arena_new() -> ParseArena => ParseArena {
+    kinds: [], flags: [], starts: [], ends: [], names: [], values: [],
+    kid_lo: [], kid_hi: [], kids: [],
+};
+
+/// Adds a node and returns its number.
+pub fn add_node(var ref a: ParseArena, kind: i64, flags: i64, start: i64, end: i64, name: str, value: i64, ref children: List<i64>) -> i64 {
+    a.kinds.push(kind);
+    a.flags.push(flags);
+    a.starts.push(start);
+    a.ends.push(end);
+    a.names.push(name);
+    a.values.push(value);
+    a.kid_lo.push(a.kids.len() as i64);
+    for c in children { a.kids.push(c); }
+    a.kid_hi.push(a.kids.len() as i64);
+    return a.kinds.len() as i64 - 1;
+}

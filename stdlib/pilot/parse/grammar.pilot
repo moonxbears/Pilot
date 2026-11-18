@@ -1,0 +1,68 @@
+// ==============================================================================
+// FILE: stdlib/pilot/parse/grammar.pilot
+// Ring 3: the operator table the Pilot parser reads (pub pkg
+// pilot.parse.grammar;) — PROP-025 step 2, building block 3.
+// ==============================================================================
+// Every operator is declared once, by an attribute naming its level, shape
+// and associativity (stdlib/core/operators/, PROP-008). This table holds what
+// the parser needs from those declarations: per spelling, the binding power
+// (the level's position, loosest first: `level_bp`), the associativity and
+// the shape. Nothing here names an operator; the declarations fill it
+// (`declare`).
+pub pkg pilot.parse.grammar;
+
+/// The power of the loosest level; each tighter level adds `LEVEL_STEP`.
+/// The same numbers as the seed's (crates/pilot-parser/src/tables.rs), so
+/// both parsers group alike while they are compared.
+pub const LEVEL_BASE: i64 = 10;
+pub const LEVEL_STEP: i64 = 4;
+
+/// One infix spelling: its power, whether it groups to the right, and the
+/// name of its parse shape (a `ParseShape` variant).
+pub struct InfixOp : IValue {
+    pub bp: i64;
+    pub right: bool;
+    pub shape: str;
+}
+
+/// The declared operators by spelling. `prefix_words` maps a readable prefix
+/// word (`not`) to the symbol it pairs with.
+pub struct OpTable : IObject {
+    pub infix: Map<str, InfixOp>;
+    pub prefix: Map<str, i64>;
+    pub postfix: Map<str, i64>;
+    pub prefix_words: Map<str, str>;
+}
+
+pub fn op_table_new() -> OpTable => OpTable {
+    infix: Map<str, InfixOp>(),
+    prefix: Map<str, i64>(),
+    postfix: Map<str, i64>(),
+    prefix_words: Map<str, str>(),
+};
+
+/// The power of level `level` (its position, loosest first).
+pub fn level_bp(level: i64) -> i64 => LEVEL_BASE + LEVEL_STEP * (if level > 60 { 60 } else { level });
+
+/// Adds one declared operator: `symbol` and its readable `word` (or ""), read
+/// by shape `shape` at level position `level`. A cascade or adjacent-call
+/// shape adds nothing: those forms are read by their tokens.
+pub fn declare(var ref t: OpTable, symbol: str, word: str, shape: str, level: i64, right: bool) {
+    let bp = level_bp(level);
+    if shape == nameof(Prefix) {
+        t.prefix.set(symbol, bp);
+        if word.len() > 0 {
+            t.prefix.set(word, bp);
+            t.prefix_words.set(word, symbol);
+        }
+        return;
+    }
+    if shape == nameof(Postfix) {
+        t.postfix.set(symbol, bp);
+        return;
+    }
+    if shape == nameof(Cascade) || shape == nameof(AdjacentCall) { return; }
+    let op = InfixOp { bp: bp, right: right, shape: shape };
+    t.infix.set(symbol, op);
+    if word.len() > 0 { t.infix.set(word, op); }
+}

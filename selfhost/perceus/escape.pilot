@@ -228,7 +228,7 @@ pub fn esc_verify_call_node(nid: i64, env: i64, memo: i64, node_count: i64, in_r
     if cname == nameof(spawn) || (cname == nameof(__engine) && cc >= 2 && __engine("sym_str", __engine("ast_node_sym", __engine("ast_child_at", nid, 1))) == nameof(map_new)) {
         if in_rt {
             let pcode = verify_noalloc_escape(2, true);
-            __engine("ast_emit_diag", nid, 1, pcode + ": Task spawn forbidden in [HardRealtime] or noalloc context");
+            seam("analysis.diag_sink", pcode + ": Task spawn forbidden in [HardRealtime] or noalloc context");
             cnt = cnt + 1;
         }
         return cnt;
@@ -239,7 +239,7 @@ pub fn esc_verify_call_node(nid: i64, env: i64, memo: i64, node_count: i64, in_r
         if st_lat == 2 {
             if in_rt {
                 let pcode = verify_noalloc_escape(2, true);
-                __engine("ast_emit_diag", nid, 1, pcode + ": Owned heap struct allocation forbidden in [HardRealtime] or noalloc context");
+                seam("analysis.diag_sink", pcode + ": Owned heap struct allocation forbidden in [HardRealtime] or noalloc context");
                 cnt = cnt + 1;
             }
             if cc == 2 && __engine("ast_orig_kind", __engine("ast_child_at", nid, 1)) == 219 {
@@ -251,7 +251,7 @@ pub fn esc_verify_call_node(nid: i64, env: i64, memo: i64, node_count: i64, in_r
                     let flat = esc_expr_lattice(fval, env, memo, node_count);
                     let ecode = verify_borrow_escape_by_lattice(cname, flat, true, 2, false);
                     if ecode.len() > 0 {
-                        __engine("ast_emit_diag", nid, 1, ecode + ": Borrowed view or guard cannot be stored inside owned heap struct");
+                        seam("analysis.diag_sink", ecode + ": Borrowed view or guard cannot be stored inside owned heap struct");
                         cnt = cnt + 1;
                     }
                     fvi = fvi + 2;
@@ -263,7 +263,7 @@ pub fn esc_verify_call_node(nid: i64, env: i64, memo: i64, node_count: i64, in_r
                     let alat = esc_expr_lattice(aval, env, memo, node_count);
                     let ecode = verify_borrow_escape_by_lattice(cname, alat, true, 2, false);
                     if ecode.len() > 0 {
-                        __engine("ast_emit_diag", nid, 1, ecode + ": Borrowed view or guard cannot be stored inside owned heap struct");
+                        seam("analysis.diag_sink", ecode + ": Borrowed view or guard cannot be stored inside owned heap struct");
                         cnt = cnt + 1;
                     }
                     cai = cai + 1;
@@ -282,12 +282,12 @@ pub fn esc_verify_call_node(nid: i64, env: i64, memo: i64, node_count: i64, in_r
             let qiso = esc_expr_is_iso(qarg, env);
             if (qlat & 1) != 0 {
                 let ecode = verify_borrow_escape_by_lattice(cname, qlat, true, -1, true);
-                __engine("ast_emit_diag", nid, 1, ecode + ": Borrowed view or guard cannot cross [Cue] boundary");
+                seam("analysis.diag_sink", ecode + ": Borrowed view or guard cannot cross [Cue] boundary");
                 cnt = cnt + 1;
             } else {
                 let ccode = verify_cue_transfer_by_lattice(cname, qlat, qiso);
                 if ccode.len() > 0 {
-                    __engine("ast_emit_diag", nid, 1, ccode + ": Unisolated owned object cannot cross [Cue] boundary without iso");
+                    seam("analysis.diag_sink", ccode + ": Unisolated owned object cannot cross [Cue] boundary without iso");
                     cnt = cnt + 1;
                 }
             }
@@ -302,7 +302,7 @@ pub fn esc_verify_call_node(nid: i64, env: i64, memo: i64, node_count: i64, in_r
             let riso = esc_expr_is_iso(rarg, env);
             let rcode = verify_retained_escape(rlat, riso);
             if rcode.len() > 0 {
-                __engine("ast_emit_diag", nid, 1, rcode + ": Ephemeral 0b01 borrow passed to [Retained] async foreign parameter — use PinnedSlice<T> or iso");
+                seam("analysis.diag_sink", rcode + ": Ephemeral 0b01 borrow passed to [Retained] async foreign parameter — use PinnedSlice<T> or iso");
                 cnt = cnt + 1;
             }
             rai = rai + 1;
@@ -356,7 +356,7 @@ pub fn esc_walk_perceus_node(nid: i64, env: i64, memo: i64, node_count: i64, in_
         var lcnt = 0;
         if in_rt {
             let pcode = verify_noalloc_escape(2, true);
-            __engine("ast_emit_diag", nid, 1, pcode + ": Heap list literal forbidden in [HardRealtime] or noalloc context");
+            seam("analysis.diag_sink", pcode + ": Heap list literal forbidden in [HardRealtime] or noalloc context");
             lcnt = lcnt + 1;
         }
         let lcc = __engine("ast_child_count", nid);
@@ -367,7 +367,7 @@ pub fn esc_walk_perceus_node(nid: i64, env: i64, memo: i64, node_count: i64, in_
             let elat = esc_expr_lattice(elem, env, memo, node_count);
             let ecode = verify_borrow_escape_by_lattice("list", elat, true, 2, false);
             if ecode.len() > 0 {
-                __engine("ast_emit_diag", nid, 1, ecode + ": Borrowed view or guard cannot be stored inside heap list");
+                seam("analysis.diag_sink", ecode + ": Borrowed view or guard cannot be stored inside heap list");
                 lcnt = lcnt + 1;
             }
             li = li + 1;
@@ -396,7 +396,7 @@ pub fn esc_walk_perceus_node(nid: i64, env: i64, memo: i64, node_count: i64, in_
                 let rhs_lat = esc_expr_lattice(rhs, env, memo, node_count);
                 let ecode = verify_borrow_escape_by_lattice("assign", rhs_lat, true, recv_lat, false);
                 if ecode.len() > 0 {
-                    __engine("ast_emit_diag", nid, 1, ecode + ": Borrowed view or guard cannot be assigned to owned heap field");
+                    seam("analysis.diag_sink", ecode + ": Borrowed view or guard cannot be assigned to owned heap field");
                     acnt = acnt + 1;
                 }
             }
@@ -414,7 +414,7 @@ pub fn esc_walk_perceus_node(nid: i64, env: i64, memo: i64, node_count: i64, in_
                 let tied = (rlat == 1) && esc_expr_from_ref(ret_e, env);
                 let rcode = verify_borrow_escape_by_lattice("return", rlat, tied, -1, false);
                 if rcode.len() > 0 {
-                    __engine("ast_emit_diag", nid, 1, rcode + ": Local borrowed view or guard cannot escape function return");
+                    seam("analysis.diag_sink", rcode + ": Local borrowed view or guard cannot escape function return");
                     rcnt = rcnt + 1;
                 }
             }

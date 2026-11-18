@@ -29,9 +29,14 @@ pub const SEED_TABLE_FILE: str = "stdlib/core/lex/toolchain.lex";
 /// The lexer the seed runs, read from `SEED_TABLE_FILE` as it is written:
 /// the checker's view of how the seed splits a file (GRAM002). `none` when
 /// the file is not there or not a lexer.
-pub fn read_seed_table() -> ModalLexer? {
-    if !File.exists(SEED_TABLE_FILE) { return none; }
-    let src = File.read_text(SEED_TABLE_FILE);
+pub fn read_seed_table() -> ModalLexer? => read_seed_table_in(".");
+
+/// `read_seed_table` for the checkout at `root`, not the working directory
+/// (the gate runs over a workspace root it is given).
+pub fn read_seed_table_in(root: str) -> ModalLexer? {
+    let path = root + "/" + SEED_TABLE_FILE;
+    if !File.exists(path) { return none; }
+    let src = File.read_text(path);
     guard some key = written_key(src) else { return none; }
     return read_lexer(src, key);
 }

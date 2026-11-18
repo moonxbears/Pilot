@@ -1,6 +1,7 @@
 // ============================================================================
 // FILE: selfhost/cst/incremental.pilot
-// Milestone 53.1: Sub-Millisecond Incremental CST Splicer & Island Reuse
+// Incremental CST update: splices an edit and reuses unchanged subtrees.
+// Reached only by the milestone53 Rust test; no `pilot` command runs it.
 // ============================================================================
 
 pub pkg selfhost.cst;

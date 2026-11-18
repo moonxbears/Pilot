@@ -1,7 +1,8 @@
 // ==============================================================================
 // FILE: selfhost/inspect/perceus_lens.pilot
-// Milestone 7.1: Zero-Black-Box Inspection Perceus ARC Lens
-// Inline Perceus Markers: [borrow], [move], [dup +1], [drop -1], [reuse-in-place], [guard-exit LIFO]
+// `pilot inspect` Perceus lens text: borrow, move, dup, drop and reuse markers.
+// `pilot inspect` has no handler (seam cli.command_handler).
+// Reached only by the milestone07 Rust test; no `pilot` command runs it.
 // ==============================================================================
 pub lvl(0) pkg selfhost.inspect;
 

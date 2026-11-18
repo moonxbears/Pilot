@@ -479,7 +479,6 @@ pub fn build_file_ceiling_registry() -> Map<str, i64> {
     var reg = Map<str, i64>();
     reg.set("crates/pilot-analysis/src/types.rs", 250);
     reg.set("crates/pilot-analysis/src/infer.rs", 440);
-    reg.set("crates/pilot-analysis/src/pipeline.rs", 80);
     reg.set("crates/pilot-analysis/src/lib.rs", 60);
     reg.set("crates/pilot-cli/src/main.rs", 100);
     reg.set("selfhost/ide/vscode_gen.pilot", 1000);
@@ -563,7 +562,6 @@ const GM_ALLOWED_INFER_STRINGS: List<str> = [
     "ast_get_bound_layout",
     "ast_bind_target",
     "ast_get_bound_target",
-    "ast_emit_diag",
     "sym_str",
     "sym_lookup",
     "str_len",
@@ -636,13 +634,19 @@ pub pure fn max_total_rust_loc() -> usize => 5900;
 //     on 2026-11-18 by deleting the dead `pilot-analysis/src/diagnostics.rs`
 //     and its two `lib.rs` lines (27,233) and by PROP-008 step 2, which
 //     deleted 30 unused operator token kinds and the dead `PolyglotBlock`
-//     chain (-80), the seed going to 27,153);
+//     chain (-80), the seed going to 27,153; and on 2026-11-18 by PROP-037,
+//     which deleted the unused `CapabilityBits` tests and the write-only
+//     `ast_emit_diag` diagnostics list (-21), the seed going to 27,132; and
+//     on 2026-11-18 by PROP-038, which deleted the CLI host services the
+//     Pilot CLI rebuilt (`report_pending`, `cli_checked_tool`,
+//     `cli_text_tool`, `run_on_text`, `run_checked_on_program`; -78), the
+//     ceiling going to 27,054);
 //   - each Rust source file must obey the `<= 1,500` LOC law (MOD001);
 //   - retired crates (`pilot-rt`, `pilot-codegen`, etc.) must stay absent.
 // To resume full per-crate contraction, set `seed_contraction_paused()` to
 // `false` at Stage-3 cutover and run `pilot gate --ratchet-update`.
 pub pure fn seed_contraction_paused() -> bool => true;
-pub pure fn paused_max_total_rust_loc() -> usize => 27153;
+pub pure fn paused_max_total_rust_loc() -> usize => 27054;
 pub pure fn paused_max_rust_file_loc() -> usize => 1500;
 pub pure fn max_pilot_file_loc() -> usize => 1500;
 
@@ -666,40 +670,26 @@ pub fn stage_a_host_natives() -> List<str> => ["host_op"];
 /// Counts are lexer-aware non-comment/non-string `__engine(` occurrences and may only shrink to 0.
 pub fn legacy_engine_ratchet() -> Map<str, i64> {
     let m = Map<str, i64>();
-    m.set("selfhost/ast_bridge.pilot", 17);
-    m.set("selfhost/ast.pilot", 101);
-    m.set("selfhost/attr_weaver.pilot", 26);
+    m.set("selfhost/attr_weaver.pilot", 24);
     m.set("selfhost/bench/bench.pilot", 11);
-    m.set("selfhost/check/main.pilot", 1);
     m.set("selfhost/check/snapshot.pilot", 1);
-    m.set("selfhost/cli/host.pilot", 11);
     m.set("selfhost/cli/test_runner.pilot", 7);
-    m.set("selfhost/codegen/asm_emitter.pilot", 109);
-    m.set("selfhost/codegen/c_emitter.pilot", 80);
-    m.set("selfhost/codegen/gpu_c_dialects.pilot", 73);
-    m.set("selfhost/codegen/gpu_llvm.pilot", 67);
-    m.set("selfhost/codegen/gpu_shaders.pilot", 122);
-    m.set("selfhost/codegen/llvm_emitter.pilot", 109);
-    m.set("selfhost/codegen/physics.pilot", 66);
-    m.set("selfhost/codegen/wasm_emitter.pilot", 120);
     m.set("selfhost/cst/cst.pilot", 17);
     m.set("selfhost/dap/inspector.pilot", 4);
     m.set("selfhost/dap/repl_eval.pilot", 19);
     m.set("selfhost/dap/vm_controller.pilot", 9);
     m.set("selfhost/db/cache_io.pilot", 2);
     m.set("selfhost/db/engine.pilot", 81);
-    m.set("selfhost/diagnostics.pilot", 20);
+    m.set("selfhost/diagnostics.pilot", 12);
     m.set("selfhost/gate/seed_audit.pilot", 9);
     m.set("selfhost/ffi_bindgen.pilot", 56);
     m.set("selfhost/ide/vscode_gen.pilot", 29);
     m.set("selfhost/ir/fault.pilot", 1);
-    m.set("selfhost/ir/main.pilot", 1);
     m.set("selfhost/lexer.pilot", 64);
-    m.set("selfhost/lsp/handlers.pilot", 222);
+    m.set("selfhost/lsp/handlers.pilot", 221);
     m.set("selfhost/lsp/ide_db.pilot", 3);
     m.set("selfhost/lsp/server.pilot", 10);
-    m.set("selfhost/parser.pilot", 178);
-    m.set("selfhost/perceus/escape.pilot", 90);
+    m.set("selfhost/perceus/escape.pilot", 79);
     m.set("selfhost/perceus/lattice.pilot", 40);
     m.set("selfhost/perceus/optimizer.pilot", 15);
     m.set("selfhost/perceus/realtime.pilot", 11);
@@ -709,8 +699,7 @@ pub fn legacy_engine_ratchet() -> Map<str, i64> {
     m.set("selfhost/pkg/manifest.pilot", 6);
     m.set("stdlib/core/effects.pilot", 43);
     m.set("stdlib/core/keywords.pilot", 8);
-    m.set("stdlib/core/primitives/ast.pilot", 21);
-    m.set("stdlib/core/primitives/map.pilot", 5);
+    m.set("stdlib/core/primitives/ast.pilot", 20);
     m.set("stdlib/core/reactive.pilot", 51);
     m.set("stdlib/core/reflect.pilot", 52);
     m.set("stdlib/db/sql_engine.pilot", 52);

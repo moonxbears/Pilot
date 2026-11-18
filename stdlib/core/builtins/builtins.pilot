@@ -107,8 +107,8 @@ let FloatSsaFacet<TSelf: IValue> = {
         op != (rhs: TSelf) -> bool  => !(__ssa(MachineOp::FEq, self, rhs));
         op <  (rhs: TSelf) -> bool  => __ssa(MachineOp::FLt,  self, rhs);
         op <= (rhs: TSelf) -> bool  => __ssa(MachineOp::FLe,  self, rhs);
-        op >  (rhs: TSelf) -> bool  => !(__ssa(MachineOp::FLe, self, rhs));
-        op >= (rhs: TSelf) -> bool  => !(__ssa(MachineOp::FLt, self, rhs));
+        op >  (rhs: TSelf) -> bool  => __ssa(MachineOp::FLt, rhs, self);
+        op >= (rhs: TSelf) -> bool  => __ssa(MachineOp::FLe, rhs, self);
 };
 
 // =========================================================================

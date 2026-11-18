@@ -1,0 +1,87 @@
+// ==============================================================================
+// FILE: stdlib/pilot/parse/type_rules.pilot
+// Ring 3: the arms of `syntax type_construct` rules, read from a token tape
+// (pub pkg pilot.parse.type_rules;) — PROP-019, PROP-025 step 2.
+// ==============================================================================
+// Each arm's pattern decides which symbol it rewrites: `(T OP)` is postfix,
+// `(OP T)` prefix and `(A OP B)` infix or postfix with an argument
+// (parentheses inside a pattern only group, as in `((A) => R)`). `(T[..])`
+// forms are structural and `(Name<T>)` has no symbol. GRAM012
+// (selfhost/check/type_levels.pilot) reads them; the Pilot parser's type
+// rules will (PROP-025).
+pub pkg pilot.parse.type_rules;
+
+use pilot.parse.tape;
+
+/// One arm of a `type_construct` rule: its operator symbol ("" when it has
+/// none) and the tape positions of its pattern's `(` and `)`.
+pub struct TypeRuleArm : IValue {
+    pub symbol: str;
+    pub open: i64;
+    pub close: i64;
+}
+
+/// Every arm of every `syntax type_construct { .. }` block on `t`.
+pub fn type_rule_arms(ref t: Tape) -> List<TypeRuleArm> {
+    var out: List<TypeRuleArm> = [];
+    var i = 0;
+    while i + 2 < t.len() {
+        let opens = t.text_of(i) == nameof(syntax) && t.text_of(i + 1) == nameof(type_construct) && t.text_of(i + 2) == "{";
+        i = i + 1;
+        if !opens { continue; }
+        var j = i + 2;
+        var depth = 1;
+        while j < t.len() && depth > 0 {
+            let x = t.text_of(j);
+            if x == "}" {
+                depth = depth - 1;
+            } else if x == "{" {
+                depth = depth + 1;
+            } else if depth == 1 && x == "(" {
+                let arm = read_arm(t, j);
+                out.push(arm);
+                j = arm.close + 1;
+                continue;
+            }
+            j = j + 1;
+        }
+        i = j;
+    }
+    return out;
+}
+
+/// The arm whose pattern opens at `open`.
+fn read_arm(ref t: Tape, open: i64) -> TypeRuleArm {
+    var pat: List<str> = [];
+    var j = open + 1;
+    var depth = 1;
+    while j < t.len() {
+        let x = t.text_of(j);
+        if x == "(" { depth = depth + 1; }
+        if x == ")" {
+            depth = depth - 1;
+            if depth == 0 { break; }
+        }
+        if x != "(" && x != ")" { pat.push(x); }
+        j = j + 1;
+    }
+    return TypeRuleArm { symbol: rule_symbol(pat), open: open, close: j };
+}
+
+fn is_word_start(x: str) -> bool {
+    if x.len() == 0 { return false; }
+    let c = x.byte_at(0);
+    return (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c == 95;
+}
+
+/// The operator symbol of a pattern (its parentheses left out), or "".
+fn rule_symbol(ref pat: List<str>) -> str {
+    if pat.len() >= 2 && is_word_start(pat[0]) && pat[1] == "<" { return ""; }
+    if pat.len() >= 2 && pat[1] == "[" { return ""; }
+    if pat.len() == 2 {
+        if !is_word_start(pat[0]) { return pat[0]; }
+        if !is_word_start(pat[1]) { return pat[1]; }
+    }
+    if pat.len() == 3 && !is_word_start(pat[1]) { return pat[1]; }
+    return "";
+}

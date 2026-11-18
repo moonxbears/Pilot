@@ -109,14 +109,14 @@ fn arg_text(ref s: Snap, a: i64) -> str {
 }
 
 /// Whether `d` is a `syntax` rule: a function whose body is a quote template.
-fn is_syntax_rule(ref s: Snap, d: i64) -> bool {
+pub fn is_syntax_rule(ref s: Snap, d: i64) -> bool {
     if kind(s, d) != nk_fn() { return false; }
     let body = fn_body(s, d);
     return body >= 0 && kind(s, body) == nk_quote();
 }
 
 /// The fixity an `op` symbol's holes give it (PROP-018 §1).
-enum Fixity : u8 {
+pub enum Fixity : u8 {
     Infix,
     Prefix,
     Postfix,
@@ -380,7 +380,7 @@ pub fn check_grammar_attrs(ref inf: Infer, var ref sink: DiagSink) {
 /// One operator a grammar attribute declares: its symbol and readable word,
 /// where it stands, its level, associativity and shape as written, and the
 /// declaration and attribute that declare it.
-struct GrammarClaim : IValue {
+pub struct GrammarClaim : IValue {
     pub symbol: str;
     pub word:   str;
     pub place:  Fixity;
@@ -395,7 +395,7 @@ struct GrammarClaim : IValue {
 fn arg_at(ref s: Snap, ref args: List<i64>, at: i64) -> str => if at >= 0 && at < args.len() { arg_text(s, args[at]) } else { "" };
 
 /// The operators the grammar attributes on `d` declare.
-fn claims_of(ref p: Program, d: i64) -> List<GrammarClaim> {
+pub fn claims_of(ref p: Program, d: i64) -> List<GrammarClaim> {
     let s = p.s;
     var out: List<GrammarClaim> = [];
     if nl_get(p.attrs, f"{d}").len() == 0 { return out; }

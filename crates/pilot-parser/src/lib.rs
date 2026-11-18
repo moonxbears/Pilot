@@ -1,5 +1,7 @@
-//! Homoiconic 14-Token Seed Parser & `$param` AST-Splicing Macro Engine (`pilot-parser`).
-//! Hardcodes strictly the 14 seed `TokenKind`s; zero Pilot scalar/composite type names exist here.
+//! The seed parser (`pilot-parser`): the 14 seed keywords and fixed punctuation
+//! are read here; every other word, operator and construct comes from the
+//! bootstrap tables built from the stdlib sources. No Pilot type name is
+//! written here.
 use pilot_ast::*;
 use pilot_intern::SymbolId;
 use pilot_lexer::{SeedTable, TokenKind, TokenTape};

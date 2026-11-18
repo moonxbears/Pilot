@@ -1,7 +1,7 @@
 // ==============================================================================
 // selfhost/adapter/absorb_proto.pilot
-// Ring 3 / Self-Host Compiler: Protocol Buffers v2/v3 Absorber & Wire Codec (`use proto`)
-// Package: selfhost.adapter (Milestone 20)
+// Protocol Buffers v2/v3 schema absorber and wire codec for `use proto`.
+// Reached only by the milestone20 Rust test; no `pilot` command runs it.
 // ==============================================================================
 
 pub lvl(0) pkg selfhost.adapter;

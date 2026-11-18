@@ -1,6 +1,12 @@
 // ==============================================================================
 // stdlib/std/polyglot/transport/xml.pilot
-// Ring 2 Standard Library: Full Bidirectional XML DOM & Serialization
+// Ring 2 Standard Library: an XML node tree (element / text / comment)
+// with attribute get/set/has, add_child, find_first/find_all and emit.
+// xml_parse reads a small subset: an optional `<?xml ?>` declaration, one
+// root element with `name="value"` attributes, and its body, which is
+// either text or parsed again as a single child element (sibling elements
+// are not split apart). No entities, CDATA, comments in input, namespaces
+// or single-quoted attributes.
 // Package: std.polyglot.transport.xml (Transport Languages Subsystem)
 // ==============================================================================
 

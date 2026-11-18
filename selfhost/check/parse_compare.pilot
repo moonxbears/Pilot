@@ -1,0 +1,348 @@
+// ==============================================================================
+// FILE: selfhost/check/parse_compare.pilot
+// The one-off comparison of the Pilot parser with the seed's (PROP-025 §4
+// step 2). Runs only when `PILOT_PARSE_COMPARE` names a report file.
+// ==============================================================================
+// `PILOT_PARSE_COMPARE=<report> pilot check <file>` parses every expression
+// the seed's parser read in the user's file (each expression statement, each
+// `let`/`var` value and each `return` value) again with the Pilot parser
+// (stdlib/pilot/parse/), from the same token, and compares the two trees
+// node by node, spans included. The operator table is the one the
+// declarations give (`claims_of`), never a list written here.
+// Every user file the check read (a whole package) is one `COVERS` line,
+// and each expression one line after it, all led by the file's path:
+//   <path> COVERS 0 <path>
+//   <path> SAME <line>
+//   <path> UNBUILT <line> <the first form the Pilot parser does not build yet>
+//   <path> DIFF <line> seed=<tree> pilot=<tree>
+//   <path> NOLEX 0 <the lexer's error> (the declared lexer rejects the file)
+//   <path> REWRITTEN <line> <why> (a tree a seed desugaring made, which has
+//   no source text of its own to parse)
+// A DIFF is a bug in one of the parsers: found and fixed, never accepted.
+// tools/parse_compare/run.sh runs it over every `.pilot` file in the tree.
+pub lvl(0) pkg selfhost.check;
+
+use Pilot.Core.File;
+use Pilot.Core.Env;
+use pilot.lex.modes;
+use pilot.lex.seed;
+use pilot.parse.tape;
+use pilot.parse.arena;
+use pilot.parse.grammar;
+use pilot.parse.expr;
+use pilot.parse.dump;
+
+/// The environment variable naming the report file.
+pub const PARSE_COMPARE_VAR: str = "PILOT_PARSE_COMPARE";
+
+/// Writes the comparison report when `PARSE_COMPARE_VAR` is set.
+pub fn parse_compare_if_asked(ref p: Program) {
+    let out = Env.get(PARSE_COMPARE_VAR);
+    if out.len() == 0 { return; }
+    let s = p.s;
+    guard some m = read_seed_table() else {
+        let _ = File.write_text(out, "ERROR the seed's lexer table cannot be read\n");
+        return;
+    };
+    let g = declared_table(p);
+    var b: List<str> = [];
+    var u = 0;
+    while u < s.files.len() {
+        let row = s.files[u];
+        if row.1 {
+            let from = b.len() as i64;
+            b.push(f"COVERS 0 {row.0}");
+            compare_file(p, m, g, u, row.2, row.3, b);
+            var j = from;
+            while j < b.len() as i64 {
+                b[j] = row.0 + " " + b[j];
+                j = j + 1;
+            }
+        }
+        u = u + 1;
+    }
+    var text = "";
+    for line in b { text = text + line + "\n"; }
+    let _ = File.write_text(out, text);
+}
+
+/// The operator table the declarations give: every grammar attribute in the
+/// linked program, placed by the position of its level and associativity in
+/// the enums `register_grammar` names.
+fn declared_table(ref p: Program) -> OpTable {
+    let s = p.s;
+    var g = op_table_new();
+    var levels: List<str> = [];
+    var assocs: List<str> = [];
+    var d = 0;
+    while d < s.count {
+        if kind(s, d) == nk_call() {
+            let ch = children(s, d);
+            if ch.len() == 4 && kind(s, ch[0]) == nk_ident() && node_name(s, ch[0]) == nameof(register_grammar)
+                && nameof_word(s, ch[3]) != nameof(type_construct) {
+                levels = enum_variants(s, nameof_word(s, ch[1]));
+                assocs = enum_variants(s, nameof_word(s, ch[2]));
+            }
+        }
+        d = d + 1;
+    }
+    d = 0;
+    while d < s.count {
+        let k = kind(s, d);
+        if k == nk_operator() || is_syntax_rule(s, d) {
+            for c in claims_of(p, d) {
+                if is_structural_symbol(c.symbol) { continue; }
+                var shape = c.shape;
+                var level = c.level;
+                var assoc = c.assoc;
+                if c.attr == nameof(Infix) || c.attr == nameof(InfixWord) { shape = nameof(Binary); }
+                if c.attr == nameof(Prefix) { shape = nameof(Prefix); assoc = nameof(Right); }
+                if c.attr == nameof(Postfix) { shape = nameof(Postfix); level = nameof(Postfix); }
+                let lv = position(levels, level);
+                if lv < 0 { continue; }
+                declare(g, c.symbol, c.word, shape, lv, position(assocs, assoc) == 1);
+            }
+        }
+        d = d + 1;
+    }
+    return g;
+}
+
+fn position(ref xs: List<str>, x: str) -> i64 {
+    var i = 0;
+    while i < xs.len() {
+        if xs[i] == x { return i; }
+        i = i + 1;
+    }
+    return -1;
+}
+
+/// The word in `nameof(word)` (a call argument), or "".
+fn nameof_word(ref s: Snap, a0: i64) -> str {
+    let a = if kind(s, a0) == nk_call_arg() { rhs(s, a0) } else { a0 };
+    if kind(s, a) != nk_call() { return ""; }
+    let ch = children(s, a);
+    if ch.len() == 2 && kind(s, ch[0]) == nk_ident() && node_name(s, ch[0]) == nameof(nameof) { return node_name(s, ch[1]); }
+    return "";
+}
+
+/// The variant names, in order, of the enum named `name`.
+fn enum_variants(ref s: Snap, name: str) -> List<str> {
+    var out: List<str> = [];
+    for d in nodes_of(s, nk_adt()) {
+        if node_name(s, d) != name { continue; }
+        for v in children(s, d) { out.push(node_name(s, v)); }
+        return out;
+    }
+    return out;
+}
+
+/// The expressions the seed read in unit `u`: values of expression
+/// statements, `let`/`var` and `return`.
+fn compare_file(ref p: Program, ref m: ModalLexer, ref g: OpTable, u: i64, base: i64, text: str, var ref b: List<str>) {
+    let s = p.s;
+    let t = tape_of(m, text);
+    if !t.ok() {
+        b.push(f"NOLEX 0 the file does not lex with the declared lexer ({t.error})");
+        return;
+    }
+    var at = Map<i64, i64>();
+    var i = 0;
+    while i < t.len() {
+        at.set(t.starts[i], i);
+        i = i + 1;
+    }
+    var d = s.user_lo;
+    while d < s.user_hi {
+        if unit_of(s, d) == u {
+            let k = kind(s, d);
+            var e = -1;
+            if k == nk_expr_stmt() || k == nk_return() { e = lhs(s, d); }
+            if k == nk_let() || k == nk_var() { e = rhs(s, d); }
+            if e >= 0 { compare_one(s, t, g, at, base, d, e, b); }
+        }
+        d = d + 1;
+    }
+}
+
+/// Compares the value `e` of statement `d`. The Pilot parser starts where
+/// the value starts in the source: after `return`, after the `=` of a
+/// binding, or at the expression statement itself (the seed's node for a
+/// parenthesized expression leaves its parentheses out of its span).
+fn compare_one(ref s: Snap, ref t: Tape, ref g: OpTable, ref at: Map<i64, i64>, base: i64, d: i64, e: i64, var ref b: List<str>) {
+    let line = line_of(t.text, span_start(s, d) - base);
+    guard some i0 = at.get(span_start(s, d) - base) else {
+        b.push(f"UNBUILT {line} the seed's statement does not start at a token (a rewritten form)");
+        return;
+    };
+    var i = i0;
+    let k = kind(s, d);
+    if k == nk_return() { i = i0 + 1; }
+    if k == nk_let() || k == nk_var() {
+        var depth = 0;
+        while i < t.len() {
+            let x = t.text_of(i);
+            if x == "(" || x == "[" || x == "{" || x == "<" { depth = depth + 1; }
+            if x == ")" || x == "]" || x == "}" || x == ">" { depth = depth - 1; }
+            if x == "=" && depth <= 0 { break; }
+            i = i + 1;
+        }
+        i = i + 1;
+    }
+    if i >= t.len() || t.ends[i] > span_end(s, e) - base + 1 && t.starts[i] > span_start(s, e) - base {
+        b.push(f"UNBUILT {line} the seed's value is not where the statement's tokens put it (a rewritten form)");
+        return;
+    }
+    if k == nk_expr_stmt() && span_start(s, e) > span_start(s, d) && is_name_token(t, i) {
+        b.push(f"UNBUILT {line} a clause led by a word (`{t.text_of(i)}`), whose value the seed keeps without the word");
+        return;
+    }
+    var leaves = Map<i64, bool>();
+    if synthesized(s, e) || repeats_leaf(s, e, leaves) {
+        b.push(f"REWRITTEN {line} the seed's parser made this tree, not the source (a node as wide as its own child)");
+        return;
+    }
+    if holds_type(s, e) {
+        b.push(f"UNBUILT {line} an operand the seed read as a type (a struct's `*Bundle` splice)");
+        return;
+    }
+    var a = arena_new();
+    var st = parse_state_at(i);
+    let n = parse_expr_bp(t, g, a, st, 0);
+    if n < 0 {
+        b.push(f"UNBUILT {line} {st.unbuilt}");
+        return;
+    }
+    let seed = seed_sexpr(s, t.text, base, e);
+    let mine = sexpr_of(a, n, true);
+    let next = t.text_of(st.pos);
+    let ended = next == ";" || next == "}" || next == "" || next == "," || next == ")";
+    if !ended && seed == mine && span_end(s, d) > span_end(s, e) {
+        b.push(f"UNBUILT {line} a value inside a `syntax` rule form (the rule reads on at `{next}`)");
+        return;
+    }
+    if !ended {
+        b.push(f"DIFF {line} the Pilot parse stopped before `{next}`: seed={seed} pilot={mine}");
+        return;
+    }
+    if seed == mine {
+        b.push(f"SAME {line}");
+    } else {
+        b.push(f"DIFF {line} seed={seed} pilot={mine}");
+    }
+}
+
+/// Whether the seed's tree at `n` holds a node it made rather than read: an
+/// operator, call, member, index or `?` node whose span is a child's span. A
+/// parsed one is always wider than each operand, by its operator or its
+/// brackets; the nodes a seed desugaring makes all carry the span of the
+/// statement they replace, and a template that repeats a hole holds one
+/// piece of source twice.
+fn synthesized(ref s: Snap, n: i64) -> bool {
+    let k = kind(s, n);
+    let ch = children(s, n);
+    let wraps = k == nk_binary() || k == nk_unary() || k == nk_call() || k == nk_member() || k == nk_index() || k == nk_try_propagate();
+    var i = 0;
+    while i < ch.len() {
+        let c = ch[i];
+        if wraps && span_start(s, c) == span_start(s, n) && span_end(s, c) == span_end(s, n) { return true; }
+        // One piece of source used twice: a template repeating its hole.
+        var j = i + 1;
+        while j < ch.len() {
+            if span_start(s, c) == span_start(s, ch[j]) && span_end(s, c) == span_end(s, ch[j]) { return true; }
+            j = j + 1;
+        }
+        if synthesized(s, c) { return true; }
+        i = i + 1;
+    }
+    return false;
+}
+
+/// Whether the seed's tree at `n` holds a type node: the Pilot expression
+/// parser reads no types yet.
+fn holds_type(ref s: Snap, n: i64) -> bool {
+    let k = kind(s, n);
+    if k == nk_type_named() || k == nk_type_tuple() { return true; }
+    for c in children(s, n) {
+        if holds_type(s, c) { return true; }
+    }
+    return false;
+}
+
+/// Whether two leaves of the seed's tree at `n` cover the same source: a
+/// template that uses one hole twice (`if a < b { b } else { a }` from
+/// `clamp_low(a, b)`). Two leaves a parser read never share a span.
+fn repeats_leaf(ref s: Snap, n: i64, var ref seen: Map<i64, bool>) -> bool {
+    let ch = children(s, n);
+    if ch.len() == 0 {
+        let key = span_start(s, n) * 4294967296 + span_end(s, n);
+        if seen.has(key) { return true; }
+        seen.set(key, true);
+        return false;
+    }
+    for c in ch {
+        if repeats_leaf(s, c, seen) { return true; }
+    }
+    return false;
+}
+
+fn is_name_token(ref t: Tape, i: i64) -> bool => t.family_of(i) == "name";
+
+fn line_of(text: str, off: i64) -> i64 {
+    var line = 1;
+    var i = 0;
+    while i < off && i < text.len() {
+        if text.byte_at(i) == 10 { line = line + 1; }
+        i = i + 1;
+    }
+    return line;
+}
+
+/// The seed's tree at `n` in the format of `sexpr_of(.., true)`; spans in
+/// the file's own offsets. An operator is shown by its spelling as written:
+/// the text between its operands.
+fn seed_sexpr(ref s: Snap, text: str, base: i64, n: i64) -> str {
+    let k = kind(s, n);
+    let at = f"@{span_start(s, n) - base}:{span_end(s, n) - base}";
+    let ch = children(s, n);
+    if k == nk_ident() { return node_name(s, n) + at; }
+    if k == nk_int() { return f"{s.nodes[n * snap_columns() + 7]}" + at; }
+    if k == nk_float() { return "float" + at; }
+    if k == nk_str() { return "str" + at; }
+    if k == nk_bool() { return (if s.nodes[n * snap_columns() + 7] == 1 { "bool:1" } else { "bool:0" }) + at; }
+    if k == nk_none() { return "none" + at; }
+    if k == nk_member() {
+        let dot = if flags(s, n) == 1 { "?." } else if flags(s, n) == 0 { "." } else { f".{flags(s, n)}" };
+        return f"({dot} {seed_sexpr(s, text, base, ch[0])} {sym_text(s, rhs(s, n))})" + at;
+    }
+    if k == nk_call_arg() { return f"({sym_text(s, lhs(s, n))}: {seed_sexpr(s, text, base, ch[0])})" + at; }
+    var head = f"kind{k}";
+    if k == nk_binary() && ch.len() == 2 {
+        head = op_text(text.slice(span_end(s, ch[0]) - base, span_start(s, ch[1]) - base));
+    } else if k == nk_unary() && ch.len() == 1 {
+        head = op_text(text.slice(span_start(s, n) - base, span_start(s, ch[0]) - base));
+    } else if k == nk_call() {
+        head = if flags(s, n) == 0 { "call" } else { f"call{flags(s, n)}" };
+    } else if k == nk_index() {
+        head = "[]";
+    } else if k == nk_try_propagate() {
+        head = "?";
+    } else if k == nk_tuple() {
+        head = "tuple";
+    } else if k == nk_list() {
+        head = if flags(s, n) == 0 { "list" } else { f"list{flags(s, n)}" };
+    }
+    var out = "(" + head;
+    for c in ch { out = out + " " + seed_sexpr(s, text, base, c); }
+    return out + ")" + at;
+}
+
+/// An operator's spelling from the text between its operands: spaces and
+/// the parentheses of a parenthesized operand left out.
+fn op_text(between: str) -> str {
+    var lo = 0;
+    var hi = between.len();
+    while lo < hi && (between.byte_at(lo) <= 32 || between.byte_at(lo) == 41 || between.byte_at(lo) == 40) { lo = lo + 1; }
+    while hi > lo && (between.byte_at(hi - 1) <= 32 || between.byte_at(hi - 1) == 40 || between.byte_at(hi - 1) == 41) { hi = hi - 1; }
+    return between.slice(lo, hi);
+}

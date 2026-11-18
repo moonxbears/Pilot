@@ -1,7 +1,11 @@
 // ==============================================================================
 // FILE: stdlib/pilot/vm.pilot
 // Ring 3: Compiler-as-a-Library Deterministic VmSandbox (pub pkg pilot.vm;)
-// Capability-gated execution, instruction fuel limits, and memory quotas
+// Sandbox bookkeeping only: a config (fuel limit, heap and call-depth caps,
+// capability mask) and helpers a caller invokes by hand to count fuel, test
+// a capability and capture stdout. Nothing runs code under these limits:
+// vm_sandbox_run is seam `pilot_vm.sandbox_run`, and the heap and
+// call-depth caps are never checked.
 // ==============================================================================
 pub pkg pilot.vm;
 
@@ -37,6 +41,10 @@ pub pure fn vm_config_default() -> VmConfig {
     };
 }
 
+// The VMnnn codes noted below clash with the registry in
+// selfhost/diagnostics/errors.pilot, where VM001 is "Bytecode Execution
+// Trap" and VM002 is "Call Stack Depth Exceeded"; VM003-VM006 are not
+// registered. Only the trap_msg strings here use them.
 pub enum VmTrap : u8 {
     ::None                 = 0,
     ::FuelExhausted        = 1, // VM001
@@ -98,9 +106,9 @@ pub fn vm_sandbox_write_stdout(var ref s: VmSandbox, piece: str) {
     }
 }
 
-/// Runs `source` inside the sandbox, charging fuel per instruction and
-/// checking each host call against the capability mask; returns captured
-/// stdout.
+/// Planned: run `source` inside the sandbox, charging fuel per instruction
+/// and checking each host call against the capability mask, returning the
+/// captured stdout. Not built; stops at seam `pilot_vm.sandbox_run`.
 pub fn vm_sandbox_run(var ref s: VmSandbox, source: str) -> str {
     return seam("pilot_vm.sandbox_run", "the VM does not meter fuel, heap or capabilities through a sandbox");
 }

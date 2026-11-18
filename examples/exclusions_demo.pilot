@@ -1,0 +1,28 @@
+// `without` exports: a module hides members (`secret_key`, `internal_debug`),
+// a whole type (`SecretBackend`) or a function (`deprecated_helper`) after
+// declaring them, so a file that uses this package cannot reach them.
+pkg Pilot.Test;
+
+pub struct Service {
+    pub name: str;
+    pub secret_key: str;
+    pub fn start() -> bool => true;
+    pub fn internal_debug() -> void {}
+}
+
+pub struct SecretBackend {
+    pub token: str;
+    pub fn ping() -> bool => true;
+}
+
+pub fn public_utility() -> i64 => 42;
+pub fn deprecated_helper() -> i64 => 0;
+
+// Exclude sensitive and deprecated symbols post-definition
+without Service {
+    secret_key,
+    internal_debug
+};
+
+without SecretBackend;
+without deprecated_helper;

@@ -1,7 +1,9 @@
 // =========================================================================
 // FILE: selfhost/dap/server.pilot
-// Milestone 59.3: VmHook-Stepped Debug Adapter Protocol (DAP) Server
-// Replaces crates/pilot-dap/src/dap.rs in Pure Pilot.
+// Debug Adapter Protocol message framing and handling helpers.
+// `pilot debug` has no handler (seam cli.command_handler), so nothing serves
+// DAP today; the crates/pilot-dap crate this was meant to replace is gone.
+// Reached only by the milestone59 Rust test; no `pilot` command runs it.
 // =========================================================================
 pub pkg selfhost.dap;
 

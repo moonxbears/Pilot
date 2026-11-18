@@ -1,0 +1,16 @@
+// GRAM012 (PROP-019), not reached yet: the seed stops first with SEED001 on
+// the rules' templates (known bug seed.user_type_construct_rule).
+// A `syntax type_construct` rule whose symbol has no
+// type level would never apply. The rule for `<~>` (line 8, column 5) has no
+// `TypeInfix` beside it, so the checker names the missing level there.
+// (`~>` has its level, so its rule is not reported.)
+pub syntax type_construct {
+    (A <~> B) => quote { fn<$A, $B> };
+    (A ~> B) => quote { fn<$A, $B> };
+}
+comptime {
+    TypeInfix("~>", ::Arrow, ::Right);
+}
+fn main() {
+    print(1);
+}

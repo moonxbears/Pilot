@@ -1,7 +1,9 @@
 // ==============================================================================
 // FILE: selfhost/db/engine.pilot
-// Milestone 5.2: Shared Incremental Compiler Query Database Engine (PilotDb)
-// Salsa-Style Red-Green Memoization, Durability Watermarks & Early Cutoff
+// PilotDb query engine: memoized queries with revisions, durability and early
+// cutoff. No `pilot` command queries PilotDb.
+// Reached only by the milestone05 and milestone59 Rust tests (also through
+// selfhost/lsp/ide_db.pilot).
 // ==============================================================================
 pub lvl(0) pkg selfhost.db;
 
@@ -340,9 +342,11 @@ pub fn pilotdb_query_with_fn(db: i64, key: QueryKey) -> str {
     return new_payload;
 }
 
-// Compute dispatcher for the canonical stages. Stages whose engine does not
-// exist yet (lossless CST, macro expansion, type checking) stop at a seam
-// instead of producing a placeholder payload.
+// Compute dispatcher for the canonical stages. Stages PilotDb cannot compute
+// stop at a seam instead of producing a placeholder payload: the lossless CST
+// (selfhost/cst/ has one, not wired into PilotDb), macro expansion, and type
+// definitions / per-file diagnostics (the checker in selfhost/check/ exists,
+// not wired into PilotDb).
 pub fn pilotdb_dispatch_compute(db: i64, key: QueryKey) -> str {
     let stage = key.stage_id;
     let fid = key.entity_id;
@@ -361,7 +365,7 @@ pub fn pilotdb_dispatch_compute(db: i64, key: QueryKey) -> str {
         return pilotdb_render_tokens(src);
     }
     if stage == stage_lossless_cst() {
-        return seam("db.lossless_cst", "the lossless red/green CST parser (pilot.cst) does not exist yet");
+        return seam("db.lossless_cst", "the lossless CST in selfhost/cst/ is not wired into PilotDb");
     }
     if stage == stage_expanded_ast() {
         return seam("db.expanded_ast", "syntax-rule and macro expansion over the CST does not exist yet");
@@ -380,10 +384,10 @@ pub fn pilotdb_dispatch_compute(db: i64, key: QueryKey) -> str {
         return sigs;
     }
     if stage == stage_def_types_and_lattice() {
-        return seam("db.def_types", "the type checker that computes definitions, layouts and lattice bits arrives in F4");
+        return seam("db.def_types", "the checker (selfhost/check/) is not wired into PilotDb to compute definitions, layouts and lattice bits");
     }
     if stage == stage_file_diagnostics() {
-        return seam("db.file_diagnostics", "per-file diagnostics come from the type checker (F4)");
+        return seam("db.file_diagnostics", "per-file diagnostics come from the checker (selfhost/check/), which is not wired into PilotDb");
     }
     return "DB003: no compute is registered for query stage " + stage;
 }

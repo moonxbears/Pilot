@@ -1,6 +1,7 @@
 // =========================================================================
 // FILE: selfhost/perf/optimizer.pilot
-// Milestone 60.2: Real AST Constant-Folding & Dead Code Elimination Optimizer
+// Classifies AST nodes for constant folding and dead-code removal.
+// Reached only by the milestone60 Rust test; no `pilot` command runs it.
 // =========================================================================
 pub pkg selfhost.perf;
 

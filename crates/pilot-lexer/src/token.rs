@@ -1,7 +1,8 @@
-//! Milestone 29.3 & 52.2: Struct-of-Arrays (SoA) `TokenTape`, `TokenFlags`, and 14-Seed `TokenKind`.
+//! `TokenKind` (the 14 seed keywords, literals, punctuation and `Operator`),
+//! `TokenFlags`, and the struct-of-arrays `TokenTape`.
 //!
-//! `TokenKind` contains strictly the **14 Hardware Seed Keywords** (`KwEngine`..`KwAsm`),
-//! raw atomic literals, and punctuation/operators. All non-seed words lex as `TokenKind::Ident`.
+//! `TokenKind` holds the 14 seed keywords (`KwEngine`..`KwAsm`), raw
+//! literals, punctuation and `Operator` (any declared operator symbol). All non-seed words lex as `TokenKind::Ident`.
 
 use pilot_span::ByteSpan;
 

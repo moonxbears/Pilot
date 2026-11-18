@@ -1,14 +1,16 @@
 // ==============================================================================
 // FILE: stdlib/std/polyglot/shm.pilot
 // Milestone 14: Perceus Foreign Resource & Shared-Memory Buffer/View (0b10 / 0b01)
-// `ShmBuffer<T>` (0b10 : IObject) with OS unmap destructor,
+// `ShmBuffer<T>` (0b10 : IObject): `create` stops at seam `shm.map` and
+// `~self()` on a mapped buffer stops at seam `shm.unmap` (no OS mapping yet),
 // and `ShmView<T>` (0b01 : IReference) statically escape-checked.
 // ==============================================================================
 pub pkg std.polyglot.shm;
 
 // ------------------------------------------------------------------------------
 // 1. ShmBuffer<T: IValue> : IObject (0b10 Owned Object)
-// Owns shared memory region; automatically unmapped via ~self()
+// Meant to own a shared memory region and unmap it in ~self(); both the map
+// and the unmap are seams (`shm.map`, `shm.unmap`) until the OS ops exist.
 // ------------------------------------------------------------------------------
 
 [Layout(c_abi)]

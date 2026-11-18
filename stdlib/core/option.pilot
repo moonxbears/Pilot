@@ -1,7 +1,9 @@
 // =========================================================================
 // FILE: stdlib/core/option.pilot
 // STAGE 3B CONCISE NULL-SAFETY (`option<T>` / `T?`)
-// Preserves Milestone 12 implicit lifting, niche optimization & `some`/`none`.
+// Implicit lifting and `some`/`none`. `opt<T>` is a [Layout(c_abi)] record
+// with a separate tag; no layout reads a niche yet (wiring F6 niche-packed
+// `opt<T>` is SPEC; stand-in `ir.absent_as_null` is open).
 // =========================================================================
 [EnforceCoreNaming]
 pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Option;

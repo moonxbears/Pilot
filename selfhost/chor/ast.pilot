@@ -1,8 +1,10 @@
 // ==============================================================================
 // FILE: selfhost/chor/ast.pilot
-// Milestone 24: .pchor Sublanguage Choreographer - Typed AST & Topology Graph Model
+// .pchor AST records.
 // Defines BlueprintDef, StorageBinding, RoleContract, CueContract, RouteEdge,
 // TransportSpec, and ArchPolicyRule.
+// Reached only by the milestone24 Rust test (directly and through
+// stdlib/pilot/chor.pilot); no `pilot` command runs it.
 // ==============================================================================
 
 pub lvl(0) pkg selfhost.chor;

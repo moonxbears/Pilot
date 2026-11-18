@@ -1,7 +1,8 @@
 // ==============================================================================
 // FILE: selfhost/cli/main.pilot
-// Milestone 3.4: Declarative CommandRegistry Router & Single-Source CLI Entry
-// Replaces hardcoded numeric dispatch in Pure Pilot (CLI001 - CLI006)
+// The command registry (names, flags, help text) and the CLI entry point,
+// which dispatches each command to its handler in `cli_handlers()`
+// (selfhost/cli/commands.pilot). Diagnostics CLI001 - CLI006.
 // ==============================================================================
 pub lvl(0) pkg selfhost.cli;
 
@@ -15,7 +16,7 @@ pub fn default_command_registry() -> CommandRegistry {
     // 1. Run & Build
     var cmd_run = spec_new_command(
         "run", "", "Run & Build",
-        "Execute Pilot program via PilVM v3 / Native AOT",
+        "Check a Pilot program and run it on the VM (--via-ir: through PilIR and .pilc)",
         "pilot run app.pilot [args...]"
     );
     spec_command_add_flag(cmd_run, spec_new_flag("via-ir", "", 0, "false", "", "", false, false, "Compile through PilIR to bytecode (`pilot compile`) and run that on the VM"));
@@ -71,7 +72,7 @@ pub fn default_command_registry() -> CommandRegistry {
 
     var cmd_test = spec_new_command(
         "test", "", "Analysis & Quality",
-        "Run integrated test suite or differential tests",
+        "Run the conformance tests on the seed VM, PilIR (--ir), .pilc (--via-ir) or generated code (--emit <lang>)",
         "pilot test [filter]"
     );
     spec_command_add_flag(cmd_test, spec_new_flag("filter", "", 3, "", "", "", false, false, "Filter test cases by name substring"));
@@ -114,14 +115,14 @@ pub fn default_command_registry() -> CommandRegistry {
     // 3. Packages & Deps
     let cmd_pkg = spec_new_command(
         "pkg", "package", "Packages & Deps",
-        "Manage packages, dependencies, and lockfiles",
+        "Not wired yet (seam cli.command_handler): manage packages, dependencies and lockfiles",
         "pilot pkg init my_app\npilot pkg add std.col"
     );
     let _ = spec_registry_register(reg, cmd_pkg);
 
     var cmd_deps = spec_new_command(
         "deps", "", "Packages & Deps",
-        "Inspect, list, and verify dependencies",
+        "Not wired yet (seam cli.command_handler): list and verify dependencies",
         "pilot deps list\npilot deps check"
     );
     spec_command_add_flag(cmd_deps, spec_new_flag("depth", "d", 1, "99", "", "", false, false, "Maximum traversal depth"));
@@ -130,14 +131,14 @@ pub fn default_command_registry() -> CommandRegistry {
 
     let cmd_tree = spec_new_command(
         "tree", "", "Packages & Deps",
-        "Display visual dependency tree of imports or packages",
+        "Not wired yet (seam cli.command_handler): print the import or package dependency tree",
         "pilot tree src/main.pilot"
     );
     let _ = spec_registry_register(reg, cmd_tree);
 
     let cmd_venv = spec_new_command(
         "venv", "", "Packages & Deps",
-        "Manage isolated virtual environments",
+        "Not wired yet (seam cli.command_handler): manage isolated package environments",
         "pilot venv init .pilot_env"
     );
     let _ = spec_registry_register(reg, cmd_venv);
@@ -145,14 +146,14 @@ pub fn default_command_registry() -> CommandRegistry {
     // 4. IDE, Debug & AI
     let cmd_repl = spec_new_command(
         "repl", "", "IDE, Debug & AI",
-        "Start interactive Name-Blind Pilot REPL",
+        "Not wired yet (seam cli.command_handler): interactive Pilot REPL",
         "pilot repl"
     );
     let _ = spec_registry_register(reg, cmd_repl);
 
     var cmd_debug = spec_new_command(
         "debug", "", "IDE, Debug & AI",
-        "Launch VmHook-stepped debugger or DAP server",
+        "Not wired yet (seam cli.command_handler): step debugger and DAP server",
         "pilot debug app.pilot --dap"
     );
     spec_command_add_flag(cmd_debug, spec_new_flag("dap", "", 0, "false", "", "", false, false, "Launch resident Debug Adapter Protocol server"));
@@ -160,14 +161,14 @@ pub fn default_command_registry() -> CommandRegistry {
 
     let cmd_lsp = spec_new_command(
         "lsp", "", "IDE, Debug & AI",
-        "Start resident PilVM Language Server",
+        "Not wired yet (seam cli.command_handler): language server",
         "pilot lsp"
     );
     let _ = spec_registry_register(reg, cmd_lsp);
 
     let cmd_perf = spec_new_command(
         "perf", "", "IDE, Debug & AI",
-        "Profile and optimize code performance",
+        "Not wired yet (seam cli.command_handler): profile a program",
         "pilot perf profile app.pilot"
     );
     let _ = spec_registry_register(reg, cmd_perf);
@@ -189,7 +190,7 @@ pub fn default_command_registry() -> CommandRegistry {
 
     var cmd_inspect = spec_new_command(
         "inspect", "", "IDE, Debug & AI",
-        "Show the compiler's decisions for a selector: woven attributes, field layout, MethodTable winners, Perceus drops",
+        "Not wired yet (seam cli.command_handler): show the compiler's decisions for a selector: woven attributes, field layout, MethodTable winners, Perceus drops",
         "pilot inspect app.pilot:42 --layout"
     );
     for lens in ["weave", "layout", "methods", "perceus"] {
@@ -203,7 +204,7 @@ pub fn default_command_registry() -> CommandRegistry {
 
     var cmd_from = spec_new_command(
         "from", "--from", "IDE, Debug & AI",
-        "Ingest foreign code into Pilot AST",
+        "Not wired yet (seam cli.command_handler): translate foreign source into Pilot",
         "pilot from python app.py -o app.pilot"
     );
     spec_command_add_flag(cmd_from, spec_new_flag("output", "o", 4, "", "", "", false, false, "Output file path"));
@@ -211,14 +212,14 @@ pub fn default_command_registry() -> CommandRegistry {
 
     let cmd_map = spec_new_command(
         "map", "outline", "IDE, Debug & AI",
-        "Display visual symbol map of namespaces, classes, fns",
+        "Not wired yet (seam cli.command_handler): print the symbols a file declares",
         "pilot map src/main.pilot"
     );
     let _ = spec_registry_register(reg, cmd_map);
 
     let cmd_ide_sync = spec_new_command(
         "ide-sync", "", "IDE, Debug & AI",
-        "Synchronize VS Code extension grammar and schemas",
+        "Not wired yet (seam cli.command_handler): regenerate the VS Code extension grammar and schemas",
         "pilot ide-sync"
     );
     let _ = spec_registry_register(reg, cmd_ide_sync);

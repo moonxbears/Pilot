@@ -1,0 +1,355 @@
+// ==============================================================================
+// FILE: stdlib/pilot/parse/expr.pilot
+// Ring 3: the Pratt loop of the Pilot parser (pub pkg pilot.parse.expr;)
+// PROP-025 step 2, building block 4.
+// ==============================================================================
+// Reads one expression from a token tape into a `ParseArena`. Every
+// operator's power, associativity and shape comes from the declared table
+// (`OpTable`, pilot.parse.grammar); this file holds only the mechanisms: the
+// Pratt loop, the structural delimiters, calls, members, indexing and the
+// literals.
+//
+// Built so far: names, number and plain string literals, `true`/`false`/
+// `none`, parentheses and tuples, list literals, declared prefix, infix and
+// postfix operators (readable words included), `a.b` and `a?.b`, calls with
+// positional and named arguments, and `a[i]`. Every other form stops the
+// parse and records why in `ParseState.unbuilt` (`not built: <form>`); the
+// caller treats the expression as not parsed. Nothing is skipped or
+// guessed: an unbuilt form is never read as something else.
+pub pkg pilot.parse.expr;
+
+use Pilot.Core.Lex.Words;
+use pilot.parse.tape;
+use pilot.parse.arena;
+use pilot.parse.grammar;
+
+/// Where the parser stands: the next token, and the first form it met that
+/// is not built yet ("" while none).
+pub struct ParseState : IObject {
+    pub pos: i64;
+    pub unbuilt: str;
+}
+
+pub fn parse_state_at(pos: i64) -> ParseState => ParseState { pos: pos, unbuilt: "" };
+
+/// Records the first unbuilt form and returns -1 (no node).
+fn stop(var ref st: ParseState, form: str) -> i64 {
+    if st.unbuilt.len() == 0 { st.unbuilt = form; }
+    return -1;
+}
+
+fn text_at(ref t: Tape, var ref st: ParseState) -> str => t.text_of(st.pos);
+
+fn is_seed_word(w: str) -> bool {
+    for s in SEED_WORDS { if s == w { return true; } }
+    return false;
+}
+
+/// Whether token `i` is a number or string literal.
+fn is_literal(ref t: Tape, i: i64) -> bool {
+    let f = t.family_of(i);
+    return f == "integer" || f == "hex_integer" || f == "bin_integer" || f == "oct_integer" || f == "float"
+        || f == "string" || f == "string_triple" || f == "raw_string" || f == "raw_string_triple"
+        || f == "byte_string" || f == "byte_string_triple";
+}
+
+/// Whether token `i` is a word: a name or one of the seed words.
+fn is_word(ref t: Tape, i: i64) -> bool {
+    let f = t.family_of(i);
+    return f == "name" || (is_seed_word(f) && t.text_of(i) == f);
+}
+
+/// Whether the source between the end of node `n` and token `i` holds a
+/// newline: a call or index on the next line is a new statement.
+fn newline_between(ref t: Tape, ref a: ParseArena, n: i64, i: i64) -> bool {
+    if i >= t.len() { return false; }
+    let from = a.ends[n];
+    let to = t.starts[i];
+    return to > from && t.text.slice(from, to).contains("\n");
+}
+
+/// The value of the integer literal `text` in base `radix`, separators and
+/// any base prefix left out; wraps past 64 bits as the seed does.
+fn int_value(text: str, radix: i64) -> i64 {
+    var v = 0;
+    var i = if radix == 10 { 0 } else { 2 };
+    while i < text.len() {
+        let c = text.byte_at(i);
+        i = i + 1;
+        if c == 95 { continue; }
+        let d = if c >= 48 && c <= 57 { c - 48 } else if c >= 97 && c <= 102 { c - 87 } else if c >= 65 && c <= 70 { c - 55 } else { 0 };
+        v = v *% radix +% d;
+    }
+    return v;
+}
+
+/// One expression starting at `st.pos`, binding at least `min_bp`; -1 when
+/// none starts there or the expression holds an unbuilt form.
+pub fn parse_expr_bp(ref t: Tape, ref g: OpTable, var ref a: ParseArena, var ref st: ParseState, min_bp: i64) -> i64 {
+    var lhs = parse_prefix(t, g, a, st);
+    if lhs < 0 { return -1; }
+    while st.unbuilt.len() == 0 {
+        let x = text_at(t, st);
+        let k = a.kinds[lhs];
+        if x == "<" && (k == NK_IDENT || k == NK_MEMBER) && generic_args_ahead(t, st.pos) {
+            return stop(st, "generic arguments after a name");
+        }
+        if x == "{" && (k == NK_IDENT || k == NK_MEMBER) { return stop(st, "struct literal"); }
+        let fam = t.family_of(st.pos);
+        if fam == "infix_dot" || x == "?." || x == "::" {
+            let safe = if x == "?." { 1 } else { 0 };
+            st.pos = st.pos + 1;
+            let nx = text_at(t, st);
+            if t.family_of(st.pos).contains("integer") { return stop(st, "tuple field path"); }
+            if nx == "~" { return stop(st, "lens member"); }
+            if st.pos >= t.len() { return stop(st, "member name missing"); }
+            st.pos = st.pos + 1;
+            lhs = add_node(a, NK_MEMBER, safe, a.starts[lhs], t.ends[st.pos - 1], nx, 0, [lhs,]);
+            continue;
+        }
+        if x == "(" || fam.ends_with("_quote") {
+            if newline_between(t, a, lhs, st.pos) { break; }
+            if x != "(" { return stop(st, "call quote"); }
+            lhs = parse_call(t, g, a, st, lhs);
+            if lhs < 0 { return -1; }
+            continue;
+        }
+        if x == "[" {
+            if newline_between(t, a, lhs, st.pos) { break; }
+            st.pos = st.pos + 1;
+            let ix = text_at(t, st);
+            if ix == "]" || ix == ".." || ix == "..=" { return stop(st, "empty or open index"); }
+            let idx = parse_expr_bp(t, g, a, st, 0);
+            if idx < 0 { return -1; }
+            if text_at(t, st) != "]" { return stop(st, "index with more than one part"); }
+            st.pos = st.pos + 1;
+            lhs = add_node(a, NK_INDEX, 0, a.starts[lhs], t.ends[st.pos - 1], "", 0, [lhs, idx,]);
+            continue;
+        }
+        if g.postfix.has(x) {
+            if g.postfix[x] < min_bp { break; }
+            if x != "?" { return stop(st, "postfix operator other than `?`"); }
+            st.pos = st.pos + 1;
+            lhs = add_node(a, NK_TRY_PROPAGATE, 0, a.starts[lhs], t.ends[st.pos - 1], "", 0, [lhs,]);
+            continue;
+        }
+        if x == "!" { return stop(st, "postfix `!`"); }
+        if (x == "?.." || x == "..") && min_bp <= 1 && k != NK_INT && k != NK_FLOAT && is_word(t, st.pos + 1) {
+            return stop(st, "cascade");
+        }
+        if x == nameof(catch) { return stop(st, "catch clause"); }
+        guard some op = g.infix.get(x) else { break; };
+        if op.shape == nameof(TypeRight) || op.shape == nameof(Membership) {
+            if op.bp >= min_bp { return stop(st, f"{op.shape} operator"); }
+            break;
+        }
+        if op.bp < min_bp { break; }
+        st.pos = st.pos + 1;
+        let rhs = parse_expr_bp(t, g, a, st, if op.right { op.bp } else { op.bp + 1 });
+        if rhs < 0 { return stop(st, "operator without a right operand"); }
+        lhs = add_node(a, NK_BINARY, 0, a.starts[lhs], t.ends[st.pos - 1], x, 0, [lhs, rhs,]);
+        if op.shape == nameof(OpenRange) && text_at(t, st) == ":" { return stop(st, "range step"); }
+    }
+    if st.unbuilt.len() > 0 { return -1; }
+    return lhs;
+}
+
+/// Whether `<` at `p` opens generic arguments: the seed's test
+/// (crates/pilot-parser/src/expr.rs `try_skip_generic_expr_args`), on the
+/// declared tokens. Any comment or newline inside means no.
+fn generic_args_ahead(ref t: Tape, p0: i64) -> bool {
+    var p = p0;
+    var d = 0;
+    while p < t.len() {
+        if p > p0 && t.nl_before[p] { return false; }
+        let x = t.text_of(p);
+        if x == "<" {
+            d = d + 1;
+        } else if x == ">" {
+            d = d - 1;
+            if d == 0 { break; }
+        } else if x == ">>" {
+            d = d - 2;
+            if d <= 0 { break; }
+        } else if !(x == "," || x == "[" || x == "]" || x == "(" || x == ")" || x == "*" || x == "?" || x == "!" || x == "|" || x == "&" || x == "->" || x == "=>" || x == ".." || t.family_of(p) == "integer" || is_word(t, p)) {
+            return false;
+        }
+        p = p + 1;
+    }
+    if d != 0 || p + 1 >= t.len() { return false; }
+    let after = t.text_of(p + 1);
+    let fam = t.family_of(p + 1);
+    return after == "{" || after == "(" || fam == "infix_dot" || fam == "prefix_dot";
+}
+
+/// The operand at `st.pos`.
+fn parse_prefix(ref t: Tape, ref g: OpTable, var ref a: ParseArena, var ref st: ParseState) -> i64 {
+    if st.pos >= t.len() { return -1; }
+    let x = text_at(t, st);
+    let fam = t.family_of(st.pos);
+    let s0 = t.starts[st.pos];
+    let e0 = t.ends[st.pos];
+    if fam == "integer" || fam == "hex_integer" || fam == "bin_integer" || fam == "oct_integer" {
+        let radix = if fam == "hex_integer" { 16 } else if fam == "bin_integer" { 2 } else if fam == "oct_integer" { 8 } else { 10 };
+        st.pos = st.pos + 1;
+        return add_node(a, NK_INT, 0, s0, e0, "", int_value(x, radix), []);
+    }
+    if fam == "float" {
+        st.pos = st.pos + 1;
+        return add_node(a, NK_FLOAT, 0, s0, e0, "", 0, []);
+    }
+    if fam == "string" || fam == "string_triple" || fam == "byte_string" || fam == "byte_string_triple" || fam == "raw_string" || fam == "raw_string_triple" {
+        st.pos = st.pos + 1;
+        return add_node(a, NK_STR, 0, s0, e0, "", 0, []);
+    }
+    if x == "(" { return parse_paren(t, g, a, st); }
+    if x == "::" && is_word(t, st.pos + 1) {
+        st.pos = st.pos + 2;
+        return add_node(a, NK_IDENT, 0, s0, t.ends[st.pos - 1], t.text_of(st.pos - 1), 0, []);
+    }
+    if x == "[" { return parse_list(t, g, a, st); }
+    if g.prefix.has(x) && !is_word(t, st.pos) {
+        let bp = g.prefix[x];
+        st.pos = st.pos + 1;
+        let v = parse_expr_bp(t, g, a, st, bp);
+        if v < 0 { return stop(st, "prefix operator without an operand"); }
+        return add_node(a, NK_UNARY, 0, s0, t.ends[st.pos - 1], x, 0, [v,]);
+    }
+    if is_word(t, st.pos) {
+        if g.prefix_words.has(x) {
+            let bp = g.prefix[x];
+            st.pos = st.pos + 1;
+            let v = parse_expr_bp(t, g, a, st, bp);
+            if v < 0 { return stop(st, "prefix word without an operand"); }
+            return add_node(a, NK_UNARY, 0, s0, t.ends[st.pos - 1], x, 0, [v,]);
+        }
+        if x == nameof(true) || x == nameof(false) {
+            st.pos = st.pos + 1;
+            return add_node(a, NK_BOOL, 0, s0, e0, "", if x == nameof(true) { 1 } else { 0 }, []);
+        }
+        if x == nameof(none) {
+            st.pos = st.pos + 1;
+            return add_node(a, NK_NONE, 0, s0, e0, "", 0, []);
+        }
+        let led = [nameof(if), nameof(quote), nameof(comptime), nameof(yield), nameof(ref),];
+        for w in led {
+            if x == w { return stop(st, "form led by a seed word"); }
+        }
+        let nx = t.text_of(st.pos + 1);
+        // `splat(x)`, `pairs(x)`, `flat(x)`: the readable spellings of the
+        // prefix `*`, `**`, `*..`, one node with the word as its spelling.
+        if (x == nameof(splat) || x == nameof(pairs) || x == nameof(flat)) && nx == "(" {
+            st.pos = st.pos + 2;
+            let v = parse_expr_bp(t, g, a, st, 0);
+            if v < 0 { return -1; }
+            if text_at(t, st) != ")" { return stop(st, "unpack word not closed by `)`"); }
+            st.pos = st.pos + 1;
+            return add_node(a, NK_UNARY, 0, s0, t.ends[st.pos - 1], x, 0, [v,]);
+        }
+        if x == nameof(var) && (is_word(t, st.pos + 1) || nx == "&") { return stop(st, "mutable binding word"); }
+        if x == nameof(some) { return stop(st, "`some` binding"); }
+        let quoting = [nameof(call), nameof(splice), nameof(frame), nameof(sig), nameof(grad), nameof(plan),];
+        for w in quoting {
+            if x == w && is_word(t, st.pos + 1) { return stop(st, "readable call quote"); }
+        }
+        // A name followed on its line by a word that is no operator is a
+        // form a `syntax` rule leads (`for i in xs { .. }`), not a name.
+        let led = is_word(t, st.pos + 1) || is_literal(t, st.pos + 1);
+        if led && !t.nl_before[st.pos + 1] && !g.infix.has(nx) && !g.postfix.has(nx) {
+            return stop(st, "a form led by a word (a `syntax` rule)");
+        }
+        st.pos = st.pos + 1;
+        return add_node(a, NK_IDENT, 0, s0, e0, x, 0, []);
+    }
+    return stop(st, if fam.len() > 0 { f"operand starting with a `{fam}` token" } else { "end of source" });
+}
+
+/// `( .. )`: a parenthesized expression or a tuple.
+fn parse_paren(ref t: Tape, ref g: OpTable, var ref a: ParseArena, var ref st: ParseState) -> i64 {
+    let s0 = t.starts[st.pos];
+    guard some close = matching(t, st.pos) else { return stop(st, "unclosed `(`"); };
+    if close + 1 < t.len() && t.text_of(close + 1) == "=>" { return stop(st, "lambda"); }
+    st.pos = st.pos + 1;
+    var items: List<i64> = [];
+    var comma = false;
+    while st.pos < t.len() && text_at(t, st) != ")" {
+        let e = parse_expr_bp(t, g, a, st, 0);
+        if e < 0 { return -1; }
+        items.push(e);
+        if text_at(t, st) != "," { break; }
+        comma = true;
+        st.pos = st.pos + 1;
+    }
+    if text_at(t, st) != ")" { return stop(st, "tuple not closed by `)`"); }
+    st.pos = st.pos + 1;
+    if items.len() == 1 && !comma { return items[0]; }
+    return add_node(a, NK_TUPLE, 0, s0, t.ends[st.pos - 1], "", 0, items);
+}
+
+/// `[a, b]`: a list literal. A map literal or `[:]` is not built yet.
+fn parse_list(ref t: Tape, ref g: OpTable, var ref a: ParseArena, var ref st: ParseState) -> i64 {
+    let s0 = t.starts[st.pos];
+    st.pos = st.pos + 1;
+    if text_at(t, st) == ":" { return stop(st, "empty map literal"); }
+    var items: List<i64> = [];
+    while st.pos < t.len() && text_at(t, st) != "]" {
+        let e = parse_expr_bp(t, g, a, st, 0);
+        if e < 0 { return -1; }
+        let nx = text_at(t, st);
+        if nx == ":" { return stop(st, "map literal"); }
+        // `[**m]`: a map built by spreading another (the prefix `**`).
+        if a.kinds[e] == NK_UNARY && (a.names[e] == "**" || a.names[e] == nameof(pairs)) { return stop(st, "map literal spread"); }
+        if nx == nameof(for) || nx == nameof(if) { return stop(st, "list comprehension"); }
+        items.push(e);
+        if nx != "," { break; }
+        st.pos = st.pos + 1;
+    }
+    if text_at(t, st) != "]" { return stop(st, "list not closed by `]`"); }
+    st.pos = st.pos + 1;
+    return add_node(a, NK_LIST, 0, s0, t.ends[st.pos - 1], "", 0, items);
+}
+
+/// `callee(args)`: positional and named (`name: value`, `name = value`)
+/// arguments. A trailing comma is not a form of the language.
+fn parse_call(ref t: Tape, ref g: OpTable, var ref a: ParseArena, var ref st: ParseState, callee: i64) -> i64 {
+    if a.kinds[callee] == NK_IDENT && a.names[callee] == nameof(nameof) { return stop(st, "name quote"); }
+    st.pos = st.pos + 1;
+    var ch: List<i64> = [callee,];
+    while st.pos < t.len() && text_at(t, st) != ")" {
+        let nx = t.text_of(st.pos + 1);
+        if is_word(t, st.pos) && (nx == "=" || nx == ":") {
+            let ns = t.starts[st.pos];
+            let name = text_at(t, st);
+            st.pos = st.pos + 2;
+            let v = parse_expr_bp(t, g, a, st, 0);
+            if v < 0 { return -1; }
+            ch.push(add_node(a, NK_CALL_ARG, 0, ns, t.ends[st.pos - 1], name, 0, [v,]));
+        } else {
+            let v = parse_expr_bp(t, g, a, st, 0);
+            if v < 0 { return -1; }
+            ch.push(v);
+        }
+        if text_at(t, st) != "," { break; }
+        st.pos = st.pos + 1;
+        if text_at(t, st) == ")" { return stop(st, "trailing comma in arguments"); }
+    }
+    if text_at(t, st) != ")" { return stop(st, "arguments not closed by `)`"); }
+    st.pos = st.pos + 1;
+    return add_node(a, NK_CALL, 0, a.starts[callee], t.ends[st.pos - 1], "", 0, ch);
+}
+
+/// The `)` that closes the `(` at `open`.
+fn matching(ref t: Tape, open: i64) -> i64? {
+    var depth = 0;
+    var p = open;
+    while p < t.len() {
+        let x = t.text_of(p);
+        if x == "(" || x == "[" || x == "{" { depth = depth + 1; }
+        if x == ")" || x == "]" || x == "}" {
+            depth = depth - 1;
+            if depth == 0 { return p; }
+        }
+        p = p + 1;
+    }
+    return none;
+}

@@ -1,6 +1,8 @@
 // =========================================================================
 // FILE: selfhost/bench/bench.pilot
-// Milestone 60.2: Self-Hosted Hardware Throughput & Zero-GC Benchmark Suite
+// Benchmark metric records and JSON statistics. `pilot bench` is
+// selfhost/cli/bench_cmd.pilot, not this file.
+// Reached only by the milestone60 Rust test; no `pilot` command runs it.
 // =========================================================================
 pub pkg selfhost.bench;
 

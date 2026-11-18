@@ -27,7 +27,7 @@ Phase 4  PROP-023 (LANG section) → PROP-006 cutover (~1,800 Rust LOC floor)
 - **Rust tests are deleted, not kept or added.** What a Rust test checked that no Pilot conformance program checks is ported to `tests/conformance/` first. The one exception: `pilot-parser`'s `damaged_source` test stays until the Rust parser is deleted (AGENTS.md §11 rule 7).
 - **Old Pilot code goes on sight.** A `.pilot` file that only works on the Rust AST bridge, or that a Pilot replacement has superseded, is deleted when its last user goes, not kept "for later".
 
-Seed today: **27,233** `src` lines (the `paused_max_total_rust_loc()` ceiling) plus **25,486** lines of Rust tests (`pilot-analysis` 20,703; `pilot-cli` 3,266; `pilot-parser` 1,151; `pilot-vm` 366).
+Seed today: **27,054** `src` lines (the `paused_max_total_rust_loc()` ceiling) plus **25,486** lines of Rust tests (`pilot-analysis` 20,703; `pilot-cli` 3,266; `pilot-parser` 1,151; `pilot-vm` 366).
 
 ---
 
@@ -35,8 +35,8 @@ Seed today: **27,233** `src` lines (the `paused_max_total_rust_loc()` ceiling) p
 
 | Step | Rust deleted | Old Pilot deleted | What breaks (made loud) |
 | :-- | :-- | :-- | :-- |
-| **D0 — now** (new proposal; needs nothing else first) | All of `crates/pilot-analysis`: `src` 1,380 (`infer.rs` 1,080, `types.rs` 287, `lib.rs` 13) and its 46 test files, 20,703. In `pilot-cli`: the `pilot_analysis` uses in `tool.rs` and `run.rs` (the `ast_*`/`layout_*`/`mount_unit` hooks) and the `Cargo.toml` dependency. The 13 `pilot-cli` tests (3,266) and 2 `pilot-vm` tests (366), after porting what only they check. `pilot-parser`'s tests except `damaged_source` (948). **About −26,700.** | 5B.4 group 4: `selfhost/{lexer,ast,parser}.pilot` (343 `__engine` calls). Group 5, the 35 unlinked files (1,967 calls): `selfhost/vm/compiler.pilot` (the old Pilot bytecode compiler, superseded by `ir_to_pilc.pilot`), `vm/pilc_writer`, `codegen/*` (old emitters over the Rust AST; `--emit c` uses `selfhost/ir`), `perceus/*`, `perf/*`, `lsp/*`, `dap/*`, `db/*`, `ide/vscode_gen`, `cst/cst`, `bench/bench`, and each unpackaged `stdlib/*` file no test imports. | Everything that reads the Rust AST through `pilot-analysis`: `ffi_bindgen`, `core/reflect` (user reflection), `attr_weaver`, `core/primitives/ast` (`ast<T>` reads), `diagnostics`, `ast_bridge`, `core/keywords` (the keyword-matrix tool). Each call becomes a seam; its rows drop to `SEAM`. **Rewrite first, in Pilot over `selfhost/check`'s snapshot:** the 7 AST reads in `cli/test_runner` and the 6 in `pkg/manifest`, because `pilot test` and package loading are toolchain. LSP, DAP and the Perceus/WCET passes are rebuilt on `selfhost/check` later. |
-| **A1 — 5B.4 groups 3–4** | Each CLI host native that can be rebuilt in Pilot over existing owners leaves `pilot-cli/src/{host,tool}.rs` ("Pilot first", 2026-11-18). | `legacy_engine_ratchet()` rows go to 0 and are removed. | — |
+| **D0 — now** (new proposal; needs nothing else first) | All of `crates/pilot-analysis`: `src` 1,380 (`infer.rs` 1,080, `types.rs` 287, `lib.rs` 13) and its 46 test files, 20,703. In `pilot-cli`: the `pilot_analysis` uses in `tool.rs` and `run.rs` (the `ast_*`/`layout_*`/`mount_unit` hooks) and the `Cargo.toml` dependency. The 13 `pilot-cli` tests (3,266) and 2 `pilot-vm` tests (366), after porting what only they check. `pilot-parser`'s tests except `damaged_source` (948). **About −26,700.** | 5B.4 group 4: `selfhost/{lexer,ast,parser}.pilot` (343 `__engine` calls). Group 5, the 35 unlinked files (1,967 calls): `selfhost/vm/compiler.pilot` (the old Pilot bytecode compiler, superseded by `ir_to_pilc.pilot`), `vm/pilc_writer`, `codegen/*` (old emitters over the Rust AST; deleted 2026-11-18, nothing ran them; `--emit c` uses `selfhost/ir`), `perceus/*`, `perf/*`, `lsp/*`, `dap/*`, `db/*`, `ide/vscode_gen`, `cst/cst`, `bench/bench`, and each unpackaged `stdlib/*` file no test imports. | Everything that reads the Rust AST through `pilot-analysis`: `ffi_bindgen`, `core/reflect` (user reflection), `attr_weaver`, `core/primitives/ast` (`ast<T>` reads), `diagnostics`, `ast_bridge` (deleted 2026-11-18), `core/keywords` (the keyword-matrix tool). Each call becomes a seam; its rows drop to `SEAM`. **Rewrite first, in Pilot over `selfhost/check`'s snapshot:** the 7 AST reads in `cli/test_runner` and the 6 in `pkg/manifest`, because `pilot test` and package loading are toolchain. LSP, DAP and the Perceus/WCET passes are rebuilt on `selfhost/check` later. |
+| **A1 — 5B.4 groups 3–4** | Each CLI host native that can be rebuilt in Pilot over existing owners leaves `pilot-cli/src/{host,tool}.rs` ("Pilot first", 2026-11-18). | `legacy_engine_ratchet()` rows go to 0 and are removed. | done 2026-11-18 |
 | **A2–A4 — 5B.5, 5B.6, 5C** | None expected. A fix that seems to need Rust is first asked about. | Any check left duplicated between `selfhost/check` and an older pass. | — |
 | **A5 — 5D** | None (adds only the approved minimum). | Whatever `ir_to_pilc.pilot` supersedes that D0 did not already remove. | — |
 | **A7 — 5E (T1)** | The toolchain link lists in `pilot-cli/src/{link,run}.rs` that only existed to compile the toolchain from source (exact list in the 5E proposal). | — | — |
@@ -58,8 +58,8 @@ After P2, about 4,700 Rust lines remain (`pilot-vm`'s `bridge.rs` 1,245, `lib.rs
 
 | # | Item | State | Needs from the owner |
 | :-- | :-- | :-- | :-- |
-| 0.1 | `PROP-005` 5D — `selfhost/vm/ir_to_pilc.pilot`, `pilot run --via-ir` | Pilot part being built (worktree agent) | approve its Rust list when it reports (`.pilc` source spans; a host op that runs emitted `.pilc`) |
-| 0.2 | `PROP-008` step 2 — generic `Operator` token, 30 dead operator kinds deleted | Rust approved 2026-11-18 without the `expr.rs` row; being built (worktree agent) | nothing; review the result |
+| 0.1 | `PROP-005` 5D — `selfhost/vm/ir_to_pilc.pilot`, `pilot run --via-ir` | Pilot part merged 2026-11-18 (`be4229f`); `--via-ir` fails the 9 cases that need `.pilc` source locations | final look at its 4-file Rust list (`pilc.rs` debug trailer, `run.rs` locations, the `milestone55` deletion, one `anticheat.rs` row) |
+| 0.2 | `PROP-008` step 2 — generic `Operator` token, 30 dead operator kinds deleted | merged 2026-11-18 (`4b94e8c`) | — |
 | 0.3 | `PROP-035` Amendment A1 — `anticheat.rs` test counts, `test_m27_4` step 1 | approved and built 2026-11-18 | — |
 | 0.4 | PR #18 (`claude/const-read-ir-speed`) — PilIR interpreter about 2× faster on Ed25519; `PROP-036` built (a `const` list read no longer copies the list) | open | review and merge |
 | 0.5 | `PROP-033` (analyzer skips stdlib units) | withdrawn 2026-11-18 | — |
@@ -74,7 +74,7 @@ Goal: Pilot (PilIR → `.pilc`) compiles everything, and the Rust `BytecodeCompi
 
 | # | Item | Depends on | Unblocks | Needs from the owner |
 | :-- | :-- | :-- | :-- | :-- |
-| A1 | **5B.4 groups 3–4** — the CLI host services get `[EngineOp]` owners (group 3); delete the old `selfhost/{lexer,ast,parser}.pilot` (group 4). Group 1 and 2 are done. | — | 5B.5, PROP-004 | group 3 decided 2026-11-18 ("Pilot first": rebuild in Pilot where possible, owners for the rest); group 4: its Rust test edits |
+| A1 | **5B.4 groups 3–4** — the CLI host services get `[EngineOp]` owners (group 3); delete the old `selfhost/{lexer,ast,parser}.pilot` (group 4). Group 1 and 2 are done. | — | 5B.5, PROP-004 | built 2026-11-18 (`PROP-038`, approved): 4 host services rebuilt in Pilot and their Rust deleted (−78 lines), the other 8 owned by `ToolHost`, old `selfhost/{ast,parser}.pilot` deleted; Amendments A1 (`test_61_1` deleted, milestone61 count 2 → 1 in `anticheat.rs`) and A2 (milestone01's gate bundle) approved and built the same day; left: `selfhost/lexer.pilot` goes with `PROP-004` |
 | A2 | **5B.5** — checker bugs found on the toolchain (`known_bugs` repro first, then the fix), then the visibility fixes | A1 | A3 | Rust list only if a fix needs one |
 | A3 | **5B.6** — the remaining rules: METH001, PURE001, COMP005 (each struct's real lattice), NULL005/006, TYPE003, FLOW005. Done when `pilot check` reports 0 errors on every live entry, kept at 0 by a new `toolchain_check` gate rule | A2 | A4 | as A2 |
 | A4 | **5C** — PilIR lowers and runs the whole toolchain: every `ir.lower_construct` seam it hits is closed | A3 | A6 (T1 needs it) | as A2 |
@@ -82,6 +82,7 @@ Goal: Pilot (PilIR → `.pilc`) compiles everything, and the Rust `BytecodeCompi
 | A6 | **Bootstrap: T1, decided 2026-11-18** (`PROP-005` §5E) — a checked-in `toolchain.pilc` built by the Pilot path; the Rust compiler is not kept for the toolchain | A4, A5 | A7 | decided |
 | A7 | **5E** — the VM boots `toolchain.pilc`; Gate 2 checks stage 2 == stage 3 | A6 | A8 | approve its itemized Rust list |
 | A8 | **5F** — delete the Rust `BytecodeCompiler`; ratchet `paused_max_total_rust_loc()` down; `must_be_absent` entries | A7 | Phase 4 | approve its Rust list (the big deletion) |
+| A9 | **`PROP-039`** — `.pilc` carries Pilot's Perceus `dup`/`drop`; the VM counts references and frees exactly where Pilot says; the tracing collector (`collect.rs`, 274) is deleted (AGENTS.md 12.4.5: Pilot decides, Rust acts) | A5 (Pilot part); A8 (deleting the collector) | — | draft 2026-11-18: opcodes or intrinsics; land the `+40` now or with A8 |
 
 `PROP-003` 3C (`op_checked` / `checked.rs`) was moved into this track and goes in A8.
 
@@ -94,10 +95,10 @@ Goal: every operator's spelling, level and meaning come from Pilot declarations,
 | # | Item | Depends on | Unblocks | Needs from the owner |
 | :-- | :-- | :-- | :-- | :-- |
 | B1 | **`PROP-008` step 2** — Phase 0.2 | — | B3 | (Phase 0.2); GRAM002 strictness question |
-| B2 | **`PROP-019`** — type-position operators (`T?`, `A -> R`, `T1 | T2`) declare their levels in Pilot; `TypePrecedence` leaves Rust (about −25 to 0) | — (independent; best before B5) | B5 | approved 2026-11-18 |
-| B3 | **`PROP-022`, the rest** — every operator use lowers to its member call or rule template; delete `map_binop_sym`, `binop_code`, `prefix_flag`, the `TryPropagateExpr` case, the native index parse, `BinaryOp` | B1, A5 | B5, Phase 4 | its Rust list (fixed when sequenced) |
+| B2 | **`PROP-019`** — type-position operators (`T?`, `A -> R`, `T1 | T2`) declare their levels in Pilot; `TypePrecedence` leaves Rust (about −25 to 0) | — (independent; best before B5) | B5 | approved 2026-11-18; built 2026-11-18 with Amendment 019-A (approved the same day) |
+| B3 | **`PROP-022`, the rest** — every operator use lowers to its member call or rule template; delete `map_binop_sym`, `binop_code`, `prefix_flag`, the `TryPropagateExpr` case, the native index parse, `BinaryOp` | Pilot slices: B1, A5 (started 2026-11-18, slice 22B built; 22C–22F next). Rust deletions: A7 (5E), because the seed `BytecodeCompiler` that compiles the toolchain reads `BinaryOp` | B5, Phase 4 | its Rust list, itemized after 5E |
 | B4 | **`PROP-008` step 3** — method-backed operators lower to owner methods; integer `+` lowers exactly as now on all three engines; gated on C2 | B3 | — | its Rust list |
-| B5 | **`PROP-025` steps 1–3** — the Pilot parser's building blocks, checked against the Rust parser by dumping both ASTs for every file in the tree (any difference is a bug, never accepted) | B2 (B3 helps) | B6, B7 | approved 2026-11-18; Rust lists come back |
+| B5 | **`PROP-025` steps 1–3** — the Pilot parser's building blocks, checked against the Rust parser by dumping both ASTs for every file in the tree (any difference is a bug, never accepted) | B2 (B3 helps) | B6, B7 | approved 2026-11-18; Rust lists come back. Steps 1–2 built 2026-11-18 (Pilot only, `stdlib/pilot/parse/`, `PILOT_PARSE_COMPARE`); step 3 not started |
 | B6 | **`PROP-034`** — a string built from many parts is allocated once (f-strings and `+` chains lower to one join) | B5 | — | its Rust/HostOp list (one appended op) |
 | B7 | **`PROP-025`, the rest** — the Pilot parser builds the AST the checker and PilIR read | B5 | Phase 4 | its Rust list |
 
@@ -136,3 +137,15 @@ Still open:
 1. Merge PR #18 (`PROP-036`).
 2. ERR005 warning on every `try`; `[HardRealtime]` heap checks.
 3. The itemized Rust lists of later steps as each is reached (5E, 5F, `PROP-022`, `PROP-023`, `PROP-004`, `PROP-006`), and whether to keep `PROP-003` 3D/3F.
+
+## Owner's to-fix-later list (from the checked-conversion work, 2026-11-12)
+
+Kept for a follow-up pass. Check each item against `selfhost/gate/ledger/seams.pilot` before working on it.
+1. Receiver-type planning (`selfhost/check/receivers.pilot`) covers user files only, not stdlib.
+2. On a SEED001 retry, `pilot run` computes the run plan twice (`cli_check` retry, then `cli_run`).
+3. Primitives can't declare `ext T : IToX` bases (known bug `seed.ext_bases_dropped`, a parser issue).
+4. No `static const` members; limits are static functions such as `i32.max()`.
+5. `-128i8`-style minimum literals fail (the unary minus applies after the suffixed literal).
+6. Known bug `seed.ok_result_members`: `.is_err` / `.is_ok` on a successful result fails on the VM.
+7. Known bugs `seed.struct_ok_unwrapped`, `seed.int_to_f32_double_round`; seam `convert.wide_scalar`; stand-in `convert.nan_bits`. (`seed.f32_not_rounded` and `convert.float_parse_slow_path` were no longer in the ledger on 2026-11-18: closed or renamed.)
+8. The rename litmus fails on `tests/conformance/errors/err_pure_result_mutate.pilot` (the word `result` in its expected stderr).

@@ -1,0 +1,95 @@
+// ==============================================================================
+// FILE: stdlib/pilot/parse/tape.pilot
+// Ring 3: the token tape the Pilot parser reads (pub pkg pilot.parse.tape;)
+// PROP-025 step 2, building block 1.
+// ==============================================================================
+// The tokens the parser reads, as the declared lexer splits them: the table
+// the seed runs (stdlib/core/lex/toolchain.lex, `read_seed_table`), run by
+// Pilot (`lex_modal`). Spaces and comments are left out by their declared
+// role, so no family name is written here; a newline before a token is kept
+// as a flag. An f-string, holes and all, is one token, as the seed reads it:
+// a token that enters a mode from the first mode runs until the lexer is back
+// there. This reads the lexeme stream directly rather than through
+// `TokenTape` (stdlib/pilot/lex.pilot): linking `pilot.lex` into the checker
+// pulls in the lexicon's constant tables, and the seed then needs more than
+// 111 locals to initialize the tools' constants (`pilot compile` failed).
+pub pkg pilot.parse.tape;
+
+use Pilot.Core.Lex.Patterns;
+use pilot.lex.build;
+use pilot.lex.modes;
+use pilot.lex.seed;
+
+/// The tokens of one text. Token `i` is `text.slice(starts[i], ends[i])`,
+/// of family `families[i]` (its name in the lexer, `?` for a byte no token
+/// starts); `nl_before[i]` says a newline stands between it and the token
+/// before. `error` is "" or the first lexing error (a byte no token starts).
+pub struct Tape : IObject {
+    pub text: str;
+    pub families: List<str>;
+    pub starts: List<i64>;
+    pub ends: List<i64>;
+    pub nl_before: List<bool>;
+    pub error: str;
+
+    pub fn len(ref self) -> i64 => self.starts.len() as i64;
+
+    pub fn ok(ref self) -> bool => self.error.len() == 0;
+
+    /// The text of token `i`, or "" past the end.
+    pub fn text_of(ref self, i: i64) -> str =>
+        if i >= 0 && i < self.len() { self.text.slice(self.starts[i], self.ends[i]) } else { "" };
+
+    /// The family of token `i`, or "" past the end.
+    pub fn family_of(ref self, i: i64) -> str =>
+        if i >= 0 && i < self.len() { self.families[i] } else { "" };
+}
+
+/// Whether `l` is a space, a newline or a comment: not read by the parser.
+fn is_trivia(ref m: ModalLexer, l: Lexeme) -> bool {
+    if l.decl < 0 { return false; }
+    let role = m.tables[l.mode].actions[l.decl].role;
+    return role == TokenRole::Space || role == TokenRole::Trivia;
+}
+
+/// The tape of `text`, lexed by `m`.
+pub fn tape_of(ref m: ModalLexer, text: str) -> Tape {
+    var families: List<str> = [];
+    var starts: List<i64> = [];
+    var ends: List<i64> = [];
+    var nl: List<bool> = [];
+    var newline = false;
+    var error = "";
+    // An f-string being merged: its index on the tape, or -1.
+    var open = -1;
+    for l in lex_modal(m, text) {
+        if open >= 0 {
+            if l.mode != 0 {
+                ends[open] = l.end;
+                continue;
+            }
+            open = -1;
+        }
+        if is_trivia(m, l) {
+            if text.slice(l.start, l.end).contains("\n") { newline = true; }
+            continue;
+        }
+        if l.decl < 0 && error.len() == 0 { error = f"no token starts at byte {l.start}"; }
+        families.push(modal_family(m, l));
+        starts.push(l.start);
+        ends.push(l.end);
+        nl.push(newline);
+        newline = false;
+        if l.decl >= 0 && l.mode == 0 && m.enters[0][l.decl] >= 0 {
+            open = starts.len() as i64 - 1;
+        }
+    }
+    return Tape { text: text, families: families, starts: starts, ends: ends, nl_before: nl, error: error };
+}
+
+/// The tape of `text` with the seed's table; `none` when the table cannot be
+/// read from the working directory.
+pub fn seed_tape(text: str) -> Tape? {
+    guard some m = read_seed_table() else { return none; }
+    return tape_of(m, text);
+}

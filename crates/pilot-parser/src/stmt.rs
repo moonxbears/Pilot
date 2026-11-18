@@ -12,10 +12,10 @@ impl<'a> Parser<'a> {
             let sym = self.intern_cur();
             self.arena
                 .alloc_node(NodeKind::TypeNamed, 0, sp, sym.0, u32::MAX)
-        } else if matches!(self.peek(), TokenKind::Star | TokenKind::At) {
+        } else if let Some(&bp) = self.tables.type_prefix.get(self.text()) {
             let op = self.text().to_string();
             self.advance();
-            let inner = self.parse_type_bp(TypePrecedence::PostfixOptional as u8);
+            let inner = self.parse_type_bp(bp);
             if let Some(TypeConstructRule::Prefix {
                 param, template, ..
             }) = self
@@ -117,8 +117,9 @@ impl<'a> Parser<'a> {
         } else {
             return NodeId::NONE;
         };
+        let tight = self.tables.type_tight_bp();
         loop {
-            if TypePrecedence::PostfixOptional as u8 >= min_bp {
+            if tight >= min_bp {
                 if self.eat(TokenKind::LBracket) {
                     let (kind, extra) = if self.eat(TokenKind::RBracket) {
                         (TypePostfixKind::BracketEmpty, Vec::new())
@@ -151,40 +152,62 @@ impl<'a> Parser<'a> {
                         }
                     continue;
                 }
-                if matches!(
-                    self.peek(),
-                    TokenKind::Question | TokenKind::Caret | TokenKind::At
-                ) {
-                    let sym = self.text().to_string();
-                    if let Some(TypeConstructRule::Postfix { kind: TypePostfixKind::Sym(_, has_arg), params, template }) =
-                        self.tables.type_rules.iter().find(|r| matches!(r, TypeConstructRule::Postfix { kind: TypePostfixKind::Sym(s, _), .. } if s == &sym)).cloned()
-                    { self.advance(); let mut b = vec![(params[0].clone(), lhs)]; if has_arg {
+                // A declared postfix symbol: `T?`, or with an argument `T @ N`.
+                let sym = self.text().to_string();
+                let declared = self
+                    .tables
+                    .type_postfix
+                    .get(&sym)
+                    .is_some_and(|&b| b >= min_bp);
+                let rule = self.tables.type_rules.iter().find(|r| match r {
+                    TypeConstructRule::Postfix {
+                        kind: TypePostfixKind::Sym(s),
+                        ..
+                    } => s == &sym,
+                    TypeConstructRule::Infix { op, .. } => op == &sym,
+                    _ => false,
+                });
+                if let Some(rule) = rule.cloned().filter(|_| declared) {
+                    self.advance();
+                    let (b, template) = match rule {
+                        TypeConstructRule::Infix {
+                            lhs_param,
+                            rhs_param,
+                            template,
+                            ..
+                        } => {
                             // A number argument may be a range: at the power of `..`.
                             let arg = if self.at(TokenKind::IntLit) {
-                                let bp = self.tables.bp_of(pilot_ast::BinaryOp::RangeHalfOpen, LEVEL_BASE);
+                                let bp = self
+                                    .tables
+                                    .bp_of(pilot_ast::BinaryOp::RangeHalfOpen, LEVEL_BASE);
                                 self.parse_expr_bp(bp)
                             } else {
-                                self.parse_type_bp(31)
+                                self.parse_type_bp(tight.saturating_add(1))
                             };
-                            if let Some(p1) = params.get(1) { b.push((p1.clone(), arg)); } }
-                        let end = self.prev_span().end;
-                        lhs = template.instantiate(&mut self.arena, &b, ByteSpan::new(sp.start, end));
-                        continue; }
+                            (vec![(lhs_param, lhs), (rhs_param, arg)], template)
+                        }
+                        TypeConstructRule::Postfix {
+                            params, template, ..
+                        } => (vec![(params[0].clone(), lhs)], template),
+                        _ => break,
+                    };
+                    let end = self.prev_span().end;
+                    lhs = template.instantiate(&mut self.arena, &b, ByteSpan::new(sp.start, end));
+                    continue;
                 }
             }
-            let op_str = match self.peek() {
-                TokenKind::Amper => "&",
-                TokenKind::Vbar => "|",
-                TokenKind::Arrow => "->",
-                TokenKind::Exclamation => "!",
-                TokenKind::FatArrow if self.arena.node(lhs).node_kind() == NodeKind::TypeTuple => {
-                    "=>"
-                }
-                _ => break,
+            // `=>` is a type operator only after a parenthesized list: `(A) => R`.
+            if self.at(TokenKind::FatArrow)
+                && self.arena.node(lhs).node_kind() != NodeKind::TypeTuple
+            {
+                break;
+            }
+            let op_str = self.text().to_string();
+            let Some(&(bp, right_assoc)) = self.tables.type_infix.get(&op_str) else {
+                break;
             };
             let Some(TypeConstructRule::Infix {
-                bp,
-                right_assoc,
                 lhs_param,
                 rhs_param,
                 template,
@@ -193,7 +216,7 @@ impl<'a> Parser<'a> {
                 .tables
                 .type_rules
                 .iter()
-                .find(|r| matches!(r, TypeConstructRule::Infix { op, .. } if op == op_str))
+                .find(|r| matches!(r, TypeConstructRule::Infix { op, .. } if op == &op_str))
                 .cloned()
             else {
                 break;

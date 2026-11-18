@@ -297,7 +297,7 @@ impl<'a> Parser<'a> {
                     self.advance();
                 }
                 let (ty, op) = (
-                    self.parse_type_bp(30),
+                    self.parse_type_bp(self.tables.type_tight_bp()),
                     if is_view {
                         BinaryOp::AsView
                     } else {

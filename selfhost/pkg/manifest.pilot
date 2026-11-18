@@ -1,6 +1,9 @@
 // =========================================================================
 // FILE: selfhost/pkg/manifest.pilot
-// Milestone 60.1: Pilot Package Manifest (pilot.json) & Lockfile Generator
+// Package manifest (pilot.json) parsing and lockfile generation.
+// Reached by the milestone29 and milestone60 Rust tests and by
+// selfhost/cli/pkg_cmd.pilot (milestone03 test only); `pilot pkg` has no
+// handler (seam cli.command_handler).
 // =========================================================================
 pub pkg selfhost.pkg;
 

@@ -9,11 +9,12 @@
 use crate::Parser;
 use pilot_lexer::TokenKind;
 
-/// One above the binding power of the function-type arrow (`compile_type_rule`
-/// gives `=>` and `->` 10), so a type parsed at it stops before the arrow.
-pub(crate) const ABOVE_FN_ARROW: u8 = 11;
-
 impl<'a> Parser<'a> {
+    /// One above the declared power of the type arrow `=>`: a type read at it stops before the body's `=>`.
+    pub(crate) fn above_fn_arrow(&self) -> u8 {
+        self.tables.type_infix.get("=>").map_or(0, |e| e.0) + 1
+    }
+
     /// At a function's return type: whether it is a parenthesized type whose
     /// `)` is followed by the `=>` that begins the expression body.
     pub(crate) fn tuple_return_before_body(&self) -> bool {

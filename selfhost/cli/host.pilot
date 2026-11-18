@@ -37,6 +37,15 @@ pub struct DeclaredFn : IValue {
 /// severity (`Diag::to_host` in crates/pilot-cli/src/run.rs).
 type HostDiagRow = (str, str, str, i64, i64, i64);
 
+/// A function row as the host gives it: name, attributes.
+type DeclaredFnRow = (str, List<str>);
+
+/// What the host gives for a run: exit code, then diagnostic rows.
+type HostRunRows = (i64, List<HostDiagRow>);
+
+/// What the host gives for a type check: diagnostic rows, then step rows or none.
+type HostCheckRows = (List<HostDiagRow>, List<HostStepRow>?);
+
 fn host_diags(ref raw: List<HostDiagRow>) -> List<HostDiag> {
     var out: List<HostDiag> = [];
     for d in raw {
@@ -45,8 +54,52 @@ fn host_diags(ref raw: List<HostDiagRow>) -> List<HostDiag> {
     return out;
 }
 
+/// The seed's tool services (`crates/pilot-cli/src/host.rs`): compiling,
+/// checking and running a program or a self-hosted tool from source, which
+/// needs the seed's parser and compiler until PROP-005 5E. Each service is
+/// the whole body of its `[EngineOp]` owner, called only by the public method
+/// of the same name (`airlock_native_owners()` in
+/// selfhost/gate/airlock_abi.pilot, PROP-038). The rows come back untyped
+/// from the host; the `host_*` functions below give them their types.
+pub struct ToolHost : IValue {
+    [EngineOp]
+    priv static fn check_internal(path: str, ref checker: List<str>, ref decls: List<str>) -> List<HostDiagRow> => __engine("cli_check", path, checker, decls);
+    [EngineOp]
+    priv static fn typecheck_internal(path: str, ref checker: List<str>, ref decls: List<str>, entry: str) -> HostCheckRows => __engine("cli_typecheck", path, checker, decls, entry);
+    [EngineOp]
+    priv static fn program_tool_internal(path: str, ref files: List<str>, ref decls: List<str>, entry: str) -> i64 => __engine("cli_program_tool", path, files, decls, entry);
+    [EngineOp]
+    priv static fn program_eval_internal(path: str, ref files: List<str>, ref decls: List<str>, entry: str) -> List<HostStepRow>? => __engine("cli_program_eval", path, files, decls, entry);
+    [EngineOp]
+    priv static fn run_internal(path: str, ref args: List<str>, tail: str, ref checker: List<str>, ref decls: List<str>, ref links: List<str>) -> HostRunRows => __engine("cli_run", path, args, tail, checker, decls, links);
+    [EngineOp]
+    priv static fn functions_internal(path: str) -> List<DeclaredFnRow>? => __engine("cli_functions", path);
+    [EngineOp]
+    priv static fn tool_internal(ref files: List<str>, entry: str) -> str => __engine("cli_tool", files, entry);
+    [EngineOp]
+    priv static fn tool_on_internal(ref files: List<str>, entry: str, input: str) -> str => __engine("cli_tool_on", files, entry, input);
+
+    /// Links, parses and compiles `path` (with the checker's sources and
+    /// declarations for a run plan) without running it.
+    pub static fn check(path: str, ref checker: List<str>, ref decls: List<str>) -> List<HostDiagRow> => ToolHost.check_internal(path, checker, decls);
+    /// The type checker made of `checker` over `path`, calling `entry`.
+    pub static fn typecheck(path: str, ref checker: List<str>, ref decls: List<str>, entry: str) -> HostCheckRows => ToolHost.typecheck_internal(path, checker, decls, entry);
+    /// The tool made of `files` over the program at `path`; its exit code.
+    pub static fn program_tool(path: str, ref files: List<str>, ref decls: List<str>, entry: str) -> i64 => ToolHost.program_tool_internal(path, files, decls, entry);
+    /// The tool made of `files` over the program at `path`; the value `entry` gives.
+    pub static fn program_eval(path: str, ref files: List<str>, ref decls: List<str>, entry: str) -> List<HostStepRow>? => ToolHost.program_eval_internal(path, files, decls, entry);
+    /// Compiles and runs `path`: the exit code and the diagnostics.
+    pub static fn run(path: str, ref args: List<str>, tail: str, ref checker: List<str>, ref decls: List<str>, ref links: List<str>) -> HostRunRows => ToolHost.run_internal(path, args, tail, checker, decls, links);
+    /// The top-level functions of `path` and their attributes.
+    pub static fn functions(path: str) -> List<DeclaredFnRow>? => ToolHost.functions_internal(path);
+    /// The tool made of `files`, calling `entry`; its result as text.
+    pub static fn tool(ref files: List<str>, entry: str) -> str => ToolHost.tool_internal(files, entry);
+    /// `tool`, with the tool's AST queries answering about `input`.
+    pub static fn tool_on(ref files: List<str>, entry: str, input: str) -> str => ToolHost.tool_on_internal(files, entry, input);
+}
+
 /// Links, parses and compiles `path` without running it.
-pub fn host_check(path: str) -> List<HostDiag> => host_diags(__engine("cli_check", path, cli_checker_files(), cli_checker_decls()));
+pub fn host_check(path: str) -> List<HostDiag> => host_diags(ToolHost.check(path, cli_checker_files(), cli_checker_decls()));
 
 /// What a step of a function's chain does (`StepAction` in
 /// selfhost/cli/comptime_tool.pilot, which runs in the type checker's VM and
@@ -85,7 +138,7 @@ pub struct CheckedProgram {
 /// selfhost/cli/comptime_tool.pilot). A run plan is kept for the `host_run`
 /// that follows.
 pub fn host_typecheck(path: str, ref checker: List<str>, ref decls: List<str>, entry: str) -> CheckedProgram {
-    let raw: (List<HostDiagRow>, List<HostStepRow>?) = __engine("cli_typecheck", path, checker, decls, entry);
+    let raw = ToolHost.typecheck(path, checker, decls, entry);
     return CheckedProgram { diags: host_diags(raw.0), rest: raw.1 };
 }
 
@@ -93,30 +146,15 @@ pub fn host_typecheck(path: str, ref checker: List<str>, ref decls: List<str>, e
 /// `path` linked with `decls`; the tool reads the program the way the type
 /// checker does. Its result is the tool's exit code.
 pub fn host_program_tool(path: str, ref files: List<str>, ref decls: List<str>, entry: str) -> i64 =>
-    __engine("cli_program_tool", path, files, decls, entry);
+    ToolHost.program_tool(path, files, decls, entry);
 
-/// `host_program_tool` for a tool that checks the program itself
-/// (`checked_program` in selfhost/check/main.pilot): the host reports the
-/// checker's diagnostics through `report_pending_diags`
-/// before the tool goes on.
-pub fn host_checked_tool(path: str, ref files: List<str>, ref decls: List<str>, entry: str) -> i64 =>
-    __engine("cli_checked_tool", path, files, decls, entry);
-
-/// The type checker's diagnostics a checking tool is waiting on
-/// (`host_checked_tool`).
-pub fn host_pending_diags() -> List<HostDiag> => host_diags(__engine("cli_pending_diags"));
 
 /// Runs the tool made of `files`, calling `entry`, over the program at
 /// `path` linked with `decls`, as `host_program_tool` does; gives the value
 /// `entry` returns, or `none` when the program does not link. Its one
 /// caller's entry is `comptime_runs`, whose rows are `HostStepRow`s.
 pub fn host_program_eval(path: str, ref files: List<str>, ref decls: List<str>, entry: str) -> List<HostStepRow>? =>
-    __engine("cli_program_eval", path, files, decls, entry);
-
-/// Runs the tool made of `files`, calling `entry`, on the text of the file
-/// at `path`. Its result is the tool's exit code.
-pub fn host_text_tool(path: str, ref files: List<str>, entry: str) -> i64 =>
-    __engine("cli_text_tool", path, files, entry);
+    ToolHost.program_eval(path, files, decls, entry);
 
 /// The declarations every program is checked against, linked after the
 /// program: files, or directories whose `.pilot` files are taken in name
@@ -155,9 +193,16 @@ pub fn cli_checker_files() -> List<str> => [
     "stdlib/core/os_abi.pilot",
     "stdlib/core/host_raw.pilot",
     "stdlib/core/file.pilot",
+    "stdlib/core/env.pilot",
     "stdlib/pilot/lex/modes.pilot",
     "stdlib/pilot/lex/cache.pilot",
     "stdlib/pilot/lex/seed.pilot",
+    "stdlib/pilot/parse/tape.pilot",
+    "stdlib/pilot/parse/type_rules.pilot",
+    "stdlib/pilot/parse/arena.pilot",
+    "stdlib/pilot/parse/grammar.pilot",
+    "stdlib/pilot/parse/expr.pilot",
+    "stdlib/pilot/parse/dump.pilot",
     "selfhost/check/snapshot.pilot",
     "selfhost/check/types.pilot",
     "selfhost/check/diag.pilot",
@@ -199,6 +244,8 @@ pub fn cli_checker_files() -> List<str> => [
     "selfhost/check/layout_attrs.pilot",
     "selfhost/check/grammar_lex.pilot",
     "selfhost/check/grammar_attrs.pilot",
+    "selfhost/check/type_levels.pilot",
+    "selfhost/check/parse_compare.pilot",
     "selfhost/check/stack.pilot",
     "selfhost/check/clearance.pilot",
     "selfhost/check/lint_decls.pilot",
@@ -228,23 +275,22 @@ pub fn host_run_with(path: str, ref args: List<str>, tail: str, ref links: List<
     for l in links {
         all.push(l);
     }
-    let raw = __engine("cli_run", path, args, tail, cli_checker_files(), cli_checker_decls(), all);
-    return RunOutcome { exit_code: raw[0], diags: host_diags(raw[1]) };
+    let raw = ToolHost.run(path, args, tail, cli_checker_files(), cli_checker_decls(), all);
+    return RunOutcome { exit_code: raw.0, diags: host_diags(raw.1) };
 }
 
 /// The top-level functions of `path`, or `none` when it cannot be read.
 pub fn host_functions(path: str) -> List<DeclaredFn>? {
-    let raw = __engine("cli_functions", path);
-    if raw == none { return none; }
+    guard some raw = ToolHost.functions(path) else { return none; };
     var out: List<DeclaredFn> = [];
     for f in raw {
-        out.push(DeclaredFn { name: f[0], attrs: f[1] });
+        out.push(DeclaredFn { name: f.0, attrs: f.1 });
     }
     return out;
 }
 
 /// Runs the self-hosted tool made of `files`, calling `entry`; its result as text.
-pub fn host_tool(ref files: List<str>, entry: str) -> str => __engine("cli_tool", files, entry);
+pub fn host_tool(ref files: List<str>, entry: str) -> str => ToolHost.tool(files, entry);
 
 /// Like `host_tool`, with the tool's AST queries answering about `input`.
-pub fn host_tool_on(ref files: List<str>, entry: str, input: str) -> str => __engine("cli_tool_on", files, entry, input);
+pub fn host_tool_on(ref files: List<str>, entry: str, input: str) -> str => ToolHost.tool_on(files, entry, input);

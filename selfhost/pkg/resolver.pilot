@@ -1,7 +1,8 @@
 // =========================================================================
 // FILE: selfhost/pkg/resolver.pilot
-// Milestone 60.7: Advanced Pilot Package Dependency & Version Resolver
-// Conforms to the Strict Universal Name-Blind Boundary.
+// Package dependency and version resolver.
+// Used by selfhost/cli/pkg_cmd.pilot, which only the milestone03 Rust test
+// reaches; `pilot pkg` has no handler (seam cli.command_handler).
 // =========================================================================
 pub pkg selfhost.pkg;
 

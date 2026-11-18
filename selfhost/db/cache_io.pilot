@@ -1,7 +1,7 @@
 // ==============================================================================
 // FILE: selfhost/db/cache_io.pilot
-// Milestone 5.2: Incremental Compiler Database Cache Persistence & URI Canonicalization
-// Atomic .pilc-cache/pilotdb.v1 I/O & Cross-Platform Virtual Path Canonicalization
+// PilotDb cache file I/O (.pilc-cache/pilotdb.v1) and path canonicalization.
+// Reached only by the milestone05 Rust test; no `pilot` command runs it.
 // ==============================================================================
 pub lvl(0) pkg selfhost.db;
 

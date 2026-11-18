@@ -365,8 +365,8 @@ pub fn invoke_dynamic_frame(
         i = i + 1;
     }
     packet.vec_reg_count = v_count;
-    // The packed frame goes to `pilot_rt_invoke_abi_frame`
-    // (crates/pilot-rt/src/c_abi.rs), which PilVM cannot reach yet.
+    // Invoking the packed frame is planned, not built: there is no runtime
+    // entry point that takes it yet, so this stops at seam `abi.invoke_frame`.
     return seam("abi.invoke_frame",
         "PilVM has no bridge to pilot_rt_invoke_abi_frame; native calls from Pilot arrive in F6");
 }

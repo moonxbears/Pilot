@@ -1,7 +1,8 @@
 // =========================================================================
 // FILE: selfhost/lsp/ide_db.pilot
-// Milestone 59.2: Incremental Document Store & Signature-Hash Early Cutoff
-// Replaces crates/pilot-db and crates/pilot-incremental in Pure Pilot.
+// LSP document store over PilotDb with signature-hash early cutoff.
+// Reached only by the milestone05 and milestone59 Rust tests; no `pilot`
+// command runs it.
 // =========================================================================
 pub pkg selfhost.lsp;
 

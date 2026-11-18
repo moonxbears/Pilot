@@ -1,6 +1,11 @@
 // ==============================================================================
 // stdlib/std/polyglot/transport/toml.pilot
-// Ring 2 Standard Library: Full Bidirectional TOML AST & Serialization
+// Ring 2 Standard Library: a TOML value tree (string, int, float, bool,
+// array, table) with get/set/has/push/get_at/len and emit. toml_parse reads
+// a small flat subset only: `key = value` lines into one root table, with
+// quoted strings (no escapes) and `true`/`false`. `[table]` headers are
+// skipped, so their keys land in the root; any other value is not parsed
+// (see the note in toml_parse).
 // Package: std.polyglot.transport.toml (Transport Languages Subsystem)
 // ==============================================================================
 
@@ -318,7 +323,12 @@ pub fn toml_parse(src: str) -> TomlValue {
             } else if raw_val == "false" {
                 root.set(key, toml_bool(false));
             } else {
-                root.set(key, toml_int(10));
+                // A decimal integer is read; floats, dates, arrays and
+                // inline tables stop at the seam.
+                guard some whole = text.parse_i64(raw_val) else {
+                    return seam("toml.value_kinds", "reading TOML floats, dates, arrays and inline tables");
+                }
+                root.set(key, toml_int(whole));
             }
         }
     }

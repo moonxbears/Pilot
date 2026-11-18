@@ -37,6 +37,21 @@ comptime fn Postfix(target, symbol = "") =>
 comptime fn Shaped(target, shape, level, assoc, symbol = "", word = "") =>
     grammar_entry(target, symbol, shape, level, assoc, word);
 
+/// A type-position symbol (`syntax type_construct`, PROP-019): `T1 OP T2`
+/// at `level`. Written in a `comptime` block beside the rule:
+///     comptime { TypeInfix("~>", ::Arrow, ::Right); }
+comptime fn TypeInfix(symbol: str, level: TypeLevel, assoc: Assoc) =>
+    grammar_entry(nameof(type_construct), symbol, ::Binary, level, assoc, "");
+
+/// A type-position prefix symbol (`*T`) at `level`.
+comptime fn TypePrefix(symbol: str, level: TypeLevel) =>
+    grammar_entry(nameof(type_construct), symbol, ::Prefix, level, ::Right, "");
+
+/// A type-position postfix symbol (`T?`, or `T @ N` with an argument), at
+/// the tightest type level.
+comptime fn TypePostfix(symbol: str) =>
+    grammar_entry(nameof(type_construct), symbol, ::Postfix, ::Postfix, ::Neither, "");
+
 comptime {
     register_bracket_attribute(nameof(Infix),     Infix);
     register_bracket_attribute(nameof(InfixWord), InfixWord);

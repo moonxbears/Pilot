@@ -46,26 +46,6 @@ impl CapabilityBits {
     pub const fn raw(self) -> u8 {
         self.0
     }
-    #[inline(always)]
-    pub const fn is_mutable(self) -> bool {
-        (self.0 & 1) != 0
-    }
-    #[inline(always)]
-    pub const fn is_unique(self) -> bool {
-        (self.0 & 2) != 0
-    }
-    #[inline(always)]
-    pub const fn is_linear(self) -> bool {
-        (self.0 & 4) != 0
-    }
-    #[inline(always)]
-    pub const fn is_pinned(self) -> bool {
-        (self.0 & 8) != 0
-    }
-    #[inline(always)]
-    pub const fn union(self, other: Self) -> Self {
-        Self(self.0 | other.0)
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]

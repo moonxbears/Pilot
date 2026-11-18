@@ -1,5 +1,7 @@
 # Keyword implementation audit — 2026-11-13
 
+> **Historical snapshot (2026-11-13).** Its counts and the `cargo test --workspace` results describe that date; `docs/keyword_matrix.md` is the current record and reuses this audit's verdict words.
+
 ## 1. Scope and method
 
 **What was audited.** Every keyword in the registry `stdlib/core/keywords.pilot` (categories 0–16, 35–37: 148 words), plus every word the standard library binds to grammar that the registry does not list. Operators and primitive types are out of scope.

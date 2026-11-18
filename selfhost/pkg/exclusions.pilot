@@ -1,7 +1,8 @@
 // =========================================================================
 // FILE: selfhost/pkg/exclusions.pilot
-// Milestone 60.8: Package & Post-Definition Exclusions Engine ('without')
-// Conforms to the Strict Universal Name-Blind Boundary.
+// Package `without` exclusions in the manifest.
+// Used by selfhost/cli/pkg_cmd.pilot, which only the milestone03 Rust test
+// reaches; `pilot pkg` has no handler (seam cli.command_handler).
 // =========================================================================
 pub pkg selfhost.pkg;
 

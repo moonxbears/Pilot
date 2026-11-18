@@ -1,13 +1,12 @@
 // =========================================================================
 // FILE: stdlib/core/syntax/type_construct.pilot
 // TYPE-POSITION SYMBOL CONSTRUCT MACROS (`syntax type_construct`)
-// Maps symbolic suffix/prefix/infix constructs to canonical `[Lang]` types
-// obeying Pratt Type-Spec Binding-Power Invariant #6:
-//   Postfix (`?`, `[]`, `[N]`, `[..]`, `[:]`, `@`, `^`) = 30
-//   > Intersection (`&`) = 20
-//   > Union (`|`) = 15
-//   > Function Arrow (`=>`, `->`) = 10
-//   > Fallible (`!`) = 5
+// Maps symbolic suffix/prefix/infix constructs to canonical `[Lang]` types.
+// How tightly each symbol binds is declared below by a grammar entry naming a
+// `TypeLevel` (stdlib/core/operators/levels.pilot, loosest first: `!`, then
+// `->` `=>`, `|`, `&`, and the postfix forms). The bracket forms (`[]`,
+// `[N]`, `[..]`, `[:]`) are structural and bind at the tightest level
+// (PROP-019).
 // =========================================================================
 [EnforceCoreNaming]
 pub lvl(Cfg.Tokens.ring_genesis) pkg Pilot.Core.Syntax.TypeConstruct;
@@ -36,4 +35,20 @@ pub syntax type_construct {
     (sig<T>)       => quote { signal<$T> };
     (grad<T, G>)   => quote { dual<$T, $G> };
     (plan<T>)      => quote { effect_plan<$T> };
+}
+
+// The level of every type-position symbol (PROP-019). The seed reads only the
+// position of each `TypeLevel` variant, so renaming a level changes nothing.
+// A rule whose symbol has no entry here never applies.
+comptime {
+    grammar_entry(nameof(type_construct), "!",  ::Binary,  ::Fallible,  ::Left,    "");
+    grammar_entry(nameof(type_construct), "->", ::Binary,  ::Arrow,     ::Right,   "");
+    grammar_entry(nameof(type_construct), "=>", ::Binary,  ::Arrow,     ::Right,   "");
+    grammar_entry(nameof(type_construct), "|",  ::Binary,  ::Union,     ::Left,    "");
+    grammar_entry(nameof(type_construct), "&",  ::Binary,  ::Intersect, ::Left,    "");
+    grammar_entry(nameof(type_construct), "*",  ::Prefix,  ::Postfix,   ::Right,   "");
+    grammar_entry(nameof(type_construct), "@",  ::Prefix,  ::Postfix,   ::Right,   "");
+    grammar_entry(nameof(type_construct), "?",  ::Postfix, ::Postfix,   ::Neither, "");
+    grammar_entry(nameof(type_construct), "^",  ::Postfix, ::Postfix,   ::Neither, "");
+    grammar_entry(nameof(type_construct), "@",  ::Postfix, ::Postfix,   ::Neither, "");
 }
