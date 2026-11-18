@@ -1,57 +1,132 @@
 // =========================================================================
 // FILE: selfhost/dap/vm_controller.pilot
-// Debugger breakpoint and step state machine over pc_spans.
-// Reached only by the milestone59 Rust test; no `pilot` command runs it.
+// PROP-040: when a debugged run stops. The PilIR interpreter tells the
+// debugger about each new source line of each frame
+// (selfhost/ir/interp_debug.pilot); `should_pause_at_pc` decides, from the
+// breakpoints, the step the client asked for and a pause request, whether
+// the run stops there. Both debuggers (`pilot debug --dap`,
+// selfhost/dap/server.pilot, and `pilot debug <file>`, cli_dbg.pilot) use it.
 // =========================================================================
 pub pkg selfhost.dap;
 
-pub enum StepMode {
-    Continue = 0,
-    StepIn = 1,
-    StepOver = 2,
-    StepOut = 3,
+use selfhost.ir.*;
+
+/// How the run goes on after a stop.
+pub enum StepMode : u8 {
+    /// Until a breakpoint or a pause request.
+    Continue,
+    /// To the next new line, in any frame (into a call).
+    StepIn,
+    /// To the next new line in the frame it started in or one it returns to.
+    StepOver,
+    /// To the next new line after the frame it started in has returned.
+    StepOut,
+    /// To the first line of the program (`stopOnEntry`).
+    Entry,
 }
 
-// Step mode constants: 0 = Continue, 1 = StepIn, 2 = StepOver, 3 = StepOut
-pub fn should_pause_at_pc(
-    step_mode: i64,
-    cur_line: i64,
-    last_stopped_line: i64,
-    breakpoint_line: i64,
-    cur_call_depth: i64,
-    target_call_depth: i64
-) -> i64 {
-    if cur_line <= 1 {
-        return 0;
-    }
+/// Why the run stopped; `stop_reason_word` gives the DAP word.
+pub enum StopReason : u8 {
+    Breakpoint,
+    Step,
+    Pause,
+    Entry,
+}
 
-    let raw_val = __engine("map_get", __engine("get_env"), "call_line");
-    let call_line = if raw_val != none { raw_val } else { -1 };
+/// The DAP `reason` of a `stopped` event.
+pub fn stop_reason_word(r: StopReason) -> str => switch r {
+    case StopReason::Breakpoint: "breakpoint";
+    case StopReason::Step: "step";
+    case StopReason::Pause: "pause";
+    case StopReason::Entry: "entry";
+};
 
-    if cur_line == breakpoint_line && cur_line != last_stopped_line {
-        let _new = __engine("map_new");
-        let _s = __engine("map_set", __engine("get_env"), "call_line", cur_line);
-        return 1;
+/// The debugger's choices for a run.
+pub struct DebugControl : IObject {
+    pub mode: StepMode;
+    /// The frame depth (`IrDebug.frames` index) a step started in.
+    pub target_depth: i64;
+    /// File -> line (1-based) -> whether a breakpoint is on it.
+    pub breakpoints: List<List<bool>>;
+    /// Set when the client asked the running program to pause.
+    pub pause_asked: bool;
+    /// File index -> whether it is one of the user's files; the run only
+    /// stops in those.
+    pub user_files: List<bool>;
+}
+
+/// The choices for a run of the files of `dbg`, of which `user_files` are
+/// the user's: no breakpoint, no step.
+pub fn debug_control_new(user_files: List<bool>, ref dbg: IrDebug) -> DebugControl {
+    var bps: List<List<bool>> = [];
+    for starts in dbg.line_starts {
+        var flags: List<bool> = [false];
+        for s in starts { flags.push(false); }
+        bps.push(flags);
     }
-    if step_mode == 1 {
-        // StepIn: pause at the first statement inside callee (new line and not the call site)
-        if cur_line != last_stopped_line && cur_line != call_line {
-            return 1;
+    return DebugControl { mode: StepMode::Continue, target_depth: 0, breakpoints: bps, pause_asked: false, user_files: user_files };
+}
+
+/// Removes the breakpoints of file `f`.
+pub fn control_clear_file(var ref c: DebugControl, f: i64) {
+    let flags = c.breakpoints[f];
+    var i = 0;
+    while i < flags.len() {
+        flags[i] = false;
+        i = i + 1;
+    }
+}
+
+/// Removes every breakpoint.
+pub fn control_clear_breakpoints(var ref c: DebugControl) {
+    var f = 0;
+    while f < c.breakpoints.len() {
+        control_clear_file(c, f);
+        f = f + 1;
+    }
+}
+
+/// Starts a step of kind `mode` from frame depth `depth`.
+pub fn control_resume(var ref c: DebugControl, mode: StepMode, depth: i64) {
+    c.mode = mode;
+    c.target_depth = depth;
+    c.pause_asked = false;
+}
+
+/// Whether the run stops before the first step of a new line, `key`
+/// (`debug_line_key`: file and line), in the frame at depth `depth`; and
+/// why. Only lines of the user's files stop it.
+pub fn should_pause_at_pc(ref c: DebugControl, key: i64, depth: i64) -> StopReason? {
+    let f = key >> 32;
+    if f >= c.user_files.len() || !c.user_files[f] { return none; }
+    if c.pause_asked { return StopReason::Pause; }
+    let line = key & 4294967295;
+    let flags = c.breakpoints[f];
+    if line < flags.len() && flags[line] { return StopReason::Breakpoint; }
+    return switch c.mode {
+        case StepMode::Continue: none;
+        case StepMode::StepIn: StopReason::Step;
+        case StepMode::StepOver: if depth <= c.target_depth { StopReason::Step } else { none };
+        case StepMode::StepOut: if depth < c.target_depth { StopReason::Step } else { none };
+        case StepMode::Entry: StopReason::Entry;
+    };
+}
+
+/// The line keys of the user's files that hold code a run can stop at: some
+/// instruction of `m` comes from that line. A breakpoint elsewhere is never
+/// reached.
+pub fn code_lines(ref m: IrModule, ref c: DebugControl, ref dbg: IrDebug) -> Map<i64, bool> {
+    let out = Map<i64, bool>();
+    for fun in m.functions {
+        for b in fun.blocks {
+            for inst in b.insts {
+                if (inst.span_id as i64) < fun.spans.len() {
+                    let at = fun.spans[inst.span_id];
+                    let f = debug_file_of(dbg, at);
+                    if f >= 0 && f < c.user_files.len() && c.user_files[f] { out.set(debug_line_key(dbg, at), true); }
+                }
+            }
         }
     }
-    if step_mode == 2 {
-        // StepOver: pause when back at target_call_depth or lower, on a new statement
-        if cur_call_depth <= target_call_depth && cur_line != last_stopped_line && cur_line != call_line {
-            let _s = __engine("map_set", __engine("get_env"), "call_line", cur_line);
-            return 1;
-        }
-    }
-    if step_mode == 3 {
-        // StepOut: pause when popped to a shallower call depth, on the statement following the call
-        if cur_call_depth < target_call_depth && cur_line != last_stopped_line && cur_line != call_line {
-            let _s = __engine("map_set", __engine("get_env"), "call_line", cur_line);
-            return 1;
-        }
-    }
-    return 0;
+    return out;
 }

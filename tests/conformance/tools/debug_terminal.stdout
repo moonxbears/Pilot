@@ -1,0 +1,18 @@
+breakpoint at line 9
+breakpoint not set: no code on line 6
+stopped (breakpoint) at line 9 in main
+  x = 3
+stopped (step) at line 3 in add
+  add at line 3
+  main at line 9
+  a = 3
+  b = 4
+stopped (step) at line 10 in main
+7
+error: the debugger evaluates a local name, a field (a.b) or an element (a[0]) for now; other expressions need the type checker inside the debugger (PROP-040)
+7
+stopped (step) at line 11 in main
+14
+exited with code 3
+
+exit code 3

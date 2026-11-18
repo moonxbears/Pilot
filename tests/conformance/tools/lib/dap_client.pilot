@@ -1,0 +1,151 @@
+// A DAP client for the `dap_*` conformance programs: frames the request
+// bodies on standard input (one JSON body per line), runs
+// `pilot debug --dap` on them, and prints one digest line (and its details,
+// indented) per message the debugger sends, then its exit code and whether
+// the messages' `seq` numbers run 1, 2, 3, .. in order. The digest prints
+// values and the program's own names, never the debugger's JSON as text.
+pkg lib.dap_client;
+
+use std.io;
+use std.proc;
+use std.text;
+use std.polyglot.transport.json;
+
+/// `body` framed for DAP.
+fn frame(body: str) -> str => f"Content-Length: {body.len()}\r\n\r\n{body}";
+
+/// The request bodies on standard input, framed.
+fn framed_requests() -> str {
+    var out = "";
+    var reading = true;
+    while reading {
+        if some line = io.read_line() {
+            if line.trim().len() > 0 { out = out + frame(line.trim()); }
+        } else {
+            reading = false;
+        }
+    }
+    return out;
+}
+
+/// The bodies of the frames in `stream`, in order.
+fn bodies(stream: str) -> List<str> {
+    var out: List<str> = [];
+    var at = 0;
+    let header = "Content-Length: ";
+    while at < stream.len() {
+        let rest = stream.slice(at, stream.len());
+        if !rest.starts_with(header) {
+            out.push("<not a frame>");
+            return out;
+        }
+        let end = rest.find("\r\n\r\n");
+        if end < 0 {
+            out.push("<not a frame>");
+            return out;
+        }
+        let n = text.parse_i64(rest.slice(header.len(), end)) ?? 0;
+        let from = at + end + 4;
+        out.push(stream.slice(from, from + n));
+        at = from + n;
+    }
+    return out;
+}
+
+fn int_of(v: JsonValue) -> i64 => v.num_val as i64;
+
+fn without_newline(t: str) -> str => if t.ends_with("\n") { t.slice(0, t.len() - 1) } else { t };
+
+fn print_details(cmd: str, body: JsonValue) {
+    if cmd == "setBreakpoints" {
+        let bps = body.get("breakpoints");
+        var i: usize = 0;
+        while i < bps.len() {
+            let bp = bps.get_at(i);
+            let line = int_of(bp.get("line"));
+            print(if bp.get("verified").bool_val { f"  line {line} verified" } else { f"  line {line} unverified: {bp.get("message").str_val}" });
+            i = i + 1;
+        }
+    } else if cmd == "threads" {
+        let ts = body.get("threads");
+        var i: usize = 0;
+        while i < ts.len() {
+            print(f"  thread {int_of(ts.get_at(i).get("id"))}");
+            i = i + 1;
+        }
+    } else if cmd == "stackTrace" {
+        let fs = body.get("stackFrames");
+        var i: usize = 0;
+        while i < fs.len() {
+            let f = fs.get_at(i);
+            print(f"  {f.get("name").str_val} line {int_of(f.get("line"))}, frame {int_of(f.get("id"))}");
+            i = i + 1;
+        }
+    } else if cmd == "scopes" {
+        let ss = body.get("scopes");
+        var i: usize = 0;
+        while i < ss.len() {
+            let s = ss.get_at(i);
+            print(f"  {s.get("name").str_val}, reference {int_of(s.get("variablesReference"))}");
+            i = i + 1;
+        }
+    } else if cmd == "variables" {
+        let vs = body.get("variables");
+        var i: usize = 0;
+        while i < vs.len() {
+            let v = vs.get_at(i);
+            print(f"  {v.get("name").str_val} = {v.get("value").str_val}");
+            i = i + 1;
+        }
+    } else if cmd == "evaluate" {
+        print(f"  = {body.get("result").str_val}");
+    }
+}
+
+fn digest(msg: JsonValue) {
+    let kind = msg.get("type").str_val;
+    if kind == "response" {
+        let cmd = msg.get("command").str_val;
+        if msg.get("success").bool_val {
+            print(f"{cmd} ok");
+            print_details(cmd, msg.get("body"));
+        } else {
+            print(f"{cmd} failed: {msg.get("message").str_val}");
+        }
+    } else if kind == "event" {
+        let name = msg.get("event").str_val;
+        let body = msg.get("body");
+        if name == "stopped" {
+            print(f"event stopped: {body.get("reason").str_val}");
+        } else if name == "output" {
+            print(f"event output {body.get("category").str_val}: {without_newline(body.get("output").str_val)}");
+        } else if name == "exited" {
+            print(f"event exited: {int_of(body.get("exitCode"))}");
+        } else {
+            print(f"event {name}");
+        }
+    } else {
+        print(f"not a DAP message: {kind}");
+    }
+}
+
+/// Runs `pilot debug --dap <program>` on the framed requests of standard
+/// input and prints the digest.
+pub fn run_and_digest(program: str) {
+    let r = proc.run(proc.pilot_cli_path(), ["debug", "--dap", program], framed_requests());
+    var expected_seq = 1;
+    var in_order = true;
+    for b in bodies(r.stdout) {
+        let msg = json_parse(b) catch e => json_null();
+        if msg.kind != JsonKind::Object {
+            print("a body that is not a JSON object");
+            in_order = false;
+            continue;
+        }
+        if int_of(msg.get("seq")) != expected_seq { in_order = false; }
+        expected_seq = expected_seq + 1;
+        digest(msg);
+    }
+    print(f"debugger exit code {r.exit_code}");
+    print(f"messages in order: {in_order}");
+}

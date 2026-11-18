@@ -1,0 +1,12 @@
+b 9
+b 6
+run
+l
+s
+bt
+l
+finish
+p y
+p y + 1
+n
+c

@@ -1423,8 +1423,9 @@ class PilotDebugConfigurationProvider implements vscode.DebugConfigurationProvid
         }
 
         const mode = config.mode || 'dap';
-        // For interactive terminal runs, run directly in the Pilot Runner terminal
-        if (mode === 'run') {
+        // A plain run (`pilot run`) or the terminal debugger (`pilot debug`,
+        // commands typed in the terminal) goes to the Pilot Runner terminal.
+        if (mode === 'run' || mode === 'debug') {
             const pilotBin = resolvePilotBinary(this.extensionPath, config.pilotPath);
             let terminal = vscode.window.terminals.find(t => t.name === 'Pilot Runner') || vscode.window.createTerminal('Pilot Runner');
             terminal.show();
@@ -1432,196 +1433,13 @@ class PilotDebugConfigurationProvider implements vscode.DebugConfigurationProvid
             const pilotCmd = pilotBin === 'pilot' ? 'pilot' : (isPowerShell ? `& "${pilotBin}"` : `"${pilotBin}"`);
             const rawArgs = Array.isArray(config.args) ? config.args : (config.args ? [config.args] : []);
             const argsStr = rawArgs.length > 0 ? ' ' + rawArgs.map((a: any) => `"${a}"`).join(' ') : '';
-            terminal.sendText(`${pilotCmd} run "${config.program}"${argsStr}`);
+            const verb = mode === 'debug' ? 'debug' : 'run';
+            const sep = rawArgs.length > 0 ? ' --' : '';
+            terminal.sendText(`${pilotCmd} ${verb} "${config.program}"${sep}${argsStr}`);
             return undefined;
         }
         config.mode = 'dap';
         return config;
-    }
-}
-
-class PilotDebugAdapter implements vscode.DebugAdapter {
-    private sendMessageEmitter = new vscode.EventEmitter<vscode.DebugProtocolMessage>();
-    readonly onDidSendMessage: vscode.Event<vscode.DebugProtocolMessage> = this.sendMessageEmitter.event;
-    private childProcess: cp.ChildProcess | null = null;
-    private seq = 1;
-
-    constructor(
-        private extensionPath: string,
-        private session: vscode.DebugSession
-    ) {}
-
-    handleMessage(message: any): void {
-        if (message.type === 'request') {
-            this.handleRequest(message);
-        }
-    }
-
-    private sendResponse(request: any, body?: any): void {
-        this.sendMessageEmitter.fire({
-            seq: this.seq++,
-            type: 'response',
-            request_seq: request.seq,
-            command: request.command,
-            success: true,
-            body
-        });
-    }
-
-    private sendEvent(event: string, body?: any): void {
-        this.sendMessageEmitter.fire({
-            seq: this.seq++,
-            type: 'event',
-            event,
-            body
-        });
-    }
-
-    private handleRequest(request: any): void {
-        switch (request.command) {
-            case 'initialize': {
-                this.sendResponse(request, {
-                    supportsConfigurationDoneRequest: true,
-                    supportsTerminateRequest: true,
-                    supportsEvaluateForHovers: true
-                });
-                this.sendEvent('initialized');
-                break;
-            }
-            case 'launch': {
-                this.sendResponse(request);
-                this.startProcess();
-                break;
-            }
-            case 'configurationDone': {
-                this.sendResponse(request);
-                break;
-            }
-            case 'setBreakpoints': {
-                const bps = request.arguments?.breakpoints || [];
-                this.sendResponse(request, {
-                    breakpoints: bps.map((b: any) => ({
-                        verified: false,
-                        line: b.line,
-                        message: 'Pilot has no debugger yet; breakpoints are not supported.'
-                    }))
-                });
-                break;
-            }
-            case 'threads': {
-                this.sendResponse(request, {
-                    threads: [{ id: 1, name: 'Main Thread' }]
-                });
-                break;
-            }
-            case 'evaluate': {
-                const expr = (request.arguments?.expression || '').trim();
-                if (this.childProcess && this.childProcess.stdin && !this.childProcess.stdin.destroyed) {
-                    try {
-                        this.childProcess.stdin.write(expr + '\n');
-                    } catch {}
-                }
-                this.sendResponse(request, {
-                    result: `[Pilot Debug Console]: ${expr}`,
-                    variablesReference: 0
-                });
-                break;
-            }
-            case 'disconnect':
-            case 'terminate': {
-                if (this.childProcess) {
-                    try {
-                        this.childProcess.kill();
-                    } catch {}
-                    this.childProcess = null;
-                }
-                this.sendResponse(request);
-                this.sendEvent('terminated');
-                break;
-            }
-            default: {
-                this.sendResponse(request);
-                break;
-            }
-        }
-    }
-
-    private startProcess(): void {
-        const config = this.session.configuration;
-        let program = config.program || '${file}';
-        if (program === '${file}' && vscode.window.activeTextEditor) {
-            program = vscode.window.activeTextEditor.document.fileName;
-        }
-
-        const rawArgs = Array.isArray(config.args) ? config.args : (config.args ? [config.args] : []);
-        let pilotExe = resolvePilotBinary(this.extensionPath, config.pilotPath);
-
-        const cmdArgs = ['run', program, ...rawArgs];
-        this.sendEvent('output', {
-            category: 'console',
-            output: '[Pilot] Breakpoints and stepping are not available yet: Pilot has no debugger (`pilot debug` stops at seam cli.command_handler). The program runs to the end.\n'
-        });
-        const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || path.dirname(program);
-
-        this.sendEvent('output', {
-            category: 'console',
-            output: `[Pilot] Running: ${pilotExe} ${cmdArgs.join(' ')}\n`
-        });
-
-        try {
-            this.childProcess = cp.spawn(pilotExe, cmdArgs, {
-                cwd,
-                env: getExecutionEnv()
-            });
-
-            this.childProcess.stdout?.on('data', (data) => {
-                this.sendEvent('output', {
-                    category: 'stdout',
-                    output: data.toString()
-                });
-            });
-
-            this.childProcess.stderr?.on('data', (data) => {
-                this.sendEvent('output', {
-                    category: 'stderr',
-                    output: data.toString()
-                });
-            });
-
-            this.childProcess.on('error', (err) => {
-                this.sendEvent('output', {
-                    category: 'stderr',
-                    output: `Error launching Pilot process: ${err.message}\n`
-                });
-                this.sendEvent('terminated');
-            });
-
-            this.childProcess.on('close', (code) => {
-                this.sendEvent('output', {
-                    category: 'console',
-                    output: `\n[Pilot process completed with exit code ${code ?? 0}]\n`
-                });
-                this.sendEvent('exited', { exitCode: code ?? 0 });
-                this.sendEvent('terminated');
-                this.childProcess = null;
-            });
-        } catch (err: any) {
-            this.sendEvent('output', {
-                category: 'stderr',
-                output: `Failed to spawn process: ${err?.message || err}\n`
-            });
-            this.sendEvent('terminated');
-        }
-    }
-
-    dispose(): void {
-        if (this.childProcess) {
-            try {
-                this.childProcess.kill();
-            } catch {}
-            this.childProcess = null;
-        }
-        this.sendMessageEmitter.dispose();
     }
 }
 
@@ -1642,11 +1460,22 @@ class PilotDebugAdapterDescriptorFactory implements vscode.DebugAdapterDescripto
             }
         }
 
-        // No real Pilot debugger exists yet: `pilot debug` stops at seam
-        // cli.command_handler, and the old Python pilot-dap interpreted an
-        // earlier Pilot itself without running the program. The inline adapter
-        // runs the program with the current `pilot run` instead.
-        return new vscode.DebugAdapterInlineImplementation(new PilotDebugAdapter(this.extensionPath, session));
+        // `pilot debug --dap <program>` (selfhost/dap/server.pilot, PROP-040)
+        // runs the program on the PilIR interpreter and speaks DAP over its
+        // stdin and stdout: breakpoints, stepping, the stack and locals.
+        const config = session.configuration;
+        if (!config.program) {
+            vscode.window.showErrorMessage('Pilot debugging needs a `program` in the launch configuration.');
+            return undefined;
+        }
+        const pilotBin = resolvePilotBinary(this.extensionPath, config.pilotPath);
+        const rawArgs: string[] = Array.isArray(config.args) ? config.args.map((a: any) => String(a)) : (config.args ? [String(config.args)] : []);
+        const args = ['debug', '--dap', String(config.program)];
+        if (rawArgs.length > 0) {
+            args.push('--', ...rawArgs);
+        }
+        const cwd = config.cwd || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        return new vscode.DebugAdapterExecutable(pilotBin, args, cwd ? { cwd } : undefined);
     }
 }
 

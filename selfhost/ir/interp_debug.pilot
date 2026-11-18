@@ -1,0 +1,302 @@
+// ==============================================================================
+// FILE: selfhost/ir/interp_debug.pilot
+// PROP-040: the PilIR interpreter run under a debugger.
+// ==============================================================================
+// `ir_debug_run` runs a module as `ir_run` does, with the same handlers,
+// preparers and engine operations, except that every call goes through
+// `debug_body` instead of `interp_body`. Before the first step of each new
+// source line in a frame, `debug_body` hands the step's source offset to the
+// debugger (`IrDebug.on_line`), which decides whether to stop there and
+// serves its client while stopped (selfhost/dap/vm_controller.pilot).
+//
+// A run without a debugger never reaches this file: `ir_run` builds the
+// handler table of `interp_handlers()`, whose calls go to `interp_body`, so a
+// plain run pays nothing for it. A debugged run swaps in two call handlers
+// that go to `debug_body`, so every frame of the run is a debugged one.
+//
+// Unlike `interp_body`, a debugged frame keeps every instruction as a step:
+// constants are not placed in the values a call starts from, and integer
+// steps are not joined into regions, so each instruction runs on its own
+// line and a value is written only when its instruction runs.
+pub lvl(0) pkg selfhost.ir;
+
+/// What a debugged run tells the debugger: its state, the source offset of
+/// the step about to run in the innermost frame, and its line
+/// (`debug_line_key`).
+pub type IrLineFn = (IrDebug, i64, i64) => void;
+
+/// One function prepared for a debugged run: each block's steps, and the
+/// source line (`IrDebug.line_of`) and offset of each step.
+pub struct IrDebugCode : IObject {
+    pub blocks: List<IrSteps?>;
+    pub lines: List<List<i64>>;
+    pub offsets: List<List<i64>>;
+    /// The values a call starts from: none written yet, one spare slot.
+    pub start: List<IrVal>;
+}
+
+/// The state a debugged run shares with its debugger.
+pub struct IrDebug : IObject {
+    /// Told about each new source line (see the file header).
+    pub on_line: IrLineFn;
+    /// The open frames, outermost first, with the function each runs and
+    /// the source offset of the line it is on.
+    pub frames: List<IrFrame>;
+    pub fns: List<i64>;
+    pub at: List<i64>;
+    /// Set by the debugger to end the run: it stops at the next step with
+    /// the fault `debug_stopped_message()`.
+    pub stop: bool;
+    /// Function -> its prepared code, or none until it is first called.
+    pub code: List<IrDebugCode?>;
+    /// The program's files, and the offset of each line start of each file.
+    pub sources: IrSourceMap;
+    pub line_starts: List<List<i64>>;
+}
+
+/// What a debugged run gave: the program's exit code, and its fault, which
+/// is active when it stopped at a runtime error (or was stopped).
+pub struct IrDebugEnd : IObject {
+    pub exit_code: i64;
+    pub fault: IrFault;
+}
+
+/// The fault a run the debugger ended stops with.
+pub pure fn debug_stopped_message() -> str => "the debugger stopped the program";
+
+/// A debug state for the files of `sources` that tells `on_line` about
+/// each new line.
+pub fn ir_debug_new(ref sources: IrSourceMap, on_line: IrLineFn) -> IrDebug {
+    var starts: List<List<i64>> = [];
+    var f = 0;
+    while f < sources.texts.len() {
+        let text = sources.texts[f];
+        let base = sources.bases[f];
+        var at: List<i64> = [base];
+        var i = 0;
+        while i < text.len() {
+            if text.byte_at(i) == 10 { at.push(base + i + 1); }
+            i = i + 1;
+        }
+        starts.push(at);
+        f = f + 1;
+    }
+    return IrDebug { on_line: on_line, frames: [], fns: [], at: [], stop: false, code: [], sources: sources, line_starts: starts };
+}
+
+/// The file of `sources` that holds offset `at`, or -1.
+pub fn debug_file_of(ref dbg: IrDebug, at: i64) -> i64 {
+    if at < 0 { return -1; }
+    let bases = dbg.sources.bases;
+    var f = -1;
+    var i = 0;
+    while i < bases.len() {
+        if bases[i] <= at && (f < 0 || bases[i] > bases[f]) { f = i; }
+        i = i + 1;
+    }
+    return f;
+}
+
+/// The 1-based line of offset `at` in its file, or -1 for no place.
+pub fn debug_line_in_file(ref dbg: IrDebug, at: i64) -> i64 {
+    let f = debug_file_of(dbg, at);
+    if f < 0 { return -1; }
+    let starts = dbg.line_starts[f];
+    // The last line start at or before `at`.
+    var lo = 0;
+    var hi = starts.len() - 1;
+    while lo < hi {
+        let mid = (lo + hi + 1) / 2;
+        if starts[mid] <= at { lo = mid; } else { hi = mid - 1; }
+    }
+    return lo + 1;
+}
+
+/// A key that is the same for two offsets on the same line of the same file:
+/// the file in the high bits, the line in the low; -1 for no place.
+pub fn debug_line_key(ref dbg: IrDebug, at: i64) -> i64 {
+    let f = debug_file_of(dbg, at);
+    if f < 0 { return -1; }
+    return (f << 32) | debug_line_in_file(dbg, at);
+}
+
+/// Runs function 0 of `m` under `dbg`, with `engine_ops` (the debugger's
+/// own `print`, for one) and the program's script arguments `args`.
+pub fn ir_debug_run(ref m: IrModule, var ref dbg: IrDebug, engine_ops: Map<str, IrEngineOp>, args: List<str>) -> IrDebugEnd {
+    var globals: List<IrVal> = [];
+    var assigned: List<bool> = [];
+    for g in m.globals {
+        globals.push(IrVal.Nil);
+        assigned.push(false);
+    }
+    var code: List<IrCode?> = [];
+    for f in m.functions {
+        code.push(none);
+        dbg.code.push(none);
+    }
+    let handlers = interp_handlers();
+    handlers[op_call_direct()] = (fr, st) => debug_call_direct(dbg, fr, st);
+    handlers[op_call_indirect()] = (fr, st) => debug_call_indirect(dbg, fr, st);
+    let top = IrFrame { m: m, f: m.functions[0], vals: [], cells: [], globals: globals, assigned: assigned, next: 0, next_args: [], ret: IrVal.Nil, handlers: handlers, preparers: interp_preparers(), code: code, engine_ops: engine_ops, fault: ir_fault_new(), args: args, budget: IrBudget { left: -1, depth: 0, eval: false, allowed: Map<str, bool>() }, fault_span: -1 };
+    let out = debug_body(dbg, top, 0, []);
+    if top.fault.active { return IrDebugEnd { exit_code: 1, fault: top.fault }; }
+    return IrDebugEnd { exit_code: ir_int(out) ?? 0, fault: top.fault };
+}
+
+/// The first line of the report of `fault` (selfhost/ir/fault.pilot
+/// `report_fault` writes the same line, then the calls).
+pub fn debug_fault_text(ref dbg: IrDebug, ref fault: IrFault) -> str =>
+    f"{ir_locate(dbg.sources, if fault.spans.len() > 0 { fault.spans[0] } else { ir_no_span() })}: runtime error: {fault.message}";
+
+fn debug_call_direct(var ref dbg: IrDebug, var ref fr: IrFrame, ref st: IrStep) {
+    let vals = fr.vals;
+    var args: List<IrVal> = [];
+    for id in st.a { args.push(vals[id]); }
+    vals[st.result] = debug_body(dbg, fr, st.inst.subop, args);
+}
+
+/// `call_indirect f, args..`, as `run_call_indirect` runs it.
+fn debug_call_indirect(var ref dbg: IrDebug, var ref fr: IrFrame, ref st: IrStep) {
+    var a: List<IrVal> = [];
+    for id in st.a { a.push(fr.vals[id]); }
+    switch a[0] {
+        case Seq(rec): {
+            guard some fi = ir_int(rec[0]) else {
+                raise_fault(fr.fault, f"a function value's function is {ir_kind(rec[0])}, not an integer");
+                return;
+            };
+            var args: List<IrVal> = [];
+            var i = 1;
+            while i < a.len() { args.push(a[i]); i = i + 1; }
+            i = 1;
+            while i < rec.len() { args.push(rec[i]); i = i + 1; }
+            fr.vals[st.result] = debug_body(dbg, fr, fi, args);
+        }
+        default: raise_fault(fr.fault, f"cannot call {ir_kind(a[0])}");
+    }
+}
+
+/// Function `fi` prepared for a debugged run (see the file header).
+fn debug_code(var ref dbg: IrDebug, ref m: IrModule, fi: i64) -> IrDebugCode {
+    if some have = dbg.code[fi] { return have; }
+    let f = m.functions[fi];
+    var start: List<IrVal> = [];
+    for phy in f.value_physics { start.push(IrVal.Nil); }
+    start.push(IrVal.Nil);
+    var blocks: List<IrSteps?> = [];
+    var lines: List<List<i64>> = [];
+    var offsets: List<List<i64>> = [];
+    for b in f.blocks {
+        blocks.push(none);
+        lines.push([]);
+        offsets.push([]);
+    }
+    let code = IrDebugCode { blocks: blocks, lines: lines, offsets: offsets, start: start };
+    dbg.code[fi] = code;
+    return code;
+}
+
+/// Block `bi` of the function of `fr` prepared for a debugged run: every
+/// instruction a step, with its line and offset.
+fn debug_block(var ref dbg: IrDebug, ref fr: IrFrame, var ref code: IrDebugCode, bi: i64) -> IrSteps {
+    let f = fr.f;
+    let b = f.blocks[bi];
+    let no_value = ir_no_value();
+    let spare = code.start.len() as i64 - 1;
+    var params: List<i64> = [];
+    for p in b.params { params.push(p as i64); }
+    var steps: List<IrStep> = [];
+    var lines: List<i64> = [];
+    var offsets: List<i64> = [];
+    let handlers = fr.handlers;
+    let preparers = fr.preparers;
+    for inst in b.insts {
+        let has_result = inst.result != no_value;
+        var a: List<i64> = [];
+        for x in ir_args(f, inst) { a.push(x as i64); }
+        let h = handlers[inst.opcode];
+        let st = IrStep { h: h, inst: inst, a: a, result: if has_result { inst.result as i64 } else { spare }, sym: "", oper: IrOp.Add, value: IrVal.Nil, rc: 0, width: 0, masked: false, engine: debug_no_engine_op, then_to: -1, then_ids: none, else_to: -1, else_ids: none, int_op: false, plain: h, index: 0, ins: [], ops: [], outs: [], regs: [], parts: [] };
+        let prepare = preparers[inst.opcode];
+        prepare(fr, st);
+        steps.push(st);
+        let at = if (inst.span_id as i64) < f.spans.len() { f.spans[inst.span_id] } else { ir_no_span() };
+        offsets.push(at);
+        lines.push(debug_line_key(dbg, at));
+    }
+    code.lines[bi] = lines;
+    code.offsets[bi] = offsets;
+    return IrSteps { params: params, arity: params.len() as i64, steps: steps, count: steps.len() as i64, cost: b.insts.len };
+}
+
+/// What a step that calls no engine operation holds in its place; never run.
+fn debug_no_engine_op(args: List<IrVal>, var ref fault: IrFault) -> IrVal {
+    raise_fault(fault, "internal error: a step without an engine operation ran one");
+    return IrVal.Nil;
+}
+
+/// `interp_body` under the debugger: the frame is pushed on `dbg.frames`
+/// while it runs, and `dbg.on_line` is told about each new line.
+fn debug_body(var ref dbg: IrDebug, var ref caller: IrFrame, fi: i64, args: List<IrVal>) -> IrVal {
+    let m = caller.m;
+    let f = m.functions[fi];
+    let code = debug_code(dbg, m, fi);
+    let vals = ir_values_copy(code.start);
+    let fr = IrFrame { m: m, f: f, vals: vals, cells: [], globals: caller.globals, assigned: caller.assigned, next: 0, next_args: args, ret: IrVal.Nil, handlers: caller.handlers, preparers: caller.preparers, engine_ops: caller.engine_ops, fault: caller.fault, args: caller.args, budget: caller.budget, code: caller.code, fault_span: -1 };
+    let fault = fr.fault;
+    let blocks = code.blocks;
+    dbg.frames.push(fr);
+    dbg.fns.push(fi);
+    dbg.at.push(ir_no_span());
+    let top = dbg.frames.len() - 1;
+    // The line this frame is on; a step on another line is a new line.
+    var line = -1;
+    while fr.next >= 0 {
+        let at = fr.next;
+        if blocks[at] == none { blocks[at] = debug_block(dbg, fr, code, at); }
+        guard some b = blocks[at] else { return IrVal.Nil; };
+        let lines = code.lines[at];
+        let offsets = code.offsets[at];
+        let arity = b.arity;
+        if arity > 0 {
+            let params = b.params;
+            let passed = fr.next_args;
+            var p = 0;
+            while p < arity {
+                vals[params[p]] = passed[p];
+                p = p + 1;
+            }
+        }
+        fr.next = -1;
+        let steps = b.steps;
+        let count = b.count;
+        var i = 0;
+        while i < count {
+            let st = steps[i];
+            if lines[i] >= 0 && lines[i] != line {
+                line = lines[i];
+                dbg.at[top] = offsets[i];
+                let tell = dbg.on_line;
+                tell(dbg, offsets[i], line);
+            }
+            if dbg.stop { raise_fault(fault, debug_stopped_message()); }
+            if !fault.active {
+                let h = st.h;
+                h(fr, st);
+            }
+            if fault.active {
+                fault.spans.push(f.spans[if fr.fault_span >= 0 { fr.fault_span } else { st.inst.span_id as i64 }]);
+                debug_pop(dbg);
+                return IrVal.Nil;
+            }
+            i = i + 1;
+        }
+    }
+    debug_pop(dbg);
+    return fr.ret;
+}
+
+fn debug_pop(var ref dbg: IrDebug) {
+    let _ = dbg.frames.pop();
+    let _ = dbg.fns.pop();
+    let _ = dbg.at.pop();
+}

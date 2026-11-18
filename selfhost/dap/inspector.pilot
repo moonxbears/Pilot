@@ -1,35 +1,181 @@
 // =========================================================================
 // FILE: selfhost/dap/inspector.pilot
-// Debugger variable inspector: JSON for register values and struct fields.
-// Reads register slots and layout field offsets without hardcoded type names.
-// Reached only by the milestone59 Rust test; no `pilot` command runs it.
+// PROP-040: what a stopped frame holds. The local names come from the
+// lowering (`IrFunction.locals`, selfhost/ir/lower_locals.pilot), their
+// values from the interpreter's frame, their types from the module's
+// layouts, and where each name can be seen from the checked program's
+// nodes. `evaluate` reads a local, a field or an element of a stopped frame.
 // =========================================================================
 pub pkg selfhost.dap;
 
-pub fn format_register_variable_json(var_name: str, reg_slot: i64, val_str: str, layout_id: i64) -> str {
-    let byte_size = if layout_id >= 0 { __engine("layout_metrics", layout_id) } else { 8 };
-    return "{\"name\":\"" + var_name + "\",\"value\":\"" + val_str + "\",\"register\":\"r" + reg_slot + "\",\"byteSize\":" + byte_size + "}";
+use selfhost.ir.*;
+use selfhost.check.*;
+use std.text;
+
+/// One variable of a stopped frame, or one part of a value.
+pub struct DebugVar : IObject {
+    pub name: str;
+    pub value: IrVal;
+    /// The PilIR layout name of its type, or "" when it has none.
+    pub type_name: str;
 }
 
-pub fn inspect_struct_fields_json(layout_id: i64) -> str {
-    let total_bytes = __engine("layout_metrics", layout_id);
-    if total_bytes <= 0 {
-        return "[]";
-    }
-    let off0 = __engine("layout_field_offset", layout_id, 0);
-    var json = "[{\"index\":0,\"offset\":" + off0 + "}";
-    var prev_off = off0;
-    var idx = 1;
-    while idx < 64 {
-        let off = __engine("layout_field_offset", layout_id, idx);
-        if off > prev_off && off < total_bytes {
-            json = json + ",{\"index\":" + idx + ",\"offset\":" + off + "}";
-            prev_off = off;
-            idx = idx + 1;
+/// The checked program a debugged module was lowered from: its nodes and
+/// the parent of each node.
+pub struct DebugSource : IObject {
+    pub s: Snap;
+    pub parents: List<i64>;
+}
+
+pub fn debug_source_new(ref s: Snap) -> DebugSource => DebugSource { s: s, parents: parents_of(s) };
+
+/// Whether a local bound at node `site` can be seen at source offset `at`:
+/// a parameter in its whole function; a `let` or `var` once its statement
+/// has run, to the end of the block that holds it.
+fn local_visible(ref src: DebugSource, site: i64, at: i64) -> bool {
+    let s = src.s;
+    if site < 0 { return false; }
+    let k = kind(s, site);
+    if k != nk_let() && k != nk_var() { return true; }
+    if at < span_end(s, site) { return false; }
+    let p = src.parents[site];
+    return p < 0 || at < span_end(s, p);
+}
+
+/// The layout name of physics `phy` in `m`, or "".
+fn layout_name(ref m: IrModule, phy: IrTypePhysics) -> str {
+    let id = phy.layout_id as i64;
+    return if id >= 0 && id < m.layouts.len() { m.layouts[id].name } else { "" };
+}
+
+/// The locals frame `fr` (of function `fi`) can see at source offset `at`,
+/// in the order they were declared; a name declared again shows its latest.
+pub fn frame_variables(ref src: DebugSource, ref m: IrModule, ref fr: IrFrame, fi: i64, at: i64) -> List<DebugVar> {
+    let f = m.functions[fi];
+    var out: List<DebugVar> = [];
+    let index = Map<str, i64>();
+    for l in f.locals {
+        if !local_visible(src, l.site, at) { continue; }
+        if (l.value as i64) >= fr.vals.len() { continue; }
+        var v = fr.vals[l.value];
+        if l.slot {
+            // A `var` lives in the stack slot its value names.
+            guard some cell = ir_int(v) else { continue; };
+            if cell < 0 || cell >= fr.cells.len() { continue; }
+            v = fr.cells[cell];
+        }
+        let dv = DebugVar { name: l.name, value: v, type_name: layout_name(m, f.value_physics[l.value]) };
+        if some i = index.get(l.name) {
+            out[i] = dv;
         } else {
-            break;
+            index.set(l.name, out.len() as i64);
+            out.push(dv);
         }
     }
-    json = json + "]";
-    return json;
+    return out;
+}
+
+/// `v` as the debugger shows it: text quoted, anything else as the program
+/// prints it.
+pub fn value_text(v: IrVal) -> str => switch v {
+    case Text(t): "\"" + t + "\"";
+    default: ir_display(v);
+};
+
+/// Whether `v` has parts to show (a list or a record).
+pub fn has_parts(v: IrVal) -> bool => switch v {
+    case Seq(items): items.len() > 0;
+    case Rec(fields, layout): fields.keys().len() > 0;
+    default: false;
+};
+
+/// The parts of `v`: a list's elements `[0]`, `[1]`, ..; a record's fields.
+pub fn value_parts(v: IrVal) -> List<DebugVar> {
+    var out: List<DebugVar> = [];
+    switch v {
+        case Seq(items): {
+            var i = 0;
+            while i < items.len() {
+                out.push(DebugVar { name: f"[{i}]", value: items[i], type_name: "" });
+                i = i + 1;
+            }
+        }
+        case Rec(fields, layout): {
+            for k in fields.keys() {
+                if some x = fields.get(k) { out.push(DebugVar { name: k, value: x, type_name: "" }); }
+            }
+        }
+        default: {}
+    }
+    return out;
+}
+
+/// What evaluating an expression gave: its value, or why there is none.
+pub struct EvalOutcome : IObject {
+    pub ok: bool;
+    pub value: IrVal;
+    pub message: str;
+}
+
+fn eval_fail(message: str) -> EvalOutcome => EvalOutcome { ok: false, value: IrVal.Nil, message: message };
+
+fn is_name_byte(b: i64) -> bool => (b >= 97 && b <= 122) || (b >= 65 && b <= 90) || (b >= 48 && b <= 57) || b == 95;
+
+/// The message for an expression the debugger does not evaluate yet.
+pub pure fn eval_limit_message() -> str =>
+    "the debugger evaluates a local name, a field (a.b) or an element (a[0]) for now; other expressions need the type checker inside the debugger (PROP-040)";
+
+/// Evaluates `expr` among `vars`: a local name followed by any number of
+/// `.field` and `[index]` parts. Anything else is refused with
+/// `eval_limit_message()`.
+pub fn evaluate_in(ref vars: List<DebugVar>, expr: str) -> EvalOutcome {
+    let t = expr.trim();
+    let n = t.len();
+    var i = 0;
+    while i < n && is_name_byte(t.byte_at(i)) { i = i + 1; }
+    if i == 0 { return eval_fail(eval_limit_message()); }
+    let name = t.slice(0, i);
+    var found = false;
+    var v = IrVal.Nil;
+    for dv in vars {
+        if dv.name == name {
+            v = dv.value;
+            found = true;
+        }
+    }
+    if !found { return eval_fail(f"no local named `{name}` here"); }
+    while i < n {
+        let b = t.byte_at(i);
+        if b == 46 {
+            let from = i + 1;
+            i = from;
+            while i < n && is_name_byte(t.byte_at(i)) { i = i + 1; }
+            if i == from { return eval_fail(eval_limit_message()); }
+            let field = t.slice(from, i);
+            switch v {
+                case Rec(fields, layout): {
+                    guard some x = fields.get(field) else { return eval_fail(f"no field `{field}`"); };
+                    v = x;
+                }
+                default: return eval_fail(f"a {ir_kind(v)} has no fields");
+            }
+        } else if b == 91 {
+            let from = i + 1;
+            i = from;
+            while i < n && t.byte_at(i) >= 48 && t.byte_at(i) <= 57 { i = i + 1; }
+            if i == from || i >= n || t.byte_at(i) != 93 { return eval_fail(eval_limit_message()); }
+            let at = text.parse_i64(t.slice(from, i)) ?? -1;
+            i = i + 1;
+            switch v {
+                case Seq(items): {
+                    if at < 0 || at >= items.len() { return eval_fail(f"index {at} is outside the list"); }
+                    v = items[at];
+                }
+                default: return eval_fail(f"a {ir_kind(v)} has no elements");
+            }
+        } else {
+            return eval_fail(eval_limit_message());
+        }
+    }
+    return EvalOutcome { ok: true, value: v, message: "" };
 }
