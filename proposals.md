@@ -3611,7 +3611,7 @@ The analyzer cannot tell a user unit from a stdlib unit today. The only unit que
 ---
 ## `PROP-036` — Seed: Indexing a Literal `const` List or Map Reads One Value Built Once, Not a Copy Rebuilt on Every Read
 
-**Status: APPROVED 2026-11-18 (owner: "Approve PROP-036"); BUILT 2026-11-18.** As built, `+41` net in the three listed files:
+**Status: APPROVED 2026-11-18 (owner: "Approve PROP-036"); BUILT 2026-11-18.** Ceiling raised by the owner to 27,095 for its +41 (2026-11-18, "Raise it and push"). As built, `+41` net in the three listed files:
 - A run scheduled from an index read would never be placed when the reading function is compiled lazily, which happens to imported functions after `place_comptime_runs`. The toolchain itself hit this (`pilot test`: `const#CASE_OUTCOME_WORDS is read before its declaration has run`).
 - So the constant is built by the first index read that finds it missing from one shared map, global `const#`. `place_comptime_runs` creates that map at the start of the first unit's block, which now always runs.
 - Every index read then costs a global read, a `map_get` and a null test, never a copy.
