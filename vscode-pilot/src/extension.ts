@@ -372,6 +372,12 @@ class PilotLspClient implements vscode.Disposable {
         });
     }
 
+    public notifyDidSave(doc: vscode.TextDocument): void {
+        this.sendNotification('textDocument/didSave', {
+            textDocument: { uri: doc.uri.toString() }
+        });
+    }
+
     public notifyDidClose(doc: vscode.TextDocument): void {
         this.sendNotification('textDocument/didClose', {
             textDocument: { uri: doc.uri.toString() }
@@ -537,6 +543,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             if (e.document.languageId === 'pilot') {
                 client.notifyDidChange(e.document);
                 semanticTokensEmitter.fire();
+            }
+        }),
+        vscode.workspace.onDidSaveTextDocument((doc) => {
+            if (doc.languageId === 'pilot') {
+                client.notifyDidSave(doc);
             }
         }),
         vscode.workspace.onDidCloseTextDocument((doc) => {
@@ -1486,6 +1497,17 @@ class PilotDebugAdapter implements vscode.DebugAdapter {
                 this.sendResponse(request);
                 break;
             }
+            case 'setBreakpoints': {
+                const bps = request.arguments?.breakpoints || [];
+                this.sendResponse(request, {
+                    breakpoints: bps.map((b: any) => ({
+                        verified: false,
+                        line: b.line,
+                        message: 'Pilot has no debugger yet; breakpoints are not supported.'
+                    }))
+                });
+                break;
+            }
             case 'threads': {
                 this.sendResponse(request, {
                     threads: [{ id: 1, name: 'Main Thread' }]
@@ -1531,11 +1553,14 @@ class PilotDebugAdapter implements vscode.DebugAdapter {
             program = vscode.window.activeTextEditor.document.fileName;
         }
 
-        const mode = config.mode || 'run';
         const rawArgs = Array.isArray(config.args) ? config.args : (config.args ? [config.args] : []);
         let pilotExe = resolvePilotBinary(this.extensionPath, config.pilotPath);
 
-        const cmdArgs = [mode, program, ...rawArgs];
+        const cmdArgs = ['run', program, ...rawArgs];
+        this.sendEvent('output', {
+            category: 'console',
+            output: '[Pilot] Breakpoints and stepping are not available yet: Pilot has no debugger (`pilot debug` stops at seam cli.command_handler). The program runs to the end.\n'
+        });
         const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || path.dirname(program);
 
         this.sendEvent('output', {
@@ -1608,10 +1633,6 @@ class PilotDebugAdapterDescriptorFactory implements vscode.DebugAdapterDescripto
     }
 
     createDebugAdapterDescriptor(session: vscode.DebugSession): vscode.ProviderResult<vscode.DebugAdapterDescriptor> {
-        const config = session.configuration;
-        const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
-        const repoRoot = path.resolve(this.extensionPath, '..');
-
         // Check if custom DAP or Pilot path is configured
         const userDap = vscode.workspace.getConfiguration('pilot').get<string>('dap.serverPath');
         if (userDap && userDap !== 'pilot-dap') {
@@ -1621,30 +1642,10 @@ class PilotDebugAdapterDescriptorFactory implements vscode.DebugAdapterDescripto
             }
         }
 
-        // 1. Look for standalone pilot-dap binary
-        const dapCandidates = getSearchDirectories(this.extensionPath).map(d => path.join(d, 'pilot-dap'));
-
-        const newestDap = pickNewestExistingFile(dapCandidates);
-        if (newestDap) {
-            return new vscode.DebugAdapterExecutable(newestDap, []);
-        }
-
-        const dapOnPath = findExecutableOnPath('pilot-dap');
-        if (dapOnPath) {
-            return new vscode.DebugAdapterExecutable(dapOnPath, []);
-        }
-
-        // 2. Look for pilot binary with 'debug --dap'
-        const pilotExe = resolvePilotBinary(this.extensionPath, config.pilotPath);
-        if (pilotExe && pilotExe !== 'pilot') {
-            return new vscode.DebugAdapterExecutable(pilotExe, ['debug', '--dap']);
-        }
-        const pilotOnPath = findExecutableOnPath('pilot');
-        if (pilotOnPath) {
-            return new vscode.DebugAdapterExecutable(pilotOnPath, ['debug', '--dap']);
-        }
-
-        // Fallback to inline adapter if no native binary found
+        // No real Pilot debugger exists yet: `pilot debug` stops at seam
+        // cli.command_handler, and the old Python pilot-dap interpreted an
+        // earlier Pilot itself without running the program. The inline adapter
+        // runs the program with the current `pilot run` instead.
         return new vscode.DebugAdapterInlineImplementation(new PilotDebugAdapter(this.extensionPath, session));
     }
 }
