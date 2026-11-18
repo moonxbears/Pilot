@@ -363,6 +363,20 @@ pub struct IrFunction : IObject {
     /// `ir_inline_none()`, `ir_inline_hint()` (`[Inline]`) or
     /// `ir_inline_forced()` (an `[EngineOp]` owner method).
     pub inline:        u8;
+    /// The source's local names and the values that hold them, for the
+    /// debugger (selfhost/ir/lower_locals.pilot). Not printed: a module read
+    /// from text has none.
+    pub locals:        List<IrLocal>;
+}
+
+/// A local name of the source and the value that holds it: a `let` or a
+/// parameter is the value itself, a `var` (`slot`) is the stack slot the
+/// value is stored in. `site` is the binding's node in the checked program.
+pub struct IrLocal : IValue {
+    pub name:  str;
+    pub value: u32;
+    pub slot:  bool;
+    pub site:  i64;
 }
 
 pub pure fn ir_inline_none()   -> u8 => 0;
@@ -456,7 +470,7 @@ pub fn ir_add_record(var ref m: IrModule, rec: IrRecord) {
 }
 
 pub fn ir_function_new(name: str, ret: IrTypePhysics) -> IrFunction {
-    return IrFunction { name: name, ret_physics: ret, blocks: [], operand_pool: [], value_physics: [], spans: [], once: false, inline: 0 };
+    return IrFunction { name: name, ret_physics: ret, blocks: [], operand_pool: [], value_physics: [], spans: [], once: false, inline: 0, locals: [] };
 }
 
 /// Adds an empty block to `f` and returns its id.

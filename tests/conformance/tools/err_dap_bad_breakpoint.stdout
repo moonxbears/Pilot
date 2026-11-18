@@ -1,0 +1,19 @@
+initialize ok
+event initialized
+launch ok
+setBreakpoints ok
+  line 6 unverified: no code on line 6
+  line 9 verified
+  line 40 unverified: no code on line 40
+setBreakpoints ok
+  line 1 unverified: not a file of the program being debugged
+configurationDone ok
+event stopped: breakpoint
+continue ok
+event output stdout: 7
+event output stdout: 14
+event exited: 3
+event terminated
+disconnect ok
+debugger exit code 0
+messages in order: true

@@ -466,6 +466,7 @@ pub fn lower_function(var ref lw: Lowerer, idx: i64) {
         if lw.binding_of.has(key(param)) {
             let b = lw.binding_of[key(param)];
             lw.values.set(key(b), v);
+            note_local(lw, b, param);
             if given { lw.known_types.set(key(b), t); }
         }
         pi = pi + 1;
@@ -719,6 +720,7 @@ pub fn lower_binding(var ref lw: Lowerer, n: i64) -> u32 {
     } else {
         lw.values.set(b, v);
     }
+    note_local(lw, bi, n);
     return v;
 }
 
