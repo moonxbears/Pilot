@@ -1,7 +1,0 @@
-// selfhost/analyzer.pilot: retired. Every check it ran now runs in the type
-// checker (selfhost/check/lint_flow, lint_decls, lint_hints; PROP-005 5B.4
-// group 2), and nothing in `pilot` read the layouts it bound to the Rust AST.
-// The file stays, empty, only because crates/pilot-analysis loads it
-// (`include_str!` in infer.rs) and `pilot` still runs it (run.rs `analyze`);
-// PROP-035 deletes both and this file.
-pub pkg selfhost;

@@ -10,7 +10,6 @@
 //! | --- | --- | --- |
 //! | `cli_check` | path | diagnostics (`run::Diag::to_host`) |
 //! | `cli_run` | path, args, tail, checker files, declaration files, tail links | `[exit_code, diagnostics]`; not run when there are diagnostics; the files `tail links` names are linked before the tail |
-//! | `cli_analyze` | path | the self-hosted analyzer's diagnostics for the file |
 //! | `cli_typecheck` | path, checker files, declaration files, entry call | `[diagnostics, rest]`: the type checker's diagnostics in the program's own files, and what else the entry gave (`check.rs`); a run plan it made is kept for the `cli_run` that follows |
 //! | `cli_program_tool` | path, tool files, declaration files, entry call | the tool's exit code; the tool reads the program's snapshot (`check::run_on_program`) |
 //! | `cli_program_eval` | path, tool files, declaration files, entry call | the value the entry call returns (`check::eval_on_program`), or `none` when the program does not link |
@@ -28,14 +27,14 @@ fn diags(list: &[Diag]) -> HostValue {
     HostValue::List(list.iter().map(Diag::to_host).collect())
 }
 
-/// Reports the analyzer's and the checker's diagnostics of a program a tool
-/// is checking, through the CLI's own `report_pending_diags()`, and gives the
-/// number of errors. With nothing to report the CLI is not run.
-fn report_pending(analyzed: &[Diag], checked: &[Diag]) -> i64 {
-    if analyzed.is_empty() && checked.is_empty() {
+/// Reports the checker's diagnostics of a program a tool is checking,
+/// through the CLI's own `report_pending_diags()`, and gives the number of
+/// errors. With nothing to report the CLI is not run.
+fn report_pending(checked: &[Diag]) -> i64 {
+    if checked.is_empty() {
         return 0;
     }
-    let pending = HostValue::List(vec![diags(analyzed), diags(checked)]);
+    let pending = diags(checked);
     let mut cli = cli_host_ops();
     let ops: HostOpHandler = Box::new(move |op, args| match op {
         "cli_pending_diags" => Some(Ok(pending.clone())),
@@ -103,7 +102,6 @@ pub fn cli_host_ops() -> HostOpHandler {
                     }
                 }
             }
-            "cli_analyze" => diags(&run::analyze(&text(0))),
             "cli_typecheck" => {
                 let (found, rest) = check::check(&text(0), &texts(1), &texts(2), &text(3));
                 HostValue::List(vec![diags(&found), rest])
@@ -115,9 +113,7 @@ pub fn cli_host_ops() -> HostOpHandler {
                 &text(3),
             ))),
             "cli_checked_tool" => {
-                let path = text(0);
-                let report =
-                    move |checked: Vec<Diag>| report_pending(&run::analyze(&path), &checked);
+                let report = |checked: Vec<Diag>| report_pending(&checked);
                 HostValue::Int(i64::from(check::run_checked_on_program(
                     &text(0),
                     &texts(1),

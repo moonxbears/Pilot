@@ -1,6 +1,6 @@
 // ==============================================================================
 // FILE: selfhost/check/lint_decls.pilot
-// Declaration and statement lints moved out of selfhost/analyzer.pilot:
+// Declaration and statement lints (from the retired selfhost/analyzer.pilot):
 // [EnforceCoreNaming], KW001, FLOW002-FLOW004, DECL002, DECL004 (`let`) and
 // VAR001 at the uses of a binding.
 // ==============================================================================
@@ -21,7 +21,7 @@
 //   DECL004            an assignment to a local `let` binding.
 //   VAR001             a use of a `let`/`var` written with neither a type nor
 //                      a value (the declaration itself is VAR001 in
-//                      selfhost/analyzer.pilot until it moves here too).
+//                      selfhost/check/lint_hints.pilot).
 // The lattice of a struct declared `: IValue` that has `~self()` is COMP005
 // (selfhost/types/bundle_splice.pilot through selfhost/check/methods.pilot).
 pub lvl(0) pkg selfhost.check;

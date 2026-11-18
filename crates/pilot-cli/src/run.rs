@@ -23,9 +23,6 @@ pub const EXIT_FAILURE: i32 = 1;
 /// The loader's code for a file that cannot be read (`selfhost/loader/module_graph.pilot`).
 const UNREADABLE: &str = "MOD001";
 
-/// Code for a fault inside the self-hosted analyzer itself.
-const ANALYZER_FAULT: &str = "VM001";
-
 /// A diagnostic found while linking, parsing or compiling a program. Offsets
 /// are byte offsets into `file`.
 pub struct Diag {
@@ -431,58 +428,4 @@ pub fn declared_functions(path: &str) -> Option<HostValue> {
         ]));
     }
     Some(HostValue::List(out))
-}
-
-/// The self-hosted analyzer's diagnostics for the program at `path`
-/// (`selfhost/analyzer.pilot`, run by `pilot_analysis`). The analyzer reads
-/// the whole linked program, so a declaration in an imported file is seen
-/// where it is used; only diagnostics inside the user's own files (not the
-/// toolchain's `stdlib/`) are kept. A program that does not link is read on
-/// its own: `pilot check` reports why it does not link. A fault inside the
-/// analyzer is reported as an error, never dropped.
-pub fn analyze(path: &str) -> Vec<Diag> {
-    let paths = link_plan(path).unwrap_or_else(|_| vec![path.to_string()]);
-    let mut sources = Vec::with_capacity(paths.len());
-    let mut user = Vec::new();
-    for p in paths {
-        let Ok(src) = fs::read_to_string(&p) else {
-            return Vec::new();
-        };
-        if !crate::check::in_stdlib(&p) {
-            user.push(p.clone());
-        }
-        sources.push((p, src));
-    }
-    let linked = LinkedSource::parse(sources);
-    let result = pilot_analysis::AnalysisPipeline::analyze(&linked.arena, linked.arena.root);
-    let mut out: Vec<Diag> = result
-        .diagnostics
-        .iter()
-        .filter_map(|d| {
-            let (file, start, end) = linked.resolve(d.span);
-            if !user.contains(&file) {
-                return None;
-            }
-            Some(Diag {
-                code: d.code.clone(),
-                message: d
-                    .message
-                    .strip_prefix(&format!("{}: ", d.code))
-                    .unwrap_or(&d.message)
-                    .to_string(),
-                file,
-                start,
-                end,
-                severity: d.severity.as_lsp_code(),
-            })
-        })
-        .collect();
-    if let Some(e) = &result.physics.analyzer_error {
-        out.push(Diag::whole_file(
-            path,
-            ANALYZER_FAULT,
-            format!("the analyzer stopped: {e}"),
-        ));
-    }
-    out
 }

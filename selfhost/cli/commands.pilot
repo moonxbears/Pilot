@@ -49,31 +49,10 @@ pub fn cli_gate_files() -> List<str> => [
 fn diag_before(a: HostDiag, b: HostDiag) -> bool =>
     a.file < b.file || (a.file == b.file && a.start < b.start);
 
-/// The analyzer's and the type checker's diagnostics for a program the seed
-/// accepted, in source order, and the step rows of the program at moment
-/// `phase` (`comptime_runs`), found in the checker's pass: `none` when it
-/// did not look. `for_run`: the program is run next, so the checker makes
-/// its run plan in the same pass (`host_typecheck`).
-fn semantic_diags(path: str, for_run: bool, phase: str) -> CheckedProgram {
-    let analyzed = host_analyze(path);
-    let entry = if for_run { f"check_with_steps(\"{phase}\", true);" } else { f"check_with_steps(\"{phase}\", false);" };
-    let checked = host_typecheck(path, cli_checker_files(), cli_checker_decls(), entry);
-    return CheckedProgram { diags: in_source_order(analyzed, checked.diags), rest: checked.rest };
-}
-
-/// Reports the diagnostics a checking tool is waiting on (`host_checked_tool`)
-/// as `pilot run` reports them, errors and warnings; gives the number of
-/// errors. The host calls this as the entry of its own run of the CLI.
-pub fn report_pending_diags() -> i64 {
-    let pending = host_pending_diags();
-    return report_diagnostics(report_at_least(in_source_order(pending[0], pending[1]), diag_severity_warning()));
-}
-
-/// The analyzer's diagnostics and the type checker's, in source order.
-fn in_source_order(ref analyzed: List<HostDiag>, ref checked: List<HostDiag>) -> List<HostDiag> {
+/// `diags` in source order (by file, then start), stable for equal places.
+fn in_source_order(ref diags: List<HostDiag>) -> List<HostDiag> {
     var out: List<HostDiag> = [];
-    for d in analyzed { out.push(d); }
-    for d in checked {
+    for d in diags {
         out.push(d);
         var at = out.len - 1;
         while at > 0 && diag_before(d, out[at - 1]) {
@@ -83,6 +62,24 @@ fn in_source_order(ref analyzed: List<HostDiag>, ref checked: List<HostDiag>) ->
         out[at] = d;
     }
     return out;
+}
+
+/// The type checker's diagnostics for a program the seed
+/// accepted, in source order, and the step rows of the program at moment
+/// `phase` (`comptime_runs`), found in the checker's pass: `none` when it
+/// did not look. `for_run`: the program is run next, so the checker makes
+/// its run plan in the same pass (`host_typecheck`).
+fn semantic_diags(path: str, for_run: bool, phase: str) -> CheckedProgram {
+    let entry = if for_run { f"check_with_steps(\"{phase}\", true);" } else { f"check_with_steps(\"{phase}\", false);" };
+    let checked = host_typecheck(path, cli_checker_files(), cli_checker_decls(), entry);
+    return CheckedProgram { diags: in_source_order(checked.diags), rest: checked.rest };
+}
+
+/// Reports the diagnostics a checking tool is waiting on (`host_checked_tool`)
+/// as `pilot run` reports them, errors and warnings; gives the number of
+/// errors. The host calls this as the entry of its own run of the CLI.
+pub fn report_pending_diags() -> i64 {
+    return report_diagnostics(report_at_least(in_source_order(host_pending_diags()), diag_severity_warning()));
 }
 
 /// The positional arguments as a list.

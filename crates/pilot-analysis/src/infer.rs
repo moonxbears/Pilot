@@ -1,7 +1,6 @@
 use crate::types::{CapabilityBits, HwScalarHeader, LayoutId, LayoutTable, PhysicsGeometry};
 use pilot_ast::{AstArena, NodeId, NodeKind};
 use pilot_intern::SymbolId;
-use pilot_vm::pilc::PilcBinary;
 use pilot_vm::PilotVal;
 use std::collections::{HashMap, HashSet};
 
@@ -74,8 +73,6 @@ pub struct PhysicsRegistry {
     pub lsp_method: String,
     pub lsp_offset: u32,
     pub lsp_result: String,
-    /// Set when the self-hosted analyzer faulted; its results are then incomplete.
-    pub analyzer_error: Option<String>,
     pub categories: Vec<CategoryRecord>,
     pub registered_symbols: Vec<(i64, String, String)>,
     /// The field layouts of the aggregate being built (`layout_aggregate_*`).
@@ -96,7 +93,6 @@ impl PhysicsRegistry {
             lsp_method: String::new(),
             lsp_offset: 0,
             lsp_result: String::new(),
-            analyzer_error: None,
             categories: Vec::new(),
             registered_symbols: Vec::new(),
             pending_fields: Vec::new(),
@@ -1081,82 +1077,4 @@ fn engine_intrinsic_in(
             Ok(PilotVal::NULL)
         }
     }
-}
-
-pub fn load_or_compile_analyzer_pilc() -> PilcBinary {
-    let is_fresh = matches!((std::fs::metadata("selfhost/analyzer.pilot").and_then(|m| m.modified()), std::fs::metadata("selfhost/.pilc-cache/analyzer.pilc").and_then(|m| m.modified())), (Ok(st), Ok(ct)) if ct >= st);
-    if is_fresh {
-        if let Ok(bin) = std::fs::read("selfhost/.pilc-cache/analyzer.pilc").and_then(|b| {
-            PilcBinary::load_from_bytes(&b)
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-        }) {
-            return bin;
-        }
-    }
-    let (src, has_local) = std::fs::read_to_string("selfhost/analyzer.pilot")
-        .map(|s| (s, true))
-        .unwrap_or_else(|_| {
-            (
-                include_str!("../../../selfhost/analyzer.pilot").to_string(),
-                false,
-            )
-        });
-    let parsed = pilot_parser::parse(&src);
-    let binary = pilot_vm::compiler::BytecodeCompiler::compile(&parsed, parsed.root);
-    if has_local {
-        let _ = std::fs::create_dir_all("selfhost/.pilc-cache");
-        if std::fs::write("selfhost/.pilc-cache/analyzer.pilc.tmp", binary.serialize()).is_ok() {
-            let _ = std::fs::rename(
-                "selfhost/.pilc-cache/analyzer.pilc.tmp",
-                "selfhost/.pilc-cache/analyzer.pilc",
-            );
-        }
-    }
-    binary
-}
-
-pub fn run_pilot_analyzer(
-    registry: &mut PhysicsRegistry,
-    analyzer_src: Option<&str>,
-) -> Result<(), String> {
-    let binary = analyzer_src.map_or_else(load_or_compile_analyzer_pilc, |s| {
-        let p = pilot_parser::parse(s);
-        pilot_vm::compiler::BytecodeCompiler::compile(&p, p.root)
-    });
-    let mut vm = pilot_vm::vm::PilVirtualMachine::new();
-    vm.load_binary(binary);
-    let reg_ptr = registry as *mut PhysicsRegistry;
-    vm.engine_handler = Some(Box::new(move |op_code, args| {
-        handle_engine_intrinsic(unsafe { &mut *reg_ptr }, op_code, args)
-    }));
-    vm.run();
-    match vm.fault.take() {
-        Some(fault) => Err(fault.to_string()),
-        None => Ok(()),
-    }
-}
-
-pub fn analyze_physics_with_source(
-    arena: &AstArena,
-    root: NodeId,
-    source: Option<&str>,
-    analyzer_override: Option<&str>,
-) -> PhysicsRegistry {
-    let (flat_arena, symbol_strings) = flatten_ast(arena, root);
-    let mut registry = PhysicsRegistry::new(flat_arena, symbol_strings);
-    if let Some(src) = source {
-        registry.source_text = src.to_string();
-    }
-    if let Err(e) = run_pilot_analyzer(&mut registry, analyzer_override) {
-        registry.analyzer_error = Some(e);
-    }
-    registry
-}
-
-pub fn analyze_physics(
-    arena: &AstArena,
-    root: NodeId,
-    analyzer_override: Option<&str>,
-) -> PhysicsRegistry {
-    analyze_physics_with_source(arena, root, None, analyzer_override)
 }
