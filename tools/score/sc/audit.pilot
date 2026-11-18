@@ -1,0 +1,404 @@
+// The audit: every rule of sc.rules measured between the base commit and
+// the working tree, one finding per thing found.
+pkg sc.audit;
+
+use std.text;
+use sc.rules;
+use sc.parse;
+use sc.git;
+use sc.owner;
+
+/// One thing the audit found: the rule, the points it is worth (0 for a
+/// veto, info or unmeasured rule) and what was found, with its evidence.
+pub struct Finding {
+    pub rule: str;
+    pub points: i64;
+    pub text: str;
+}
+
+/// The owner's approvals, read from the base commit only (a change cannot
+/// approve itself).
+pub struct Approvals {
+    pub rust_paths: List<str>;
+    pub rust_lines: i64;
+    pub outputs: List<str>;
+    pub scorer_paths: List<str>;
+}
+
+/// The approvals in `src`, the text of tools/score/approvals.pilot.
+pub fn read_approvals(src: str) -> Approvals {
+    let lines = number_after(src, "SCORE_APPROVED_RUST_LINES: i64 =");
+    return Approvals {
+        rust_paths: list_after(src, "SCORE_APPROVED_RUST_PATHS"),
+        rust_lines: if lines < 0 { 0 } else { lines },
+        outputs: list_after(src, "SCORE_APPROVED_OUTPUTS"),
+        scorer_paths: list_after(src, "SCORE_APPROVED_SCORER_PATHS"),
+    };
+}
+
+/// Paths a Rust rule watches.
+pub const RUST_SRC: List<str> = ["crates/*/src/*.rs"];
+pub const RUST_TESTS: List<str> = ["crates/*/tests/*.rs"];
+pub const PILOT_FILES: List<str> = ["*.pilot"];
+pub const SEAMS_PATH: str = "selfhost/gate/ledger/seams.pilot";
+pub const WIRING_PATH: str = "selfhost/gate/ledger/wiring.pilot";
+pub const CONCEPTS_PATH: str = "docs/concept_matrix.md";
+pub const MANIFEST_PATH: str = "selfhost/gate/manifest.pilot";
+pub const CEILING_MARKER: str = "paused_max_total_rust_loc() -> usize =>";
+pub const CONFORMANCE: str = "tests/conformance/";
+pub const KNOWN_BUGS_DIR: str = "tests/conformance/known_bugs/";
+pub const EXPECTED_EXTS: List<str> = [".stdout", ".stderr", ".exit"];
+
+/// Every finding for the change from `r.base` to the working tree.
+pub fn audit(ref r: Repo) -> List<Finding> {
+    var out: List<Finding> = [];
+    let approvals = read_approvals(base_text(r, APPROVALS_PATH) ?? "");
+    let changes = changes(r);
+    audit_rust(r, approvals, changes, out);
+    audit_engine(r, out);
+    audit_tests(r, approvals, changes, out);
+    audit_scorer(r, approvals, changes, out);
+    audit_ledgers(r, out);
+    audit_files(r, changes, out);
+    audit_owner(r, out);
+    for u in UNMEASURED { out.push(Finding { rule: "U1", points: 0, text: u }); }
+    return out;
+}
+
+fn add(var ref out: List<Finding>, id: str, units: i64, text: str) {
+    let r = rule(id);
+    let points = if r.per > 1 { (units / r.per) * r.points } else { units * r.points };
+    out.push(Finding { rule: id, points: points, text: text });
+}
+
+fn is_rust_path(path: str) -> bool {
+    let name = base_name(path);
+    return path.ends_with(".rs") || name == "Cargo.toml" || name == "Cargo.lock";
+}
+
+/// The part of `path` after its last `/`.
+pub fn base_name(path: str) -> str {
+    var i = path.len() - 1;
+    while i >= 0 {
+        if path.byte_at(i) == 47 { return path.slice(i + 1, path.len()); }
+        i = i - 1;
+    }
+    return path;
+}
+
+/// The part of `path` up to and with its last `/`; empty for a bare name.
+pub fn dir_of(path: str) -> str {
+    let name = base_name(path);
+    return path.slice(0, path.len() - name.len());
+}
+
+fn listed(ref items: List<str>, path: str) -> bool {
+    for item in items {
+        if item == path || (item.ends_with("/") && path.starts_with(item)) { return true; }
+    }
+    return false;
+}
+
+// ---- V1, V2, V3, C1, C2: Rust ----
+
+fn audit_rust(ref r: Repo, ref ap: Approvals, ref changes: List<Change>, var ref out: List<Finding>) {
+    let base_counts = line_counts(r, true, RUST_SRC);
+    let head_counts = line_counts(r, false, RUST_SRC);
+    let base_src = total(base_counts);
+    let head_src = total(head_counts);
+    add(out, "I1", 0, f"Rust src lines: {base_src} at base, {head_src} now ({signed(head_src - base_src)}); approved increase {ap.rust_lines}");
+    if head_src > base_src + ap.rust_lines {
+        add(out, "V1", 1, f"Rust src lines {head_src} > {base_src} + {ap.rust_lines} approved");
+    } else if head_src < base_src {
+        add(out, "C1", base_src - head_src, f"{base_src - head_src} Rust src lines deleted ({base_src} -> {head_src})");
+    }
+    let base_tests = total(line_counts(r, true, RUST_TESTS));
+    let head_tests = total(line_counts(r, false, RUST_TESTS));
+    add(out, "I1", 0, f"Rust test lines: {base_tests} at base, {head_tests} now ({signed(head_tests - base_tests)})");
+    if head_tests > base_tests {
+        add(out, "V2", 1, f"Rust test lines {head_tests} > {base_tests}");
+    } else if head_tests < base_tests {
+        add(out, "C2", base_tests - head_tests, f"{base_tests - head_tests} Rust test lines deleted ({base_tests} -> {head_tests}); their checks must already be in Pilot");
+    }
+    for c in changes {
+        if !is_rust_path(c.path) { continue; }
+        if listed(ap.rust_paths, c.path) {
+            add(out, "I1", 0, f"{c.status} {c.path}: approved Rust change");
+        } else {
+            add(out, "V3", 1, f"{c.status} {c.path}: not in SCORE_APPROVED_RUST_PATHS at base");
+        }
+    }
+}
+
+// ---- V4, C6: __engine call sites ----
+
+fn audit_engine(ref r: Repo, var ref out: List<Finding>) {
+    let needle = "__engine(";
+    let base_n = count_in_code(r, true, needle, PILOT_FILES);
+    let head_n = count_in_code(r, false, needle, PILOT_FILES);
+    add(out, "I1", 0, f"__engine calls in .pilot code: {base_n} at base, {head_n} now ({signed(head_n - base_n)})");
+    if head_n > base_n {
+        add(out, "V4", 1, f"__engine calls {head_n} > {base_n}");
+    } else if head_n < base_n {
+        add(out, "C6", base_n - head_n, f"{base_n - head_n} __engine calls removed");
+    }
+}
+
+// ---- V5, V6, C8: tests ----
+
+fn is_expected_file(path: str) -> bool {
+    if !path.starts_with("tests/") { return false; }
+    for e in EXPECTED_EXTS {
+        if path.ends_with(e) { return true; }
+    }
+    return false;
+}
+
+/// The conformance programs among `paths`: `.pilot` files with an expected
+/// output file beside them.
+fn programs(ref paths: List<str>) -> List<str> {
+    var have: Map<str, bool> = [:];
+    for p in paths { have.set(p, true); }
+    var out: List<str> = [];
+    for p in paths {
+        if !p.ends_with(".pilot") { continue; }
+        let stem = p.slice(0, p.len() - 6);
+        for e in EXPECTED_EXTS {
+            if have.has(stem + e) {
+                out.push(p);
+                break;
+            }
+        }
+    }
+    return out;
+}
+
+fn audit_tests(ref r: Repo, ref ap: Approvals, ref changes: List<Change>, var ref out: List<Finding>) {
+    var added: List<str> = [];
+    for c in changes {
+        if c.status == "A" { added.push(c.path); }
+    }
+    for c in changes {
+        if !is_expected_file(c.path) || c.status == "A" { continue; }
+        if listed(ap.outputs, c.path) {
+            add(out, "I1", 0, f"{c.status} {c.path}: approved expected-output change");
+            continue;
+        }
+        if c.status == "D" && moved_verbatim(r, c.path, added) {
+            add(out, "I1", 0, f"D {c.path}: moved unchanged");
+            continue;
+        }
+        add(out, "V5", 1, f"{c.status} {c.path}: expected output changed without approval");
+    }
+    let base_programs = programs(base_files(r, CONFORMANCE));
+    let head_paths = head_files(r, CONFORMANCE);
+    let head_programs = programs(head_paths);
+    add(out, "I1", 0, f"conformance programs: {base_programs.len()} at base, {head_programs.len()} now");
+    if head_programs.len() < base_programs.len() {
+        add(out, "V6", 1, f"conformance programs {head_programs.len()} < {base_programs.len()}");
+    }
+    credit_pairs(r, head_programs, added, out);
+}
+
+/// Whether deleted `path` reappears among `added` with the same name and
+/// the same text.
+fn moved_verbatim(ref r: Repo, path: str, ref added: List<str>) -> bool {
+    let old = base_text(r, path) ?? "";
+    let name = base_name(path);
+    for a in added {
+        if base_name(a) == name && (head_text(r, a) ?? "") == old { return true; }
+    }
+    return false;
+}
+
+/// C8: per directory, pairs of a new program and a new `err_` program,
+/// each with a header of at least MIN_HEADER_LINES comment lines.
+fn credit_pairs(ref r: Repo, ref head_programs: List<str>, ref added: List<str>, var ref out: List<Finding>) {
+    var is_new: Map<str, bool> = [:];
+    for a in added { is_new.set(a, true); }
+    var ok_count: Map<str, i64> = [:];
+    var err_count: Map<str, i64> = [:];
+    var dirs: List<str> = [];
+    for p in head_programs {
+        if !is_new.has(p) || p.starts_with(KNOWN_BUGS_DIR) { continue; }
+        let header = leading_comment_lines(head_text(r, p) ?? "");
+        if header < MIN_HEADER_LINES {
+            add(out, "I1", 0, f"new program {p}: no credit, header has {header} comment lines (needs {MIN_HEADER_LINES})");
+            continue;
+        }
+        let dir = dir_of(p);
+        if !ok_count.has(dir) {
+            dirs.push(dir);
+            ok_count.set(dir, 0);
+            err_count.set(dir, 0);
+        }
+        if base_name(p).starts_with("err_") {
+            err_count.set(dir, (err_count[dir] ?? 0) + 1);
+        } else {
+            ok_count.set(dir, (ok_count[dir] ?? 0) + 1);
+        }
+    }
+    for dir in dirs {
+        var pairs = ok_count[dir] ?? 0;
+        let errs = err_count[dir] ?? 0;
+        if errs < pairs { pairs = errs; }
+        if pairs > MAX_PAIRS_PER_DIR { pairs = MAX_PAIRS_PER_DIR; }
+        if pairs > 0 { add(out, "C8", pairs, f"{pairs} new program pair(s) in {dir}"); }
+    }
+}
+
+// ---- V7: the scorer and the Rust ceiling ----
+
+fn audit_scorer(ref r: Repo, ref ap: Approvals, ref changes: List<Change>, var ref out: List<Finding>) {
+    for c in changes {
+        if !listed(FROZEN_PATHS, c.path) || c.path == ADJUSTMENTS_PATH { continue; }
+        if listed(ap.scorer_paths, c.path) {
+            add(out, "I1", 0, f"{c.status} {c.path}: approved scorer change");
+        } else {
+            add(out, "V7", 1, f"{c.status} {c.path}: frozen scorer file changed without approval");
+        }
+    }
+    let base_ceiling = number_after(base_text(r, MANIFEST_PATH) ?? "", CEILING_MARKER);
+    let head_ceiling = number_after(head_text(r, MANIFEST_PATH) ?? "", CEILING_MARKER);
+    if base_ceiling < 0 || head_ceiling < 0 { return; }
+    add(out, "I1", 0, f"Rust line ceiling: {base_ceiling} at base, {head_ceiling} now");
+    if head_ceiling > base_ceiling + ap.rust_lines {
+        add(out, "V7", 1, f"Rust line ceiling raised {base_ceiling} -> {head_ceiling} beyond {ap.rust_lines} approved lines");
+    }
+}
+
+// ---- C3, D3, C3w, D3w, V8, C4, D1, C5, D2: the ledgers ----
+
+fn audit_ledgers(ref r: Repo, var ref out: List<Finding>) {
+    let base_seams = base_text(r, SEAMS_PATH) ?? "";
+    let head_seams = head_text(r, SEAMS_PATH) ?? "";
+    compare_sets(out, ids_after(base_seams, "seam_entry("), ids_after(head_seams, "seam_entry("), "C4", "D1", "seam");
+    compare_sets(out, ids_after(base_seams, "known_bug("), ids_after(head_seams, "known_bug("), "C5", "D2", "known bug");
+
+    var head_concepts: Map<str, str> = [:];
+    for row in concept_rows(head_text(r, CONCEPTS_PATH) ?? "") { head_concepts.set(row.id, row.verdict); }
+    for row in concept_rows(base_text(r, CONCEPTS_PATH) ?? "") {
+        let now = if head_concepts.has(row.id) { head_concepts[row.id] ?? "" } else { "removed" };
+        if row.verdict != "REAL" && now == "REAL" {
+            add(out, "C3", 1, f"{row.id}: {row.verdict} -> REAL");
+        } else if row.verdict == "REAL" && now != "REAL" {
+            add(out, "D3", 1, f"{row.id}: REAL -> {now}");
+        }
+    }
+
+    var head_rows: Map<str, str> = [:];
+    for row in wiring_rows(head_text(r, WIRING_PATH) ?? "") { head_rows.set(row.key, row.level); }
+    var base_keys: Map<str, bool> = [:];
+    for row in wiring_rows(base_text(r, WIRING_PATH) ?? "") {
+        base_keys.set(row.key, true);
+        let before = wiring_rank(row.level);
+        let now = if head_rows.has(row.key) { head_rows[row.key] ?? "" } else { "" };
+        if now == "" {
+            if before >= 3 { add(out, "D3w", 1, f"removed while {row.level}: {row.key}"); }
+            continue;
+        }
+        let after = wiring_rank(now);
+        if after == 4 && before != 4 {
+            add(out, "V8", 1, f"set to COMPLETE: {row.key}");
+        } else if before < 3 && after >= 3 {
+            add(out, "C3w", 1, f"{row.level} -> {now}: {row.key}");
+        } else if after < before {
+            add(out, "D3w", 1, f"{row.level} -> {now}: {row.key}");
+        }
+    }
+    for row in wiring_rows(head_text(r, WIRING_PATH) ?? "") {
+        if !base_keys.has(row.key) && wiring_rank(row.level) == 4 {
+            add(out, "V8", 1, f"new row at COMPLETE: {row.key}");
+        }
+    }
+}
+
+/// Credits each id of `before` missing from `after` (closed) and debits
+/// each id of `after` missing from `before` (opened).
+fn compare_sets(var ref out: List<Finding>, ref before: List<str>, ref after: List<str>, closed_rule: str, opened_rule: str, what: str) {
+    var in_before: Map<str, bool> = [:];
+    for id in before { in_before.set(id, true); }
+    var in_after: Map<str, bool> = [:];
+    for id in after { in_after.set(id, true); }
+    for id in before {
+        if !in_after.has(id) { add(out, closed_rule, 1, f"{what} closed: {id}"); }
+    }
+    for id in after {
+        if !in_before.has(id) { add(out, opened_rule, 1, f"{what} opened: {id}"); }
+    }
+    add(out, "I1", 0, f"{what}s: {before.len()} at base, {after.len()} now");
+}
+
+// ---- V10, C7: files ----
+
+fn audit_files(ref r: Repo, ref changes: List<Change>, var ref out: List<Finding>) {
+    var added: List<str> = [];
+    for c in changes {
+        if c.status == "A" { added.push(c.path); }
+    }
+    for c in changes {
+        let code = c.path.ends_with(".pilot") || c.path.ends_with(".rs");
+        if !code { continue; }
+        if c.status != "D" {
+            let n = line_count(head_text(r, c.path) ?? "");
+            let before = line_count(base_text(r, c.path) ?? "");
+            if n > MAX_FILE_LINES && n > before {
+                add(out, "V10", 1, f"{c.path}: {before} -> {n} lines (cap {MAX_FILE_LINES})");
+            } else if n > MAX_FILE_LINES {
+                add(out, "I1", 0, f"{c.path}: {n} lines, over the cap but not grown ({before} at base)");
+            }
+            continue;
+        }
+        if !c.path.ends_with(".pilot") || c.path.starts_with("tests/") { continue; }
+        if moved_verbatim(r, c.path, added) {
+            add(out, "I1", 0, f"D {c.path}: moved unchanged, not a deletion");
+            continue;
+        }
+        let refs = referrers(r, c.path);
+        if refs.len() > 0 {
+            add(out, "I1", 0, f"D {c.path}: no credit, still named in {refs[0]}");
+            continue;
+        }
+        add(out, "C7", 1, f"deleted {c.path}");
+    }
+    let base_pilot = total(line_counts(r, true, PILOT_FILES));
+    let head_pilot = total(line_counts(r, false, PILOT_FILES));
+    add(out, "I1", 0, f"Pilot lines (scores nothing): {base_pilot} at base, {head_pilot} now ({signed(head_pilot - base_pilot)})");
+}
+
+// ---- O1, V7o: the owner's ledger ----
+
+fn audit_owner(ref r: Repo, var ref out: List<Finding>) {
+    let base_entries = read_adjustments(base_text(r, ADJUSTMENTS_PATH) ?? "");
+    let head_entries = read_adjustments(head_text(r, ADJUSTMENTS_PATH) ?? "");
+    var in_head: Map<str, i64> = [:];
+    for a in head_entries { in_head.set(entry_key(a), (if in_head.has(entry_key(a)) { in_head[entry_key(a)] ?? 0 } else { 0 }) + 1); }
+    var ledger = 0;
+    for a in base_entries {
+        let k = entry_key(a);
+        let left = if in_head.has(k) { in_head[k] ?? 0 } else { 0 };
+        if left == 0 {
+            add(out, "V7o", 1, f"owner ledger entry removed or changed: {a.points} on {a.date}, {a.reason}");
+            continue;
+        }
+        in_head.set(k, left - 1);
+        ledger = ledger + a.points;
+    }
+    for a in head_entries {
+        let k = entry_key(a);
+        let left = if in_head.has(k) { in_head[k] ?? 0 } else { 0 };
+        if left == 0 { continue; }
+        in_head.set(k, left - 1);
+        let target = if a.applies_to == "" { "" } else { f" (for {a.applies_to})" };
+        out.push(Finding { rule: "O1", points: a.points, text: f"{a.reason}{target}, {a.date}; added in this change" });
+    }
+    if base_entries.len() > 0 || head_entries.len() > 0 {
+        add(out, "I1", 0, f"owner ledger before this change: {signed(ledger)} over {base_entries.len()} entries");
+    }
+}
+
+/// `n` with its sign: `+3`, `-3`, `0`.
+pub fn signed(n: i64) -> str {
+    if n > 0 { return f"+{n}"; }
+    return f"{n}";
+}

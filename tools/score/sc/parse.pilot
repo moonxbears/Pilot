@@ -1,0 +1,182 @@
+// Readers for the files the scorer compares between the base commit and the
+// working tree: the seam and bug registries, the wiring ledger, the concept
+// matrix, the Rust line ceiling and the owner's approvals. Each reads text,
+// so the base side (from `git show`) and the working tree are read the same
+// way.
+pkg sc.parse;
+
+use std.text;
+
+/// A string literal found in source text: its contents (escapes kept as
+/// written) and the offset just past its closing quote.
+pub struct Lit {
+    pub text: str;
+    pub end: i64;
+}
+
+/// The string literal starting at or after `from` in `src`; `none` when
+/// there is none.
+pub fn next_literal(src: str, from: i64) -> Lit? {
+    let open = src.find("\"", from);
+    if open < 0 { return none; }
+    var i = (open as i64) + 1;
+    let n = src.len();
+    while i < n {
+        let b = src.byte_at(i);
+        if b == 92 {
+            i = i + 2;
+            continue;
+        }
+        if b == 34 { return Lit { text: src.slice((open as i64) + 1, i), end: i + 1 }; }
+        i = i + 1;
+    }
+    return none;
+}
+
+/// The first string literal after each occurrence of `marker` in `src`, in
+/// order (`seam_entry("vm.opcode", ..)` gives `vm.opcode` for the marker
+/// `seam_entry(`).
+pub fn ids_after(src: str, marker: str) -> List<str> {
+    var out: List<str> = [];
+    var at = src.find(marker, 0);
+    while at >= 0 {
+        let from = (at as i64) + marker.len();
+        if some lit = next_literal(src, from) { out.push(lit.text); }
+        at = src.find(marker, from);
+    }
+    return out;
+}
+
+/// One row of the wiring ledger: its key (milestone and name) and level.
+pub struct WiringRow {
+    pub key: str;
+    pub level: str;
+}
+
+/// The rows of `selfhost/gate/ledger/wiring.pilot` text: each
+/// `cap("<milestone>", "<name>", ::<Level>, ..)`.
+pub fn wiring_rows(src: str) -> List<WiringRow> {
+    var out: List<WiringRow> = [];
+    let marker = "cap(\"";
+    var at = src.find(marker, 0);
+    while at >= 0 {
+        let from = at as i64;
+        at = src.find(marker, from + 1);
+        guard some milestone = next_literal(src, from + 3) else { continue; }
+        guard some name = next_literal(src, milestone.end) else { continue; }
+        let colons = src.find("::", name.end);
+        if colons < 0 { continue; }
+        var i = (colons as i64) + 2;
+        let start = i;
+        while i < src.len() && is_word_byte(src.byte_at(i)) { i = i + 1; }
+        out.push(WiringRow { key: milestone.text + " | " + name.text, level: src.slice(start, i) });
+    }
+    return out;
+}
+
+/// The rank of a wiring level: SPEC 0, DRAFT 1, CORE 2, WIRED 3,
+/// COMPLETE 4. SIMULATED imitates a capability, so it ranks with SPEC.
+pub fn wiring_rank(level: str) -> i64 {
+    if level == "Draft" || level == "DRAFT" { return 1; }
+    if level == "Core" || level == "CORE" { return 2; }
+    if level == "Wired" || level == "WIRED" { return 3; }
+    if level == "Complete" || level == "COMPLETE" { return 4; }
+    return 0;
+}
+
+/// One row of `docs/concept_matrix.md`: its id (`C07`) and verdict.
+pub struct ConceptRow {
+    pub id: str;
+    pub verdict: str;
+}
+
+/// The verdicts a concept row may hold.
+pub const VERDICTS: List<str> = ["REAL", "PARTIAL", "MIGRATING", "CORE", "SEAM", "DESIGN"];
+
+/// The concept rows of the matrix: lines starting `| **C<digits>.`, with
+/// the first table cell after the S, I and C cells that holds a verdict.
+pub fn concept_rows(src: str) -> List<ConceptRow> {
+    var out: List<ConceptRow> = [];
+    for line in text.split_text(src, "\n") {
+        if !line.starts_with("| **C") { continue; }
+        let dot = line.find(".", 5);
+        if dot < 0 { continue; }
+        let id = line.slice(4, dot as i64);
+        let cells = text.split_text(line, "|");
+        var verdict = "";
+        var c = 5;
+        while c < cells.len() && verdict == "" {
+            let cell = cells[c].trim().replace("`", "");
+            for v in VERDICTS {
+                if cell == v { verdict = v; }
+            }
+            c = c + 1;
+        }
+        out.push(ConceptRow { id: id, verdict: verdict });
+    }
+    return out;
+}
+
+/// Whether byte `b` can be part of a name.
+pub fn is_word_byte(b: u8) -> bool {
+    return (b >= 97 && b <= 122) || (b >= 65 && b <= 90) || (b >= 48 && b <= 57) || b == 95;
+}
+
+/// The number written after `marker` in `src` (spaces skipped); -1 when the
+/// marker or the number is missing.
+pub fn number_after(src: str, marker: str) -> i64 {
+    let at = src.find(marker, 0);
+    if at < 0 { return -1; }
+    var i = (at as i64) + marker.len();
+    while i < src.len() && src.byte_at(i) == 32 { i = i + 1; }
+    let start = i;
+    while i < src.len() && src.byte_at(i) >= 48 && src.byte_at(i) <= 57 { i = i + 1; }
+    if i == start { return -1; }
+    return text.parse_i64(src.slice(start, i)) ?? -1;
+}
+
+/// The string literals inside the `[..]` list that follows `name` in
+/// `src`, skipping `//` comments; empty when `name` is missing.
+pub fn list_after(src: str, name: str) -> List<str> {
+    var out: List<str> = [];
+    let at = src.find(name, 0);
+    if at < 0 { return out; }
+    let open = src.find("[", at as i64);
+    if open < 0 { return out; }
+    let close = src.find("];", open as i64);
+    if close < 0 { return out; }
+    for line in text.split_text(src.slice((open as i64) + 1, close as i64), "\n") {
+        let cut = line.find("//", 0);
+        let code = if cut >= 0 { line.slice(0, cut as i64) } else { line };
+        var from = 0;
+        while true {
+            guard some lit = next_literal(code, from) else { break; }
+            out.push(lit.text);
+            from = lit.end;
+        }
+    }
+    return out;
+}
+
+/// The number of lines in `src` (a last line without a line break counts).
+pub fn line_count(src: str) -> i64 {
+    if src.len() == 0 { return 0; }
+    var n = 0;
+    var at = src.find("\n", 0);
+    while at >= 0 {
+        n = n + 1;
+        at = src.find("\n", (at as i64) + 1);
+    }
+    if src.byte_at(src.len() - 1) != 10 { n = n + 1; }
+    return n;
+}
+
+/// How many of the first lines of `src` start with `//` (after spaces).
+pub fn leading_comment_lines(src: str) -> i64 {
+    var n = 0;
+    for line in text.split_text(src, "\n") {
+        if !line.trim().starts_with("//") { return n; }
+        n = n + 1;
+    }
+    return n;
+}

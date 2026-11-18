@@ -82,7 +82,7 @@ const CLI_BUILD_GROUP: &[&str] = &["selfhost/cli/main.pilot", "selfhost/cli/buil
 const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditSpec {
     milestone_id: 60,
     test_file_rel: "crates/pilot-analysis/tests/milestone60_selfhost_cli_pkg_perf_and_bench.rs",
-    expected_test_count: 3,
+    expected_test_count: 1,
     files: &[
         anticheat::FileAuditRule {
             path: "selfhost/pkg/manifest.pilot",

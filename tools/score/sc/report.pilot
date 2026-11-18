@@ -1,0 +1,125 @@
+// The scorecard's two views: the accumulated score (what the console shows
+// by default) and the audit log (every finding, then the totals).
+pkg sc.report;
+
+use std.text;
+use sc.rules;
+use sc.audit;
+
+/// The findings added up.
+pub struct Totals {
+    pub credits: i64;
+    pub debts: i64;
+    pub vetoes: i64;
+    pub unmeasured: i64;
+    /// Credits plus debts, or 0 when any veto was found.
+    pub score: i64;
+    /// Owner adjustments added in this change, and how many.
+    pub owner: i64;
+    pub owner_entries: i64;
+    /// The penalties among them (negative entries).
+    pub owner_penalties: i64;
+    /// The score plus the owner's entries; on a vetoed change only the
+    /// penalties count, so a reward never rescues a veto.
+    pub change_total: i64;
+}
+
+/// `findings` added up.
+pub fn totals(ref findings: List<Finding>) -> Totals {
+    var credits = 0;
+    var debts = 0;
+    var vetoes = 0;
+    var unmeasured = 0;
+    var owner = 0;
+    var owner_entries = 0;
+    var owner_penalties = 0;
+    for f in findings {
+        switch rule(f.rule).kind {
+            case ::Veto: vetoes = vetoes + 1;
+            case ::Credit: credits = credits + f.points;
+            case ::Debt: debts = debts + f.points;
+            case ::Unmeasured: unmeasured = unmeasured + 1;
+            case ::Owner: {
+                owner = owner + f.points;
+                owner_entries = owner_entries + 1;
+                if f.points < 0 { owner_penalties = owner_penalties + f.points; }
+            }
+            case ::Info: {}
+        }
+    }
+    let score = if vetoes > 0 { 0 } else { credits + debts };
+    return Totals { credits: credits, debts: debts, vetoes: vetoes, unmeasured: unmeasured, score: score, owner: owner, owner_entries: owner_entries,
+        owner_penalties: owner_penalties, change_total: if vetoes > 0 { owner_penalties } else { score + owner } };
+}
+
+/// The ids of the vetoes found, each once, in rule order.
+fn veto_ids(ref findings: List<Finding>) -> str {
+    var ids = "";
+    for r in RULES {
+        if rule(r.id).kind != ::Veto { continue; }
+        for f in findings {
+            if f.rule == r.id {
+                ids = if ids == "" { r.id } else { ids + ", " + r.id };
+                break;
+            }
+        }
+    }
+    return ids;
+}
+
+/// The accumulated score, two lines.
+pub fn summary(ref findings: List<Finding>) -> str {
+    let t = totals(findings);
+    var first = "";
+    if t.vetoes > 0 {
+        first = f"score: 0 (VETOED by {t.vetoes}: {veto_ids(findings)}; credits +{t.credits} and debts {t.debts} not counted)";
+    } else {
+        first = f"score: {signed(t.score)} (credits +{t.credits}, debts {t.debts}, vetoes 0)";
+    }
+    if t.owner_entries > 0 {
+        let note = if t.vetoes > 0 && t.owner != t.owner_penalties { "; rewards do not count on a vetoed change" } else { "" };
+        first = first + "\n" + f"owner adjustments added in this change: {signed(t.owner)} ({t.owner_entries}); change total: {signed(t.change_total)}{note}";
+    }
+    return first + "\n" + f"not measured here: {t.unmeasured} rules; run pilot test, pilot test --ir, pilot test --emit c, pilot gate --full and pilot bench";
+}
+
+/// The audit log: the findings by kind (vetoes, credits, debts,
+/// measurements, not measured), then each rule's subtotal and the summary.
+pub fn log(ref findings: List<Finding>, base: str, hash: str) -> str {
+    var s = f"score audit against {base} ({hash})\n";
+    s = s + section(findings, ::Veto, "Vetoes");
+    s = s + section(findings, ::Credit, "Credits");
+    s = s + section(findings, ::Debt, "Debts");
+    s = s + section(findings, ::Owner, "Owner adjustments added in this change (count even when vetoed)");
+    s = s + section(findings, ::Info, "Measurements (score nothing)");
+    s = s + section(findings, ::Unmeasured, "Not measured here");
+    s = s + "\nAccumulated\n";
+    for r in RULES {
+        if r.kind == ::Info || r.kind == ::Unmeasured || r.kind == ::Owner { continue; }
+        var count = 0;
+        var points = 0;
+        for f in findings {
+            if f.rule == r.id {
+                count = count + 1;
+                points = points + f.points;
+            }
+        }
+        if count == 0 { continue; }
+        let value = if r.kind == ::Veto { "veto" } else { signed(points) };
+        s = s + f"  {text.pad_right(r.id, 4)} {text.pad_left(value, 6)}  x{count}  {r.title}\n";
+    }
+    return s + summary(findings) + "\n";
+}
+
+fn section(ref findings: List<Finding>, kind: Kind, title: str) -> str {
+    var body = "";
+    var n = 0;
+    for f in findings {
+        let r = rule(f.rule);
+        if r.kind != kind { continue; }
+        n = n + 1;
+        let value = if kind == ::Credit || kind == ::Debt || kind == ::Owner { " " + signed(f.points) } else { "" };
+        body = body + f"  [{kind_label(kind)} {f.rule}{value}] {f.text}\n";
+    }
+    return f"\n{title} ({n})\n" + body;
+}

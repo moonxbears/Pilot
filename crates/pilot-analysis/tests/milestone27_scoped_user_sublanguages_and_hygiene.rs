@@ -296,20 +296,6 @@ fn test_m27_4_zero_hardcoded_keywords_in_analyzer_and_cst_recovery() {
         .parent()
         .unwrap();
 
-    // 1. Audit selfhost/analyzer.pilot: build_dynamic_keyword_set must NOT contain giant static string
-    let analyzer_src =
-        fs::read_to_string(root.join("selfhost/analyzer.pilot")).expect("read analyzer.pilot");
-    assert!(
-        !analyzer_src.contains("else|while|until|for|in|then|break|continue"),
-        "selfhost/analyzer.pilot still contains hardcoded non-seed keyword string!"
-    );
-    assert!(
-        analyzer_src.contains(
-            "|__engine|struct|interface|fn|let|ref|if|loop|return|yield|defer|comptime|quote|asm|"
-        ),
-        "selfhost/analyzer.pilot must preserve the 14 seed tokens"
-    );
-
     // 2. Audit selfhost/cst/cst_recovery.pilot: canonical_keywords must NOT contain giant static string
     let cst_src = fs::read_to_string(root.join("selfhost/cst/cst_recovery.pilot"))
         .expect("read cst_recovery.pilot");

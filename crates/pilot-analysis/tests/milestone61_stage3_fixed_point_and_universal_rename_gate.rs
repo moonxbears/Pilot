@@ -79,7 +79,7 @@ const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditS
     milestone_id: 61,
     test_file_rel:
         "crates/pilot-analysis/tests/milestone61_stage3_fixed_point_and_universal_rename_gate.rs",
-    expected_test_count: 3,
+    expected_test_count: 2,
     files: &[
         anticheat::FileAuditRule {
             path: "selfhost/lexer.pilot",

@@ -1,0 +1,82 @@
+== clean
+score: 0 (credits +0, debts 0, vetoes 0)
+exit 0
+== rust_delete
+  [CREDIT C1 +2] 22 Rust src lines deleted (25 -> 3)
+score: +2 (credits +2, debts 0, vetoes 0)
+exit 0
+== rust_unapproved
+  [VETO V3] M crates/a/src/lib.rs: not in SCORE_APPROVED_RUST_PATHS at base
+score: 0 (VETOED by 1: V3; credits +0 and debts 0 not counted)
+exit 1
+== rust_grow
+  [VETO V1] Rust src lines 5 > 3 + 0 approved
+score: 0 (VETOED by 1: V1; credits +0 and debts 0 not counted)
+exit 1
+== rust_grow_approved
+score: 0 (credits +0, debts 0, vetoes 0)
+exit 0
+== outputs
+  [VETO V5] M tests/conformance/a/p.stdout: expected output changed without approval
+score: 0 (VETOED by 1: V5; credits +0 and debts 0 not counted)
+exit 1
+== outputs_drop
+  [VETO V5] D tests/conformance/a/q.stdout: expected output changed without approval
+  [VETO V6] conformance programs 1 < 2
+score: 0 (VETOED by 2: V5, V6; credits +0 and debts 0 not counted)
+exit 1
+== ledgers
+  [CREDIT C4 +5] seam closed: s.one
+  [CREDIT C5 +5] known bug closed: b.one
+  [CREDIT C3 +10] C01: PARTIAL -> REAL
+  [CREDIT C3w +3] Draft -> Wired: F1 | row a
+  [DEBT D1 -5] seam opened: s.three
+  [DEBT D3 -10] C02: REAL -> PARTIAL
+  [DEBT D3w -3] Wired -> Core: F1 | row b
+  [DEBT D3w -3] removed while Wired: F1 | row c
+score: +2 (credits +23, debts -21, vetoes 0)
+exit 0
+== complete
+  [VETO V8] set to COMPLETE: F1 | row a
+score: 0 (VETOED by 1: V8; credits +0 and debts 0 not counted)
+exit 1
+== engine_down
+  [CREDIT C6 +1] 5 __engine calls removed
+score: +1 (credits +1, debts 0, vetoes 0)
+exit 0
+== engine_up
+  [VETO V4] __engine calls 2 > 1
+score: 0 (VETOED by 1: V4; credits +0 and debts 0 not counted)
+exit 1
+== frozen
+  [VETO V7] M tools/score/approvals.pilot: frozen scorer file changed without approval
+  [VETO V7] M tools/score/sc/rules.pilot: frozen scorer file changed without approval
+  [VETO V7] Rust line ceiling raised 100 -> 120 beyond 0 approved lines
+score: 0 (VETOED by 3: V7; credits +0 and debts 0 not counted)
+exit 1
+== files
+  [CREDIT C8 +2] 1 new program pair(s) in tests/conformance/n/
+  [CREDIT C7 +2] deleted lib/dead.pilot
+score: +4 (credits +4, debts 0, vetoes 0)
+exit 0
+== too_long
+  [VETO V10] big.pilot: 1500 -> 1501 lines (cap 1500)
+score: 0 (VETOED by 1: V10; credits +0 and debts 0 not counted)
+exit 1
+== owner_penalty
+  [VETO V3] M crates/a/src/lib.rs: not in SCORE_APPROVED_RUST_PATHS at base
+  [OWNER O1 -100] faked numbers (for PROP-x), 2026-11-18; added in this change
+score: 0 (VETOED by 1: V3; credits +0 and debts 0 not counted)
+owner adjustments added in this change: -100 (1); change total: -100
+exit 1
+== owner_reward
+  [OWNER O1 +20] clean split of the parser pass, 2026-11-18; added in this change
+score: 0 (credits +0, debts 0, vetoes 0)
+owner adjustments added in this change: +20 (1); change total: +20
+exit 0
+== owner_tamper
+  [VETO V7o] owner ledger entry removed or changed: 5 on 2026-11-01, kept
+  [OWNER O1 +50] kept, 2026-11-01; added in this change
+score: 0 (VETOED by 1: V7o; credits +0 and debts 0 not counted)
+owner adjustments added in this change: +50 (1); change total: 0; rewards do not count on a vetoed change
+exit 1

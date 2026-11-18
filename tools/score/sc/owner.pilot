@@ -1,0 +1,89 @@
+// The owner's ledger: points the owner adds or takes away by hand, outside
+// the measured rules (a reward for a pattern worth repeating, a penalty for
+// cheating the rules cannot see). Kept in tools/score/adjustments.pilot.
+//
+// - Append-only: an entry at the base commit that is missing or changed in
+//   the working tree is a V7 veto.
+// - An entry new in the working tree belongs to the change being scored and
+//   is added to its change total. On a vetoed change only penalties count:
+//   a penalty is never erased by the veto a cheat usually also earns, and a
+//   reward never rescues a veto.
+// - The tool cannot tell who wrote an entry. A new entry is always printed
+//   as added in this change, so one the author of the change added stands
+//   out in review.
+pkg sc.owner;
+
+use std.text;
+use sc.parse;
+
+/// One owner entry.
+pub struct Adjustment {
+    pub points: i64;
+    pub date: str;
+    pub reason: str;
+    pub applies_to: str;
+}
+
+/// Where the ledger lives.
+pub const ADJUSTMENTS_PATH: str = "tools/score/adjustments.pilot";
+/// Where each entry starts in the ledger's text.
+pub const ENTRY_MARKER: str = "Adjustment { points:";
+
+/// The entries in `src`, the ledger's text, in order.
+pub fn read_adjustments(src: str) -> List<Adjustment> {
+    var out: List<Adjustment> = [];
+    var at = src.find(ENTRY_MARKER, 0);
+    while at >= 0 {
+        var i = (at as i64) + ENTRY_MARKER.len();
+        at = src.find(ENTRY_MARKER, i);
+        while i < src.len() && src.byte_at(i) == 32 { i = i + 1; }
+        let start = i;
+        if i < src.len() && (src.byte_at(i) == 45 || src.byte_at(i) == 43) { i = i + 1; }
+        while i < src.len() && src.byte_at(i) >= 48 && src.byte_at(i) <= 57 { i = i + 1; }
+        guard some points = text.parse_i64(src.slice(start, i)) else { continue; }
+        guard some date = next_literal(src, i) else { continue; }
+        guard some reason = next_literal(src, date.end) else { continue; }
+        guard some target = next_literal(src, reason.end) else { continue; }
+        out.push(Adjustment { points: points, date: date.text, reason: reason.text, applies_to: target.text });
+    }
+    return out;
+}
+
+/// The text that identifies `a` when base and working tree are compared.
+pub fn entry_key(ref a: Adjustment) -> str {
+    return f"{a.points}|{a.date}|{a.reason}|{a.applies_to}";
+}
+
+/// `s` as the inside of a string literal: backslashes and quotes escaped,
+/// line breaks as spaces.
+pub fn escaped(s: str) -> str {
+    return s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", " ").replace("\r", " ");
+}
+
+/// The ledger line for `a`.
+pub fn entry_line(ref a: Adjustment) -> str {
+    let q = "\"";
+    return "    " + ENTRY_MARKER + f" {a.points}, date: " + q + escaped(a.date) + q + ", reason: " + q + escaped(a.reason) + q +
+        ", applies_to: " + q + escaped(a.applies_to) + q + " },\n";
+}
+
+/// `src` (the ledger's text) with `a` appended to the entry list; `none`
+/// when the list's end is not found.
+pub fn append_entry(src: str, ref a: Adjustment) -> str? {
+    let list = src.find("OWNER_ADJUSTMENTS", 0);
+    if list < 0 { return none; }
+    let close = src.find("];", list as i64);
+    if close < 0 { return none; }
+    let cut = close as i64;
+    return src.slice(0, cut) + entry_line(a) + src.slice(cut, src.len());
+}
+
+/// The ledger a new checkout starts with, empty.
+pub fn empty_ledger() -> str {
+    return "// The owner's score ledger (tools/score/sc/owner.pilot explains it).\n" +
+        "// Add entries with: pilot run tools/score/main.pilot -- --adjust <points> \"<reason>\" [--for <what>]\n" +
+        "// Only the owner adds entries; entries are never edited or removed.\n" +
+        "pkg sc.adjustments;\n\n" +
+        "pub struct Adjustment {\n    pub points: i64;\n    pub date: str;\n    pub reason: str;\n    pub applies_to: str;\n}\n\n" +
+        "pub const OWNER_ADJUSTMENTS: List<Adjustment> = [\n];\n";
+}

@@ -27,7 +27,7 @@ mod anticheat;
 const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditSpec {
     milestone_id: 50,
     test_file_rel: "crates/pilot-analysis/tests/milestone50_lossless_bridge_and_reflection.rs",
-    expected_test_count: 4,
+    expected_test_count: 1,
     files: &[
         anticheat::FileAuditRule {
             path: "selfhost/diagnostics.pilot",

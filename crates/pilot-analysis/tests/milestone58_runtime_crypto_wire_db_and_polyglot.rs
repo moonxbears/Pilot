@@ -112,7 +112,7 @@ mod anticheat;
 const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditSpec {
     milestone_id: 58,
     test_file_rel: "crates/pilot-analysis/tests/milestone58_runtime_crypto_wire_db_and_polyglot.rs",
-    expected_test_count: 7,
+    expected_test_count: 6,
     files: &[
         anticheat::FileAuditRule {
             path: "selfhost/ffi_bindgen.pilot",

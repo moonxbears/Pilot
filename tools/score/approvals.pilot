@@ -1,0 +1,29 @@
+// The owner's approvals for the scorecard (tools/score/main.pilot).
+//
+// Only the owner edits this file, and commits the edit on its own before
+// the change it approves is scored: the scorer reads this file from the
+// base commit, never from the working tree, so a change cannot approve
+// itself. An edit here inside a scored change is a V7 veto.
+//
+// Remove an entry once the change it approved is merged; an entry left here
+// approves every later change to that path too.
+pkg sc.approvals;
+
+/// Rust and Cargo files (a path, or a directory ending in `/`) that may
+/// change: each from an approved proposals.md entry. Name the proposal in a
+/// comment beside it.
+pub const SCORE_APPROVED_RUST_PATHS: List<str> = [
+];
+
+/// How many Rust src lines approved proposals may add in total (V1, and how
+/// far the Rust line ceiling may rise, V7).
+pub const SCORE_APPROVED_RUST_LINES: i64 = 0;
+
+/// Existing tests' expected-output files (`.stdout`, `.stderr`, `.exit`)
+/// that may change.
+pub const SCORE_APPROVED_OUTPUTS: List<str> = [
+];
+
+/// Frozen scorer files (sc.rules FROZEN_PATHS) that may change.
+pub const SCORE_APPROVED_SCORER_PATHS: List<str> = [
+];

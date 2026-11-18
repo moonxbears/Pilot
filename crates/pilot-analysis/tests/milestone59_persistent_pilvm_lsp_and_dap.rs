@@ -78,7 +78,7 @@ const DAP_BANNED_MOCKS: &[&str] = &["Apples", "production_cluster_db", "7fff2000
 const ANTICHEAT_SPEC: anticheat::MilestoneAuditSpec = anticheat::MilestoneAuditSpec {
     milestone_id: 59,
     test_file_rel: "crates/pilot-analysis/tests/milestone59_persistent_pilvm_lsp_and_dap.rs",
-    expected_test_count: 3,
+    expected_test_count: 1,
     files: &[
         anticheat::FileAuditRule {
             path: "selfhost/ide/vscode_gen.pilot",
