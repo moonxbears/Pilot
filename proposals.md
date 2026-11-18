@@ -65,7 +65,7 @@ The path to `PROP-022`, in order. Each item is built and verified on its own (th
 | **`PROP-033`** | The Analyzer Skips Units Whose Diagnostics Are Thrown Away (`ast_unit_is_user`) | about `+10` in `crates/pilot-cli/src/run.rs`, `crates/pilot-analysis/src/{pipeline,infer}.rs` | `PROPOSED 2026-11-17 — AWAITING OWNER APPROVAL` |
 | **`PROP-034`** | A String Built From Many Parts Is Allocated Once: f-Strings and `+` Chains Lower to One `str_build`, and a Unique String Appends in Place (Perceus) | about `+15` for the seed VM's n-part build (opcode or appended `HostOp`), itemized when sequenced; the rest is Pilot and C | `DRAFT 2026-11-17 — DESIGN; SEQUENCED AFTER PROP-025 STEPS 1–3` |
 | **`PROP-035`** | Stop Running the Retired `selfhost/analyzer.pilot`: Delete `run::analyze`, `cli_analyze` and the Analyzer Loader | about `-140` (`crates/pilot-cli`, `crates/pilot-analysis`) | `DRAFT 2026-11-17 — AWAITING OWNER APPROVAL; AFTER 5B.4 GROUP 2` |
-| **`PROP-036`** | Seed: Indexing a Literal `const` List or Map Reads One Value Built Once, Not a Copy Rebuilt on Every Read | about `+30` in `crates/pilot-vm/src/{lower_expr,lower_global,lib}.rs`; deleted with the seed bytecode compiler by `PROP-005` | `PROPOSED 2026-11-17 — AWAITING OWNER APPROVAL` |
+| **`PROP-036`** | Seed: Indexing a Literal `const` List or Map Reads One Value Built Once, Not a Copy Rebuilt on Every Read | about `+30` in `crates/pilot-vm/src/{lower_expr,lower_global,lib}.rs`; built `+41`; deleted with the seed bytecode compiler by `PROP-005` | `APPROVED BY OWNER 2026-11-18 ("Approve PROP-036") AND BUILT` |
 | **`PROP-003`** | Wave 3, itemized 2026-11-15: slices 3A–3F (struct `invariant` rule, dead f-string desugarer, `op_checked` to Pilot, contract rules, f-string scanner dedupe, small trims) | about `-270` now (most of the planned `-2,850` waits for `PROP-005`/`006`) | `3A + 3B BUILT 2026-11-15 (−29 RUST); 3C DEFERRED TO PROP-005; 3D–3F DRAFT` |
 | **`PROP-004`** | Retire Legacy `crates/pilot-analysis` Crate (`1,591` formatted `src` LOC; `647` packed) & Migrate Milestone Harnesses to `.pilot` | `-1,591` LOC (formatted) | `PLANNED (WAVE 4)` |
 | **`PROP-005`** | Replace Rust `BytecodeCompiler` (`24` `lower_*.rs` + `vm_gen.rs` + `codes.rs`) with `selfhost/vm/ir_to_pilc.pilot` | about `-7,950` LOC packed, about `-8,770` formatted (PROP-016) | `ITEMIZED 2026-11-15: 5A APPROVED AND BUILT (PILOT ONLY); 5B ITEMIZED (SLICES 5B.1–5B.6); D1/D2/D3/D5 DECIDED 2026-11-15, D4 OPEN; 5B.1 AND 5B.2 APPROVED AND BUILT (PILOT ONLY); 5B.3 APPROVED AND DONE 2026-11-17 (RUST AMENDMENTS 5B.3a AND 5B.3b BUILT); 5B.4–5B.6, 5C AND 5D APPROVED 2026-11-17 AND QUEUED (WORK QUEUE ITEMS 2–5; D4 AND EACH RUST LIST STILL NEEDED); 5E–5F NOT APPROVED; BOOTSTRAP T1/T2 NEEDS AN OWNER DECISION BEFORE 5E` |
@@ -3423,7 +3423,14 @@ The analyzer cannot tell a user unit from a stdlib unit today. The only unit que
 ---
 ## `PROP-036` — Seed: Indexing a Literal `const` List or Map Reads One Value Built Once, Not a Copy Rebuilt on Every Read
 
-**Status: PROPOSED 2026-11-17 — awaiting owner approval. No Rust has been touched.** Found during `PROP-005` 5B.4 (stdlib/crypto/hash.pilot copies each round table into a local to avoid this). `PROP-030` §2 noted the rebuild and left it for `PROP-005`. This proposal fixes it now, because crypto and lexer tables pay for it on every `pilot run`.
+**Status: APPROVED 2026-11-18 (owner: "Approve PROP-036"); BUILT 2026-11-18.** As built, `+41` net in the three listed files:
+- A run scheduled from an index read would never be placed when the reading function is compiled lazily, which happens to imported functions after `place_comptime_runs`. The toolchain itself hit this (`pilot test`: `const#CASE_OUTCOME_WORDS is read before its declaration has run`).
+- So the constant is built by the first index read that finds it missing from one shared map, global `const#`. `place_comptime_runs` creates that map at the start of the first unit's block, which now always runs.
+- Every index read then costs a global read, a `map_get` and a null test, never a copy.
+- The repro (64 items, 2M reads) went from 3.08 s to 0.67 s on the seed. 1,024 items now take 0.54 s against 0.49 s for 4 items (was 32.5 s).
+- stdlib/crypto/hash.pilot indexes its tables in place again.
+
+Found during `PROP-005` 5B.4 (stdlib/crypto/hash.pilot copies each round table into a local to avoid this). `PROP-030` §2 noted the rebuild and left it for `PROP-005`. This proposal fixes it now, because crypto and lexer tables pay for it on every `pilot run`.
 
 ### 1. What happens today (measured 2026-11-17, `target/debug/pilot`, machine under load)
 

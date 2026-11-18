@@ -210,6 +210,8 @@ pub struct BytecodeCompiler {
     globals: std::collections::HashSet<String>,
     /// `comptime` code compiled so far, run before everything else.
     comptime_runs: Vec<lower_global::ComptimeRun>,
+    /// Set while the name indexed by `T[i]` compiles (`shared_const`).
+    shared_read: bool,
     /// Payload field names of each enum variant that carries values, by
     /// `Enum.Variant`.
     variant_payloads: HashMap<String, Vec<String>>,
