@@ -1,0 +1,46 @@
+// Signed 64-bit arithmetic over a scratch list passed `var ref`, as
+// fixed-width crypto code is written: list reads at `base + k`, chains of
+// `* + & ^ >> << |`, writes back. On the PilIR interpreter these run as
+// integer regions and joined index steps (selfhost/ir/interp_fuse.pilot);
+// every engine must print the same. Expected output, by hand:
+//   st = [3, 5, 7, 9, 0, 0]; mix(st, 0, 2):
+//     st[2] = (3*7 + 5*9) & 255 = 66 & 255            -> 66
+//     st[3] = ((st[0] ^ st[2]) >> 1) | (st[1] << 2)
+//           = ((3 ^ 66) >> 1) | 20 = (65 >> 1) | 20 = 32 | 20 -> 52
+//   print(st)                                           -> [3, 5, 66, 52, 0, 0]
+//   signed: (-7 * 3 + 1) >> 2 = -20 >> 2 (arithmetic)   -> -5
+//   wide(10): 10*10*10*10 - 10*10 + 7 = 10000 - 100 + 7  -> 9907
+//   fib(15), recursive, each call doing region arithmetic -> 610
+//   sum over i in 0..1000 of (i * 3) & 7, by hand: i*3 mod 8 cycles
+//     through 0,3,6,1,4,7,2,5 (sum 28) every 8 values; 1000 = 125 * 8
+//     -> 125 * 28 = 3500
+
+fn mix(var ref st: List<i64>, a: i64, b: i64) {
+    st[a + 2] = (st[a] * st[b] + st[a + 1] * st[b + 1]) & 255;
+    st[a + 3] = ((st[a] ^ st[a + 2]) >> 1) | (st[a + 1] << 2);
+}
+
+fn signed(x: i64) -> i64 => (x * 3 + 1) >> 2;
+
+fn wide(x: i64) -> i64 => x * x * x * x - x * x + 7;
+
+fn fib(n: i64) -> i64 {
+    if n < 2 { return n; }
+    return fib(n - 1) + fib(n - 2);
+}
+
+fn main() {
+    var st: List<i64> = [3, 5, 7, 9, 0, 0];
+    mix(st, 0, 2);
+    print(st);
+    print(signed(-7));
+    print(wide(10));
+    print(fib(15));
+    var s = 0;
+    var i = 0;
+    while i < 1000 {
+        s = s + ((i * 3) & 7);
+        i = i + 1;
+    }
+    print(s);
+}

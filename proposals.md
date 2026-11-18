@@ -75,6 +75,7 @@ The path to `PROP-022`, in order. Each item is built and verified on its own (th
 | **`PROP-033`** | The Analyzer Skips Units Whose Diagnostics Are Thrown Away (`ast_unit_is_user`) | about `+10` in `crates/pilot-cli/src/run.rs`, `crates/pilot-analysis/src/{pipeline,infer}.rs` | `WITHDRAWN 2026-11-18 (owner: "withdraw"; the analyzer was deleted by PROP-035)` |
 | **`PROP-034`** | A String Built From Many Parts Is Allocated Once: f-Strings and `+` Chains Lower to One `str_build`, and a Unique String Appends in Place (Perceus) | about `+15` for the seed VM's n-part build (opcode or appended `HostOp`), itemized when sequenced; the rest is Pilot and C | `DRAFT 2026-11-17 — DESIGN; SEQUENCED AFTER PROP-025 STEPS 1–3` |
 | **`PROP-035`** | Stop Running the Retired `selfhost/analyzer.pilot`: Delete `run::analyze`, `cli_analyze` and the Analyzer Loader | about `-140` (`crates/pilot-cli`, `crates/pilot-analysis`) | `APPROVED 2026-11-17; BUILT 2026-11-17; A1 APPROVED AND BUILT 2026-11-18; diagnostics.rs DELETED 2026-11-18` |
+| **`PROP-036`** | Seed: Indexing a Literal `const` List or Map Reads One Value Built Once, Not a Copy Rebuilt on Every Read | about `+30` in `crates/pilot-vm/src/{lower_expr,lower_global,lib}.rs`; built `+41`; deleted with the seed bytecode compiler by `PROP-005` | `APPROVED BY OWNER 2026-11-18 ("Approve PROP-036") AND BUILT` |
 | **`PROP-039`** | The VM Frees Memory Where Pilot Says: `.pilc` Carries Perceus `dup`/`drop`, the Seed VM Counts References, and the Tracing Collector Is Deleted | about `+40` in `crates/pilot-vm` (a count per heap slot, two actions), then about `-274` (`collect.rs`) once the Rust compiler is gone (`PROP-005`) | `DRAFT 2026-11-18 — DESIGN; NEEDS OWNER APPROVAL` |
 | **`PROP-003`** | Wave 3, itemized 2026-11-15: slices 3A–3F (struct `invariant` rule, dead f-string desugarer, `op_checked` to Pilot, contract rules, f-string scanner dedupe, small trims) | about `-270` now (most of the planned `-2,850` waits for `PROP-005`/`006`) | `3A + 3B BUILT 2026-11-15 (−29 RUST); 3C DEFERRED TO PROP-005; 3D–3F DRAFT` |
 | **`PROP-004`** | Retire Legacy `crates/pilot-analysis` Crate (`1,591` formatted `src` LOC; `647` packed) & Migrate Milestone Harnesses to `.pilot` | `-1,591` LOC (formatted) | `PLANNED (WAVE 4)` |
@@ -3608,6 +3609,53 @@ The analyzer cannot tell a user unit from a stdlib unit today. The only unit que
 - **Dead after this, APPROVED FOR DELETION 2026-11-18 (owner: "approve") AND DELETED (AGENTS.md rule 4):** `crates/pilot-analysis/src/diagnostics.rs` (55 lines: `Diagnostic`, `DiagnosticSeverity`, `AnalysisDiagnostic`) has no user left in `src` or tests; `lib.rs` still re-exports it. Proposed: delete the file and its `pub mod`/`pub use` lines in `crates/pilot-analysis/src/lib.rs`.
 
 ---
+## `PROP-036` — Seed: Indexing a Literal `const` List or Map Reads One Value Built Once, Not a Copy Rebuilt on Every Read
+
+**Status: APPROVED 2026-11-18 (owner: "Approve PROP-036"); BUILT 2026-11-18.** Ceiling raised by the owner to 27,095 for its +41 (2026-11-18, "Raise it and push"). As built, `+41` net in the three listed files:
+- A run scheduled from an index read would never be placed when the reading function is compiled lazily, which happens to imported functions after `place_comptime_runs`. The toolchain itself hit this (`pilot test`: `const#CASE_OUTCOME_WORDS is read before its declaration has run`).
+- So the constant is built by the first index read that finds it missing from one shared map, global `const#`. `place_comptime_runs` creates that map at the start of the first unit's block, which now always runs.
+- Every index read then costs a global read, a `map_get` and a null test, never a copy.
+- The repro (64 items, 2M reads) went from 3.08 s to 0.67 s on the seed. 1,024 items now take 0.54 s against 0.49 s for 4 items (was 32.5 s).
+- stdlib/crypto/hash.pilot indexes its tables in place again.
+
+Found during `PROP-005` 5B.4 (stdlib/crypto/hash.pilot copies each round table into a local to avoid this). `PROP-030` §2 noted the rebuild and left it for `PROP-005`. This proposal fixes it now, because crypto and lexer tables pay for it on every `pilot run`.
+
+### 1. What happens today (measured 2026-11-17, `target/debug/pilot`, machine under load)
+
+- A top-level `const` (or `let`) whose value is a literal list or map is folded into a `CMap` (`eval_cmap`). Every read of the name compiles to `materialize_cmap` (`crates/pilot-vm/src/lib.rs:980`), which emits `list_new` plus one `list_push` per item. So `T[i]` builds the whole list again on every read.
+- The cost grows with the list's length, not with the number of reads (500,000 reads of `T[i & 3]`):
+
+| `T` | seed VM (user s) | `--ir` | `--emit c` |
+| :--- | ---: | ---: | ---: |
+| 4 items | 2.19 | 6.33 | 0.00 |
+| 1,024 items | 32.52 | 5.45 | 0.00 |
+
+  With 64 items and 2,000,000 reads, the peer measured 3.29 s against 0.62 s for a local copy (`let t = T;` once).
+- PilIR and C do not copy. The lowering builds the constant once in a `const@T` function that runs once (`once`), stores it in a module global, and each read is a `global_addr`/`load` (C: `g0` plus `pilot_v_dup`). So only the seed needs a change.
+- Value semantics must hold. `var t = T; t[0] = 99; t.push(4);` leaves `T` as it was on all three engines today (seed and C print `1`, `3`, `99`). On the seed, a list read from a global is shared, not copied (`var t = G; t[0] = 99` changes `G` on the seed and in C alike). So the shared value must only reach reads that cannot change it.
+
+### 2. Design
+
+- **Only an index read shares.** In `compile_index_value`'s plain case (`lower_expr.rs:314`), when the indexed expression is a name that resolves to a literal `const` list or map (`compile_ident`'s `const_maps` branch, after the same shadowing checks: backing field, local, capture, native value), read one shared value instead of `materialize_cmap`. Every other read (a binding, an argument, a return, a method call) still materializes a fresh copy, so no program can change the constant.
+- **Built once, before anything else runs.** The first such read of a name compiles the constant out of line, as `compile_comptime` does: a body of `materialize_cmap` and `Ret`. It is scheduled as a `ComptimeRun` of unit 0 at position 0, whose result is a hidden global `const#<name>`. `place_comptime_runs` runs it before the first unit's top-level statements, so it is set before any code that could read it, in any unit. The read is `emit_global_get("const#<name>")`. A constant that is never indexed is never built.
+- **Not changed:** scalar constants (`CMap::Val`) stay inlined, enum variants are untouched, and `Owner.FIELD` constants still materialize (left to `PROP-005`).
+
+### 3. Rust (needs approval). Strictly these files:
+
+| File | Change |
+| :--- | :--- |
+| `crates/pilot-vm/src/lower_expr.rs` | `compile_index_value`: compile the indexed name in "shared read" mode; `compile_ident`: in that mode, a `CMap::List`/`CMap::Map` reads the shared global (below) instead of `materialize_cmap`. |
+| `crates/pilot-vm/src/lower_global.rs` | `shared_const(name, cm) -> u8`: on the first call for `name`, compiles `materialize_cmap(cm)` out of line and schedules it as a `ComptimeRun { unit: 0, pos: 0, .. }` with result `const#<name>`; every call emits the global read. |
+| `crates/pilot-vm/src/lib.rs` | Two `BytecodeCompiler` fields: the shared-read flag and the set of constants already scheduled. |
+
+**Estimate:** about `+30` lines, which is growth while `seed_contraction_paused()` holds the ceiling. The owner decides whether to raise `paused_max_total_rust_loc()` or take an offset. All of it is deleted with the seed bytecode compiler (`PROP-005`).
+
+### 4. Acceptance
+
+- A new conformance program `tests/conformance/runtime/const_list_index_shared.pilot` (written first) checks value semantics: indexing, `var t = T` then a write, a push, and `T` unchanged afterwards, with a constant declared after the code that reads it. It must pass on all three engines.
+- Timing, before and after on all three engines: the 64-item, 2M-read repro, and the 4- and 1,024-item cases above. The 1,024-item seed time must match the 4-item one.
+- `pilot test`, `--ir`, `--emit c` and `pilot gate --full` stay green. `cargo test -p pilot-vm` and `cargo fmt --check` pass.
+- Afterwards, the local-copy workaround in stdlib/crypto/hash.pilot can be removed.
 
 ## `PROP-038` — A1 (`PROP-005` 5B.4 Groups 3–4): Rust Left Dead by the Pilot-First Host Services, the Owner List, and the Old Front End's Test Edits
 

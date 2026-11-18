@@ -171,6 +171,9 @@ impl BytecodeCompiler {
             return r;
         }
         if let Some(cm) = self.const_maps.get(name).cloned() {
+            if std::mem::take(&mut self.shared_read) && !matches!(cm, crate::CMap::Val(_)) {
+                return self.shared_const(name, &cm);
+            }
             return self.materialize_cmap(&cm);
         }
         if self.globals.contains(name) {
@@ -307,7 +310,10 @@ impl BytecodeCompiler {
             }
             return self.emit_intrinsic("str_slice", &[r_obj, r_a, r_b]);
         }
+        // Indexing a literal constant by name reads it, never a copy.
+        self.shared_read = arena.node(NodeId(lhs)).node_kind() == NodeKind::IdentExpr;
         let r_obj = self.compile_node(arena, NodeId(lhs));
+        self.shared_read = false;
         let r_key = self.compile_node(arena, NodeId(rhs));
         self.emit_index_read(r_obj, ty.as_deref(), r_key)
     }

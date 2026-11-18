@@ -1,0 +1,262 @@
+// ==============================================================================
+// FILE: selfhost/ir/interp_fuse.pilot
+// F5: integer regions of the PilIR interpreter.
+// ==============================================================================
+// Signed 64-bit arithmetic is most of what an arithmetic-heavy program runs,
+// and on the interpreter each step of it reads its operands out of `IrVal`s
+// and builds an `IrVal` for its result. A run of two or more consecutive
+// steps of a block that each have a direct signed 64-bit handler
+// (`run_add_ii` ..) is joined into one region step: it reads each value the
+// run takes from outside once, computes every step on raw integers in
+// registers, and builds an `IrVal` only for the values something outside the
+// run reads. The steps are consecutive and every value they define is
+// defined once, so nothing else runs between them and none of their inputs
+// changes while they run: running the region gives what running each step
+// would.
+// A region's code is four integers per step: `-1 - op` (`IrOp`), then the
+// registers of its result and its two operands. The first registers hold
+// the inputs; a placed constant's is filled once, when the region is made,
+// and `ins` lists the others as (value id, register) pairs.
+//
+// Before regions are made, an index read or write (`run_index_get`,
+// `run_index_set`) right after the `add` that gives its index, and the only
+// reader of it, takes the add in: it computes the index from the add's two
+// operands itself (`join_index_sums`).
+// An input that is not an `Int` runs the joined steps one by one, in order,
+// with their own handlers, so the result and any failure (reported at the
+// failing step's place) are each step's own.
+pub lvl(0) pkg selfhost.ir;
+
+
+/// `steps`, the prepared steps of one block in order, with each run of
+/// joinable integer steps made one region step (see the header). `code`
+/// gives each value's uses and definitions.
+pub fn join_int_regions(ref code: IrCode, steps: List<IrStep>) -> List<IrStep> {
+    var out: List<IrStep> = [];
+    var run: List<IrStep> = [];
+    for st in join_index_sums(code, steps) {
+        if joinable(code, st) {
+            run.push(st);
+        } else {
+            flush_run(code, run, out);
+            out.push(st);
+        }
+    }
+    flush_run(code, run, out);
+    return out;
+}
+
+/// Whether `st` may be part of a region: it has a direct signed 64-bit
+/// handler and its value is defined by it alone.
+fn joinable(ref code: IrCode, ref st: IrStep) -> bool => st.int_op && code.defs[st.result] == 1;
+
+/// Moves the steps of `run` to `out`: one region step for two or more, the
+/// step itself for one.
+fn flush_run(ref code: IrCode, var ref run: List<IrStep>, var ref out: List<IrStep>) {
+    if run.len() == 1 { out.push(run[0]); }
+    if run.len() > 1 { out.push(region_of(code, run)); }
+    run = [];
+}
+
+/// The region step of `run` (two or more joinable steps, in order).
+fn region_of(ref code: IrCode, ref run: List<IrStep>) -> IrStep {
+    let n = code.uses.len();
+    // Value id -> its register, or -1.
+    var reg: List<i64> = [];
+    // Value id -> how many operands inside the run read it.
+    var inner: List<i64> = [];
+    for u in code.uses {
+        reg.push(-1);
+        inner.push(0);
+    }
+    // The inputs first, so they take registers 0 .. ins.len().
+    var ins: List<i64> = [];
+    var defined: List<bool> = [];
+    for u in code.uses { defined.push(false); }
+    for st in run {
+        for a in st.a {
+            inner[a] = inner[a] + 1;
+            if !defined[a] && reg[a] < 0 {
+                reg[a] = ins.len();
+                ins.push(a);
+            }
+        }
+        defined[st.result] = true;
+    }
+    var next = ins.len();
+    var ops: List<i64> = [];
+    for st in run {
+        reg[st.result] = next;
+        next = next + 1;
+        ops.push(-1 - (st.oper as i64));
+        ops.push(reg[st.result]);
+        ops.push(reg[st.a[0]]);
+        ops.push(reg[st.a[1]]);
+    }
+    // What the run defines and something outside it reads: register, value.
+    var outs: List<i64> = [];
+    for st in run {
+        if code.uses[st.result] > inner[st.result] {
+            outs.push(reg[st.result]);
+            outs.push(st.result);
+        }
+    }
+    // A placed constant input is the same on every run: it is put in its
+    // register now, and only the other inputs are read when the region runs.
+    var regs: List<i64> = [];
+    var k = 0;
+    while k < next {
+        regs.push(0);
+        k = k + 1;
+    }
+    var reads: List<i64> = [];
+    k = 0;
+    while k < ins.len() {
+        let id = ins[k];
+        var fixed = false;
+        if code.placed[id] {
+            switch code.start[id] {
+                case Int(x): {
+                    regs[k] = x;
+                    fixed = true;
+                }
+                default: {}
+            }
+        }
+        if !fixed {
+            reads.push(id);
+            reads.push(k);
+        }
+        k = k + 1;
+    }
+    let first = run[0];
+    var parts: List<IrStep> = [];
+    for st in run { parts.push(st); }
+    return IrStep { h: run_int_region, inst: first.inst, a: [], result: first.result, sym: "", oper: first.oper, value: IrVal.Nil, rc: 0, width: 0, masked: false, engine: first.engine, then_to: -1, then_ids: none, else_to: -1, else_ids: none, int_op: false, plain: run_int_region, index: 0, ins: reads, ops: ops, outs: outs, regs: regs, parts: parts };
+}
+
+/// Runs a region on raw integers; an input that is not an `Int` runs its
+/// steps one by one instead (`run_parts`).
+fn run_int_region(var ref fr: IrFrame, ref st: IrStep) {
+    let v = fr.vals;
+    let regs = st.regs;
+    let ins = st.ins;
+    let ni = ins.len();
+    var k = 0;
+    while k < ni {
+        switch v[ins[k]] {
+            case Int(x): regs[ins[k + 1]] = x;
+            default: {
+                run_parts(fr, st);
+                return;
+            }
+        }
+        k = k + 2;
+    }
+    let ops = st.ops;
+    let n = ops.len();
+    var pc = 0;
+    while pc < n {
+        let c = ops[pc];
+        let x = regs[ops[pc + 2]];
+        let y = regs[ops[pc + 3]];
+        // `-1 - op` for each `IrOp`, the most frequent first.
+        regs[ops[pc + 1]] = if c == -1 { x + y } else if c == -3 { x * y } else if c == -7 { x & y } else if c == -11 { x >> y } else if c == -2 { x - y } else if c == -8 { x | y } else if c == -9 { x ^ y } else { x << y };
+        pc = pc + 4;
+    }
+    let outs = st.outs;
+    let no = outs.len();
+    var j = 0;
+    while j < no {
+        v[outs[j + 1]] = IrVal.Int(regs[outs[j]]);
+        j = j + 2;
+    }
+}
+
+/// The steps a region joined, each run with its own handler; a failure is
+/// reported at the failing step's place.
+fn run_parts(var ref fr: IrFrame, ref st: IrStep) {
+    for p in st.parts {
+        let h = p.plain;
+        h(fr, p);
+        if fr.fault.active {
+            fr.fault_span = p.inst.span_id as i64;
+            return;
+        }
+    }
+}
+
+/// `steps` with each `add` that only gives the index of the index read or
+/// write right after it joined into that step (see the header).
+fn join_index_sums(ref code: IrCode, steps: List<IrStep>) -> List<IrStep> {
+    var out: List<IrStep> = [];
+    let n = steps.len();
+    var i = 0;
+    while i < n {
+        let st = steps[i];
+        if i + 1 < n && st.int_op && st.oper == IrOp.Add && code.uses[st.result] == 1 && code.defs[st.result] == 1 {
+            let next = steps[i + 1];
+            let get = next.index == 1;
+            if next.index > 0 && next.a[1] == st.result {
+                var a: List<i64> = [next.a[0], st.a[0], st.a[1]];
+                if !get { a.push(next.a[2]); }
+                out.push(IrStep { h: if get { run_index_get_sum } else { run_index_set_sum }, inst: next.inst, a: a, result: next.result, sym: next.sym, oper: IrOp.Add, value: IrVal.Nil, rc: 0, width: 0, masked: false, engine: next.engine, then_to: -1, then_ids: none, else_to: -1, else_ids: none, int_op: false, plain: run_parts, index: 0, ins: [], ops: [], outs: [], regs: [], parts: [st, next] });
+                i = i + 2;
+                continue;
+            }
+        }
+        out.push(st);
+        i = i + 1;
+    }
+    return out;
+}
+
+/// The index `x + y` of a joined index step, from its operands 1 and 2,
+/// or -1 when either is not an `Int` (the step then runs its parts).
+fn index_sum(ref v: List<IrVal>, ref a: List<i64>) -> i64 {
+    switch v[a[1]] {
+        case Int(x): switch v[a[2]] {
+            case Int(y): return x + y;
+            default: return -1;
+        }
+        default: return -1;
+    }
+}
+
+/// `obj[x + y]` of a list at an index inside it; anything else runs the
+/// add and the read as they are (`run_parts`).
+fn run_index_get_sum(var ref fr: IrFrame, ref st: IrStep) {
+    let v = fr.vals;
+    let a = st.a;
+    switch v[a[0]] {
+        case Seq(items): {
+            let i = index_sum(v, a);
+            if i >= 0 && i < items.len() {
+                v[st.result] = items[i];
+                return;
+            }
+        }
+        default: {}
+    }
+    run_parts(fr, st);
+}
+
+/// `obj[x + y] = v` of a list at an index inside it (gives `obj`), as
+/// `run_index_get_sum` reads one.
+fn run_index_set_sum(var ref fr: IrFrame, ref st: IrStep) {
+    let v = fr.vals;
+    let a = st.a;
+    let obj = v[a[0]];
+    switch obj {
+        case Seq(items): {
+            let i = index_sum(v, a);
+            if i >= 0 && i < items.len() {
+                items[i] = v[a[3]];
+                v[st.result] = obj;
+                return;
+            }
+        }
+        default: {}
+    }
+    run_parts(fr, st);
+}

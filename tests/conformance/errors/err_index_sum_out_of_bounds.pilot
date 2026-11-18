@@ -1,0 +1,10 @@
+// A list index computed as `k + n` is bounds-checked like any other; on the
+// PilIR interpreter the add is joined into the read (selfhost/ir/
+// interp_fuse.pilot), which must still report the seed's error.
+// xs has 3 items: xs[1 + 1] is 3; xs[1 + 5] is index 6, out of bounds.
+fn main() {
+    let xs = [1, 2, 3];
+    var k = 1;
+    print(xs[k + 1]);
+    print(xs[k + 5]);
+}

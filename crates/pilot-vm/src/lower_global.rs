@@ -16,6 +16,9 @@ use crate::value::PilotVal;
 use crate::BytecodeCompiler;
 use pilot_ast::{AstArena, NodeId, NodeKind};
 
+/// The hidden global holding the literal constants index reads share.
+const SHARED_CONSTS: &str = "const#";
+
 /// One `comptime` block or expression, compiled out of line.
 pub(crate) struct ComptimeRun {
     /// The unit it belongs to, in link order: it runs when that unit starts.
@@ -124,8 +127,10 @@ impl BytecodeCompiler {
     /// Emits the scheduled `comptime` runs after the program, one block per
     /// unit. `unit_starts` holds, per unit in link order, the jump that starts
     /// its top-level statements and the address the block returns to. A unit
-    /// without runs gets a no-op instead of its jump. When the program falls
-    /// off its end (no `main`), a jump past the blocks ends it.
+    /// without runs gets a no-op instead of its jump; the first unit's block
+    /// always runs, and first makes the map of shared constants
+    /// (`shared_const`). When the program falls off its end (no `main`), a
+    /// jump past the blocks ends it.
     pub(crate) fn place_comptime_runs(
         &mut self,
         unit_starts: &[(usize, u32)],
@@ -134,15 +139,21 @@ impl BytecodeCompiler {
         let mut runs = std::mem::take(&mut self.comptime_runs);
         runs.sort_by_key(|r| r.pos);
         let last_unit = unit_starts.len().saturating_sub(1);
-        let over = (falls_through && !runs.is_empty()).then(|| self.emit_jump(0));
+        let over = (falls_through && !unit_starts.is_empty()).then(|| self.emit_jump(0));
         for (k, &(to_runs, back)) in unit_starts.iter().enumerate() {
             let mine: Vec<&ComptimeRun> =
                 runs.iter().filter(|r| r.unit.min(last_unit) == k).collect();
-            if mine.is_empty() {
+            if mine.is_empty() && k > 0 {
                 self.instructions[to_runs] = Instruction::encode(Opcode::Nop, 0, 0, 0);
                 continue;
             }
             self.patch_to_here(to_runs);
+            if k == 0 {
+                let mark = self.next_reg;
+                let r = self.emit_intrinsic("map_new", &[]);
+                self.emit_global_set(SHARED_CONSTS, r);
+                self.release_to(mark);
+            }
             for run in mine {
                 self.emit_comptime_run(run);
             }
@@ -151,6 +162,28 @@ impl BytecodeCompiler {
         if let Some(j) = over {
             self.patch_to_here(j);
         }
+    }
+
+    /// The value of literal constant `name` for an index read (PROP-036):
+    /// built by the first read that finds it missing from the map of shared
+    /// constants (made when the first unit starts), then read from it. Every
+    /// other read of the name still builds its own copy, so no program can
+    /// change the constant.
+    pub(crate) fn shared_const(&mut self, name: &str, cm: &crate::CMap) -> u8 {
+        let dst = self.alloc_reg();
+        let mark = self.next_reg;
+        let r_all = self.emit_global_get(SHARED_CONSTS);
+        let r_k = self.emit_const(PilotVal::from_str(name));
+        let r_v = self.emit_intrinsic("map_get", &[r_all, r_k]);
+        self.emit(Opcode::Move, dst, r_v, 0);
+        let r_missing = self.emit_intrinsic("is_null", &[dst]);
+        let built = self.emit_branch(Opcode::JumpIfFalse, r_missing, 0);
+        let r_new = self.materialize_cmap(cm);
+        self.emit(Opcode::Move, dst, r_new, 0);
+        self.emit_intrinsic("map_set", &[r_all, r_k, dst]);
+        self.patch_to_here(built);
+        self.release_to(mark);
+        dst
     }
 
     /// Emits a call to `comptime` run `run`, keeping an expression's value.
