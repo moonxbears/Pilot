@@ -1,0 +1,478 @@
+// ==============================================================================
+// FILE: selfhost/vm/pilc_lower.pilot
+// PROP-005 5D: PilIR instructions -> VM instructions.
+// ==============================================================================
+// Each PilIR instruction becomes the VM instructions that do what the PilIR
+// interpreter does with it (selfhost/ir/interp.pilot), so a program prints,
+// returns and fails the same on both:
+//   - constants are pooled and loaded; arithmetic, `cmp` and the branches are
+//     the VM's own opcodes, whose operators and messages are the seed's, as
+//     the interpreter's are (selfhost/ir/interp_ops.pilot);
+//   - a result in a register narrower than 64 bits is wrapped to it with the
+//     engine operation `num_wrap`, a narrow shift count is taken modulo the
+//     width first, and `cast` is `num_convert` (or a move when nothing
+//     changes), as the interpreter's `run_narrow` and `run_cast`;
+//   - `call_direct` stages its arguments in r1.. and calls; `call_intrinsic`
+//     runs the engine operation of the same name (`list_set` is the VM's
+//     `map_set`, `num_pow` its `Pow`); one the VM does not have stops at the
+//     seam `vm.intrinsic`;
+//   - block parameters are registers: a jump copies its arguments into them
+//     as one parallel move;
+//   - a cell's `load`/`store` is a move; a global's is `global_get` /
+//     `global_set` under its name;
+//   - `switch_table` is a chain of comparisons.
+// Every VM instruction carries the source offset of the PilIR instruction it
+// came from; the call or engine operation that can fail is the last of them.
+pub lvl(0) pkg selfhost.vm;
+
+use selfhost.ir.*;
+use pilot.vm.pilc;
+
+/// The emitter's state: the image being written, and the function being
+/// lowered.
+pub struct PilcEmit : IObject {
+    pub ref m: IrModule;
+    pub img: PilcImage;
+    /// Function -> its entry address.
+    pub entry: List<i64>;
+    /// `Call` instructions whose entry is set when every function is placed.
+    pub call_pc: List<i64>;
+    pub call_fn: List<i64>;
+    /// Global -> the name the VM keeps it under.
+    pub global_names: List<str>;
+    /// Function -> how many parameters it takes.
+    pub arity: List<i64>;
+    /// The functions a function record can name (`pilc_closures.pilot`).
+    pub fn_values: List<i64>;
+    /// The global holding each record layout's field names, when needed.
+    pub field_names_global: str;
+    pub f: IrFunction;
+    pub alloc: PilcAlloc;
+    /// Block -> its address, -1 until placed.
+    pub block_pc: List<i64>;
+    /// Jumps whose target is set when the function's blocks are placed.
+    pub jump_pc: List<i64>;
+    pub jump_block: List<i64>;
+    /// The source offset of the instruction being lowered.
+    pub span: i64;
+}
+
+/// The engine operations the VM runs itself (crates/pilot-vm
+/// stage_a_natives.rs, heap.rs, vm_gen.rs): a `call_intrinsic` of any other
+/// stops at the seam `vm.intrinsic` instead of reaching the VM, which would
+/// answer an unknown name with `null`.
+const VM_NATIVE_OPS: List<str> = [
+    "host_op", "map_set", "map_get", "list_get", "map_has", "str_len", "list_len", "list_new",
+    "list_push", "rt_print", "rt_eprint", "field_or_native", "list_extend", "map_extend",
+    "list_remove_at", "str_byte_at", "str_from_bytes", "str_copy_to_ptr", "str_from_ptr",
+    "vm_thread_entry_ptr", "vm_callback_dispatch_ptr", "str_slice", "str_find", "str_replace",
+    "str_contains", "str_starts_with", "str_ends_with", "map_new", "map_values", "map_keys",
+    "for_seq", "native_in_check", "record_set_type", "record_type", "record_copy", "value_clone",
+    "map_remove", "is_null", "closure_new", "closure_env", "global_get", "global_set", "num_fits",
+    "num_convert", "num_wrap", "scalar_from", "is_kind", "list_pop", "str_trim", "to_str",
+    "get_env", "sym_str", "op_checked", "rt_fault", "seam_open",
+    "gen_new", "gen_resume", "gen_close", "gen_yield", "gen_done", "gen_current", "gen_closing",
+];
+
+/// The PilIR engine operations the VM runs under another name.
+const RENAMED_OPS_FROM: List<str> = ["list_set",];
+const RENAMED_OPS_TO: List<str> = ["map_set",];
+
+/// The engine operation PilIR writes for `**`, which is the VM's `Pow`.
+const POW_OP: str = "num_pow";
+
+/// The VM opcode of each PilIR comparison predicate (`CmpPred` 0..5).
+const CMP_OPCODES: List<VmOp> = [VmOp::OpCmpEq, VmOp::OpCmpNe, VmOp::OpCmpLt, VmOp::OpCmpLe, VmOp::OpCmpGt, VmOp::OpCmpGe,];
+
+/// The message of `unreachable` with none of its own (`run_unreachable`).
+const UNREACHABLE_MESSAGE: str = "entered code the program cannot reach";
+
+// ------------------------------------------------------------------------------
+// Emitting
+// ------------------------------------------------------------------------------
+
+/// Appends one instruction at the current source offset; gives its address.
+pub fn put_op(var ref e: PilcEmit, op: VmOp, dst: i64, src1: i64, src2: i64, wide: i64) -> i64 =>
+    pilc_emit(e.img, pilc_ins(op, dst, src1, src2, wide), e.span);
+
+pub fn put_move(var ref e: PilcEmit, dst: i64, src: i64) {
+    if dst != src { let _ = put_op(e, VmOp::OpMove, dst, src, 0, 0); }
+}
+
+/// Loads constant `c` into `dst`.
+pub fn put_const(var ref e: PilcEmit, dst: i64, c: i64) { let _ = put_op(e, VmOp::OpLoadConst, dst, 0, 0, c); }
+
+/// A jump to block `b`, its target set when the blocks are placed.
+fn put_jump_to(var ref e: PilcEmit, op: VmOp, cond: i64, b: i64) {
+    let pc = put_op(e, op, 0, cond, 0, 0);
+    e.jump_pc.push(pc);
+    e.jump_block.push(b);
+}
+
+/// The register of value `v`.
+pub fn reg_of(ref e: PilcEmit, v: u32) -> i64 {
+    let r = e.alloc.reg[v as i64];
+    if r >= 0 { return r; }
+    if e.alloc.addr[v as i64] != PilcAddr::AddrPlain {
+        seam("vm.address_value", f"`{e.f.name}` uses the address of a stack slot or global as a value; only `load` and `store` of one are lowered");
+    }
+    fault(f"internal error: PilIR value v{v} of `{e.f.name}` has no register");
+    return 0;
+}
+
+/// The register an instruction's result goes to: its own, or scratch when it
+/// has none.
+pub fn result_reg(ref e: PilcEmit, inst: IrInst) -> i64 =>
+    if inst.result == ir_no_value() { PILC_SCRATCH } else { reg_of(e, inst.result) };
+
+/// Engine operation `name` with the values in `args` (copied to r1..), its
+/// result to `dst`.
+pub fn put_engine(var ref e: PilcEmit, name: str, ref args: List<i64>, dst: i64) {
+    if args.len() > VM_MAX_CALL_ARGS { seam("vm.call_args", f"an engine operation with {args.len()} arguments; the VM passes at most {VM_MAX_CALL_ARGS}"); }
+    var k = 0;
+    while k < args.len() {
+        put_move(e, k + 1, args[k]);
+        k = k + 1;
+    }
+    let _ = put_op(e, VmOp::OpEngineIntrinsic, dst, VM_CONST_REG, args.len(), pilc_const_text(e.img, name));
+}
+
+/// Engine operation `name` on register `a` and constant `c`, result to `dst`
+/// (`IntrinsicKey`): no argument staging.
+pub fn put_engine_key(var ref e: PilcEmit, name: str, a: i64, c: i64, dst: i64) {
+    let n = pilc_const_text(e.img, name);
+    if n > 65535 || c > 65535 { seam("vm.constant_pool", "an engine operation's name or key constant past index 65535; `IntrinsicKey` holds 16-bit indexes"); }
+    let _ = put_op(e, VmOp::OpIntrinsicKey, dst, a, 0, n | (c << 16));
+}
+
+/// Engine operation `name` on registers `x` and `y`, read in place
+/// (`IntrinsicArgs`), its result to `dst`.
+pub fn put_engine2(var ref e: PilcEmit, name: str, x: i64, y: i64, dst: i64) {
+    let n = pilc_const_text(e.img, name);
+    if n >= 1073741824 { seam("vm.constant_pool", "an engine operation's name past constant 2^30; `IntrinsicArgs` holds 30-bit indexes"); }
+    let _ = put_op(e, VmOp::OpIntrinsicArgs, dst, x, y, n | (2 << 30));
+}
+
+/// Engine operation `name` on register `x` alone, read in place.
+pub fn put_engine1(var ref e: PilcEmit, name: str, x: i64, dst: i64) {
+    let n = pilc_const_text(e.img, name);
+    if n >= 1073741824 { seam("vm.constant_pool", "an engine operation's name past constant 2^30; `IntrinsicArgs` holds 30-bit indexes"); }
+    let _ = put_op(e, VmOp::OpIntrinsicArgs, dst, x, 0, n | (1 << 30));
+}
+
+/// `global_get(name)` into `dst` (stages r1).
+pub fn put_global_get(var ref e: PilcEmit, name: str, dst: i64) {
+    put_const(e, 1, pilc_const_text(e.img, name));
+    let _ = put_op(e, VmOp::OpEngineIntrinsic, dst, VM_CONST_REG, 1, pilc_const_text(e.img, "global_get"));
+}
+
+/// `global_set(name, register src)` (stages r1, r2).
+pub fn put_global_set(var ref e: PilcEmit, name: str, src: i64) {
+    put_const(e, 1, pilc_const_text(e.img, name));
+    put_move(e, 2, src);
+    let _ = put_op(e, VmOp::OpEngineIntrinsic, PILC_SCRATCH, VM_CONST_REG, 2, pilc_const_text(e.img, "global_set"));
+}
+
+/// Copies each `srcs[i]` into `dsts[i]` at once: no copy overwrites a source
+/// another still needs; a cycle goes through the scratch register.
+pub fn put_parallel_move(var ref e: PilcEmit, ref dsts: List<i64>, ref srcs: List<i64>) {
+    var d: List<i64> = [];
+    var s: List<i64> = [];
+    var i = 0;
+    while i < dsts.len() {
+        if dsts[i] != srcs[i] {
+            d.push(dsts[i]);
+            s.push(srcs[i]);
+        }
+        i = i + 1;
+    }
+    while d.len() > 0 {
+        // A copy whose destination no other pending copy reads goes first.
+        var pick = -1;
+        i = 0;
+        while i < d.len() && pick < 0 {
+            var read = false;
+            var j = 0;
+            while j < s.len() {
+                if j != i && s[j] == d[i] { read = true; }
+                j = j + 1;
+            }
+            if !read { pick = i; }
+            i = i + 1;
+        }
+        if pick < 0 {
+            // Every destination is still read: a cycle. Its first source goes
+            // to scratch, and the copies reading it read scratch instead.
+            let held = s[0];
+            put_move(e, PILC_SCRATCH, held);
+            var j = 0;
+            while j < s.len() {
+                if s[j] == held { s[j] = PILC_SCRATCH; }
+                j = j + 1;
+            }
+            continue;
+        }
+        put_move(e, d[pick], s[pick]);
+        d.remove_at(pick);
+        s.remove_at(pick);
+    }
+}
+
+// ------------------------------------------------------------------------------
+// Physics
+// ------------------------------------------------------------------------------
+
+/// Whether a register is narrower than 64 bits: an integer register of 2 to
+/// 63 bits, or a 32-bit float register (the interpreter's
+/// `is_narrow_register`).
+pub fn pilc_is_narrow(phy: IrTypePhysics) -> bool {
+    let is_int = phy.reg_class == reg_class_gpr_signed() || phy.reg_class == reg_class_gpr_unsigned();
+    if is_int { return phy.bit_width > 1 && phy.bit_width < 64; }
+    return phy.reg_class == reg_class_simd_float() && phy.bit_width == 32;
+}
+
+/// The constant a `const_bits` of `phy` holding `v` is (the interpreter's
+/// `bits_value`): a boolean in a 1-bit register, unsigned in a 64-bit
+/// unsigned one, else a signed integer.
+fn bits_const(var ref e: PilcEmit, phy: IrTypePhysics, v: i64) -> i64 {
+    if phy.bit_width == 1 { return pilc_const_bool(e.img, v != 0); }
+    if phy.reg_class == reg_class_gpr_unsigned() && phy.bit_width >= 64 { return pilc_const_bits(e.img, VmTag::TagUInt as i64, v); }
+    return pilc_const_int(e.img, v);
+}
+
+/// `num_wrap`/`num_convert` of `src` to physics `phy`, into `dst`.
+fn put_to_register(var ref e: PilcEmit, name: str, src: i64, phy: IrTypePhysics, dst: i64) {
+    put_move(e, 1, src);
+    put_const(e, 2, pilc_const_text(e.img, reg_class_name(phy.reg_class)));
+    put_const(e, 3, pilc_const_int(e.img, phy.bit_width as i64));
+    let _ = put_op(e, VmOp::OpEngineIntrinsic, dst, VM_CONST_REG, 3, pilc_const_text(e.img, name));
+}
+
+/// The VM opcode of an arithmetic PilIR opcode.
+fn arith_opcode(op: u16) -> VmOp {
+    if op == op_add() { return VmOp::OpAdd; }
+    if op == op_sub() { return VmOp::OpSub; }
+    if op == op_mul() { return VmOp::OpMul; }
+    if op == op_div() { return VmOp::OpDiv; }
+    if op == op_rem() { return VmOp::OpRem; }
+    if op == op_bit_and() { return VmOp::OpBitAnd; }
+    if op == op_bit_or() { return VmOp::OpBitOr; }
+    if op == op_bit_xor() { return VmOp::OpXor; }
+    if op == op_shl() { return VmOp::OpShl; }
+    return VmOp::OpShr;
+}
+
+fn is_arith(op: u16) -> bool => op >= op_add() && op <= op_shr();
+
+/// Whether a cast from `from` to `to` changes nothing (the interpreter's
+/// `is_same_int`).
+fn is_same_int(from: IrTypePhysics, to: IrTypePhysics) -> bool {
+    if to.reg_class != reg_class_gpr_signed() || to.bit_width != 64 || from.bit_width <= 1 { return false; }
+    return from.reg_class == reg_class_gpr_signed();
+}
+
+// ------------------------------------------------------------------------------
+// Instructions
+// ------------------------------------------------------------------------------
+
+/// Lowers `inst` of the function being emitted.
+pub fn pilc_lower_inst(var ref e: PilcEmit, inst: IrInst) {
+    let op = inst.opcode;
+    let a = ir_args(e.f, inst);
+    let m = e.m;
+    if op == op_const_bits() {
+        put_const(e, result_reg(e, inst), bits_const(e, inst.physics, m.ints[a[0] as i64]));
+    } else if op == op_const_float() {
+        put_const(e, result_reg(e, inst), pilc_const_bits(e.img, VmTag::TagFloat as i64, m.floats[a[0] as i64]));
+    } else if op == op_const_bytes() {
+        put_const(e, result_reg(e, inst), pilc_const_text(e.img, m.strings[a[0] as i64]));
+    } else if op == op_undef() {
+        put_const(e, result_reg(e, inst), pilc_const_null(e.img));
+    } else if op == op_global_addr() {
+        // An address: `load` and `store` name the global themselves.
+    } else if op == op_stack_slot() {
+        // A fresh cell holds nothing, as the interpreter's does each time
+        // the slot is made.
+        if e.alloc.addr[inst.result as i64] == PilcAddr::AddrEscaped { let _ = reg_of(e, inst.result); }
+        put_const(e, e.alloc.target[inst.result as i64], pilc_const_null(e.img));
+    } else if is_arith(op) {
+        lower_arith(e, inst, a);
+    } else if op == op_cmp() {
+        let _ = put_op(e, CMP_OPCODES[inst.subop as i64], result_reg(e, inst), reg_of(e, a[0]), reg_of(e, a[1]), 0);
+    } else if op == op_cast() {
+        let src = reg_of(e, a[0]);
+        if is_same_int(e.f.value_physics[a[0] as i64], inst.physics) {
+            put_move(e, result_reg(e, inst), src);
+        } else {
+            put_to_register(e, "num_convert", src, inst.physics, result_reg(e, inst));
+        }
+    } else if op == op_load() {
+        lower_load(e, inst, a);
+    } else if op == op_store() {
+        lower_store(e, a);
+    } else if op == op_call_direct() {
+        lower_call_direct(e, inst, a);
+    } else if op == op_call_intrinsic() {
+        lower_intrinsic(e, inst, a);
+    } else if op == op_jump() {
+        lower_jump_args(e, a[0] as i64, a, 1);
+        put_jump_to(e, VmOp::OpJump, 0, a[0] as i64);
+    } else if op == op_cond_br() {
+        lower_cond_br(e, a);
+    } else if op == op_switch_table() {
+        lower_switch(e, a);
+    } else if op == op_return() {
+        if a.len() > 0 {
+            let _ = put_op(e, VmOp::OpRet, 0, reg_of(e, a[0]), 0, 0);
+        } else {
+            let _ = put_op(e, VmOp::OpRet, 0, VM_CONST_REG, 0, pilc_const_null(e.img));
+        }
+    } else if op == op_unreachable() {
+        if a.len() > 0 {
+            put_engine(e, "rt_fault", [reg_of(e, a[0])], PILC_SCRATCH);
+        } else {
+            let _ = put_op(e, VmOp::OpTrap, 0, 0, 0, pilc_const_text(e.img, UNREACHABLE_MESSAGE));
+        }
+    } else if op == op_construct_aggregate() || op == op_extract_field() || op == op_insert_field() {
+        pilc_lower_aggregate(e, inst, a);
+    } else if op == op_call_indirect() {
+        pilc_lower_call_indirect(e, inst, a);
+    } else {
+        seam("vm.opcode", f"PilIR `{opcode_name(op)}` is not lowered to bytecode (the PilIR interpreter does not run it either)");
+    }
+}
+
+fn lower_arith(var ref e: PilcEmit, inst: IrInst, ref a: List<u32>) {
+    let phy = inst.physics;
+    let dst = result_reg(e, inst);
+    let vm_op = arith_opcode(inst.opcode);
+    let x = reg_of(e, a[0]);
+    var y = reg_of(e, a[1]);
+    if !pilc_is_narrow(phy) {
+        let _ = put_op(e, vm_op, dst, x, y, 0);
+        return;
+    }
+    let is_shift = inst.opcode == op_shl() || inst.opcode == op_shr();
+    if is_shift && phy.reg_class != reg_class_simd_float() {
+        // The count, modulo the width.
+        let _ = put_op(e, VmOp::OpBitAnd, PILC_SCRATCH, y, VM_CONST_REG, pilc_const_int(e.img, (phy.bit_width as i64) - 1));
+        y = PILC_SCRATCH;
+    }
+    let _ = put_op(e, vm_op, dst, x, y, 0);
+    put_to_register(e, "num_wrap", dst, phy, dst);
+}
+
+fn lower_load(var ref e: PilcEmit, inst: IrInst, ref a: List<u32>) {
+    let at = a[0] as i64;
+    let kind = e.alloc.addr[at];
+    if kind == PilcAddr::AddrCell {
+        put_move(e, result_reg(e, inst), e.alloc.target[at]);
+    } else if kind == PilcAddr::AddrGlobal {
+        put_const(e, 1, pilc_const_text(e.img, e.global_names[e.alloc.target[at]]));
+        let _ = put_op(e, VmOp::OpEngineIntrinsic, result_reg(e, inst), VM_CONST_REG, 1, pilc_const_text(e.img, "global_get"));
+    } else {
+        seam("vm.address_value", f"`{e.f.name}` loads through an address that is not a stack slot or global it made");
+    }
+}
+
+fn lower_store(var ref e: PilcEmit, ref a: List<u32>) {
+    let at = a[0] as i64;
+    let kind = e.alloc.addr[at];
+    let v = reg_of(e, a[1]);
+    if kind == PilcAddr::AddrCell {
+        put_move(e, e.alloc.target[at], v);
+    } else if kind == PilcAddr::AddrGlobal {
+        put_const(e, 1, pilc_const_text(e.img, e.global_names[e.alloc.target[at]]));
+        put_move(e, 2, v);
+        let _ = put_op(e, VmOp::OpEngineIntrinsic, PILC_SCRATCH, VM_CONST_REG, 2, pilc_const_text(e.img, "global_set"));
+    } else {
+        seam("vm.address_value", f"`{e.f.name}` stores through an address that is not a stack slot or global it made");
+    }
+}
+
+/// Copies registers `regs` into r1.. for a call.
+pub fn stage_args(var ref e: PilcEmit, ref regs: List<i64>) {
+    if regs.len() > VM_MAX_CALL_ARGS { seam("vm.call_args", f"a call with {regs.len()} arguments; the VM passes at most {VM_MAX_CALL_ARGS} in registers and passing more is not built"); }
+    var k = 0;
+    while k < regs.len() {
+        put_move(e, k + 1, regs[k]);
+        k = k + 1;
+    }
+}
+
+/// A `Call` of function `fi`, its entry set once every function is placed.
+pub fn put_call(var ref e: PilcEmit, fi: i64, dst: i64) {
+    let pc = put_op(e, VmOp::OpCall, dst, 0, 0, 0);
+    e.call_pc.push(pc);
+    e.call_fn.push(fi);
+}
+
+fn lower_call_direct(var ref e: PilcEmit, inst: IrInst, ref a: List<u32>) {
+    var regs: List<i64> = [];
+    for v in a { regs.push(reg_of(e, v)); }
+    stage_args(e, regs);
+    put_call(e, inst.subop as i64, result_reg(e, inst));
+}
+
+fn lower_intrinsic(var ref e: PilcEmit, inst: IrInst, ref a: List<u32>) {
+    var name = e.m.intrinsics[inst.subop as i64];
+    var regs: List<i64> = [];
+    for v in a { regs.push(reg_of(e, v)); }
+    if name == POW_OP && regs.len() == 2 {
+        let _ = put_op(e, VmOp::OpPow, result_reg(e, inst), regs[0], regs[1], 0);
+        return;
+    }
+    var k = 0;
+    while k < RENAMED_OPS_FROM.len() {
+        if RENAMED_OPS_FROM[k] == name { name = RENAMED_OPS_TO[k]; }
+        k = k + 1;
+    }
+    var known = false;
+    for n in VM_NATIVE_OPS { if n == name { known = true; } }
+    if !known { seam("vm.intrinsic", f"the engine operation `{name}` has no VM counterpart"); }
+    put_engine(e, name, regs, result_reg(e, inst));
+}
+
+/// The parallel move a jump to block `b` makes: `a[from..]` into its
+/// parameters.
+fn lower_jump_args(var ref e: PilcEmit, b: i64, ref a: List<u32>, from: i64) {
+    let params = e.f.blocks[b].params;
+    var dsts: List<i64> = [];
+    var srcs: List<i64> = [];
+    var i = 0;
+    while i < params.len() {
+        dsts.push(reg_of(e, params[i]));
+        srcs.push(reg_of(e, a[from + i]));
+        i = i + 1;
+    }
+    put_parallel_move(e, dsts, srcs);
+}
+
+/// `cond_br c, then, n, args.., else, n, args..`: a branch on `c` (which
+/// must be a boolean, else the VM stops with the interpreter's message),
+/// then each side's moves and jump.
+fn lower_cond_br(var ref e: PilcEmit, ref a: List<u32>) {
+    let c = reg_of(e, a[0]);
+    let then_b = a[1] as i64;
+    let other = 3 + (a[2] as i64);
+    let else_b = a[other] as i64;
+    let to_else = put_op(e, VmOp::OpJumpIfFalse, 0, c, 0, 0);
+    lower_jump_args(e, then_b, a, 3);
+    put_jump_to(e, VmOp::OpJump, 0, then_b);
+    pilc_patch_wide(e.img, to_else, pilc_here(e.img));
+    lower_jump_args(e, else_b, a, other + 2);
+    put_jump_to(e, VmOp::OpJump, 0, else_b);
+}
+
+/// `switch_table i, default, targets..`: target `k` when `i == k`, else the
+/// default.
+fn lower_switch(var ref e: PilcEmit, ref a: List<u32>) {
+    let i = reg_of(e, a[0]);
+    var k = 2;
+    while k < a.len() {
+        let _ = put_op(e, VmOp::OpCmpEq, PILC_SCRATCH, i, VM_CONST_REG, pilc_const_int(e.img, k - 2));
+        put_jump_to(e, VmOp::OpJumpIfTrue, PILC_SCRATCH, a[k] as i64);
+        k = k + 1;
+    }
+    put_jump_to(e, VmOp::OpJump, 0, a[1] as i64);
+}

@@ -1,0 +1,2 @@
+runtime error: PILC001: an instruction operand 4294967296 does not fit 32 bits
+err_pilc_operand.pilot:10:15

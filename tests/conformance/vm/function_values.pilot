@@ -1,0 +1,44 @@
+// PROP-005 5D step 5: function values through every engine, including
+// `pilot run --via-ir`, where a call through a value is a VM `CallClosure`
+// to a thunk that unpacks the captured values. Worked by hand:
+//   apply(double, 21)             = 2 * 21 = 42           (named function, 0 captured)
+//   adder(10)(5)                  = 10 + 5 = 15           (1 captured)
+//   (a, b) => a * b + k, k = 3    : 4 * 5 + 3 = 23        (2 args, 1 captured)
+//   lin(2, 7)(10)                 = 2 * 10 + 7 = 27       (2 captured)
+//   twice(adder(4), 1)            = (1 + 4) + 4 = 9       (value passed on, called twice)
+//   pick(true)(6) / pick(false)(6): 6 + 1 = 7, 6 - 1 = 5  (which function decided at run time)
+//   fold [1, 2, 3, 4] with (acc, x) => acc + x * x, from 0 = 1 + 4 + 9 + 16 = 30
+fn double(x: i64) -> i64 => x * 2;
+fn inc(x: i64) -> i64 => x + 1;
+fn dec(x: i64) -> i64 => x - 1;
+
+fn apply(f: (i64) => i64, x: i64) -> i64 => f(x);
+
+fn adder(n: i64) -> (i64) => i64 => (x: i64) => x + n;
+
+fn lin(a: i64, b: i64) -> (i64) => i64 => (x: i64) => a * x + b;
+
+fn twice(f: (i64) => i64, x: i64) -> i64 => f(f(x));
+
+fn pick(up: bool) -> (i64) => i64 {
+    if up { return inc; }
+    return dec;
+}
+
+fn fold(xs: List<i64>, start: i64, f: (i64, i64) => i64) -> i64 {
+    var acc = start;
+    for x in xs { acc = f(acc, x); }
+    return acc;
+}
+
+fn main() {
+    print(apply(double, 21));
+    print(adder(10)(5));
+    let k = 3;
+    let mul_k = (a: i64, b: i64) => a * b + k;
+    print(mul_k(4, 5));
+    print(lin(2, 7)(10));
+    print(twice(adder(4), 1));
+    print(f"{pick(true)(6)} {pick(false)(6)}");
+    print(fold([1, 2, 3, 4], 0, (acc: i64, x: i64) => acc + x * x));
+}

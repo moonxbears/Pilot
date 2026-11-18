@@ -1,0 +1,40 @@
+// PROP-005 5D step 4: records and tuples through every engine, including
+// `pilot run --via-ir` (PilIR -> bytecode). Expected output worked by hand:
+//   p = Point { x: 3, y: 4 }            -> p.x + p.y = 7
+//   p.x = 10 (field write)              -> p.x * p.y = 40
+//   q = moved(p, 5) = { x: 15, y: 9 }   -> "15 9"
+//   p unchanged by moved (a new record) -> "10 4"
+//   pair (q.y, q.x) = (9, 15)           -> t.0 - t.1 = -6
+//   Line { a: Point{1,2}, b: Point{4,6} }: dx = 3, dy = 4, 3*3 + 4*4 = 25
+//   sum of x over [Point{1,0}, Point{2,0}, Point{3,0}] = 6
+struct Point { x: i64, y: i64 }
+struct Line { a: Point, b: Point }
+
+fn moved(p: Point, d: i64) -> Point {
+    return Point { x: p.x + d, y: p.y + d };
+}
+
+fn swap(p: Point) -> (i64, i64) => (p.y, p.x);
+
+fn len2(l: Line) -> i64 {
+    let dx = l.b.x - l.a.x;
+    let dy = l.b.y - l.a.y;
+    return dx * dx + dy * dy;
+}
+
+fn main() {
+    var p = Point { x: 3, y: 4 };
+    print(p.x + p.y);
+    p.x = 10;
+    print(p.x * p.y);
+    let q = moved(p, 5);
+    print(f"{q.x} {q.y}");
+    print(f"{p.x} {p.y}");
+    let t = swap(q);
+    print(t.0 - t.1);
+    print(len2(Line { a: Point { x: 1, y: 2 }, b: Point { x: 4, y: 6 } }));
+    let ps: List<Point> = [Point { x: 1, y: 0 }, Point { x: 2, y: 0 }, Point { x: 3, y: 0 }];
+    var sum = 0;
+    for pt in ps { sum = sum + pt.x; }
+    print(sum);
+}

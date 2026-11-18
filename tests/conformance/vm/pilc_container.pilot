@@ -1,0 +1,67 @@
+// The `.pilc` container (stdlib/pilot/vm/pilc.pilot): a program built by
+// hand is serialized byte for byte as crates/pilot-vm pilc.rs
+// `PilcBinary::serialize` writes it, and reads back to the same image.
+//
+// The program: print "hi", return 42.
+//   #0 = 42 (int), #1 = "hi", #2 = "rt_print"; the second use of 42 is pooled.
+//   0: LoadConst r1, #1          1: EngineIntrinsic r18 <- #2 with 1 argument
+//   2: LoadConst r18, #0         3: Ret r18
+//
+// Expected bytes, worked by hand from the format (little-endian):
+//   "PIL3" 50494c33, version 5 05000000, 3 constants 03000000
+//   #0: tag word 3 0300000000000000, payload 42 2a00000000000000
+//   #1: tag word 9 | 2 << 8 = 0x209 0902000000000000, text offset 0
+//       0000000000000000
+//   #2: tag word 9 | 8 << 8 = 0x809 0908000000000000, text offset 4 + 2 = 6
+//       0600000000000000
+//   text area (4 + 2) + (4 + 8) = 18 bytes 12000000, then 02000000 6869
+//       08000000 72745f7072696e74
+//   4 instructions 04000000; each word low half then `ext`:
+//     LoadConst (9) r1, ext 1:            0x09010000 -> 00000109 01000000
+//     EngineIntrinsic (34 = 0x22) r18 (0x12), src1 255 (the constant
+//       register), 1 argument, ext 2:     0x2212ff01 -> 01ff1222 02000000
+//     LoadConst r18, ext 0:               0x09120000 -> 00001209 00000000
+//     Ret (17 = 0x11) src1 r18:           0x11001200 -> 00120011 00000000
+// With one file "a.pilot" at offset 0 and spans 10, 10, -1, -1, the debug
+// trailer follows: "PDBG" 50444247, 1 file 01000000, base 0000000000000000,
+// length 7 07000000, "a.pilot" 612e70696c6f74, 4 spans 04000000,
+// 0a00000000000000 0a00000000000000 ffffffffffffffff ffffffffffffffff.
+use Pilot.Core.Packed;
+use pilot.vm.pilc;
+
+fn build() -> PilcImage {
+    var img = pilc_image_new();
+    let answer = pilc_const_int(img, 42);
+    let hi = pilc_const_text(img, "hi");
+    let printer = pilc_const_text(img, "rt_print");
+    let _ = pilc_emit(img, pilc_ins(VmOp::OpLoadConst, 1, 0, 0, hi), 10);
+    let _ = pilc_emit(img, pilc_ins(VmOp::OpEngineIntrinsic, 18, VM_CONST_REG, 1, printer), 10);
+    let _ = pilc_emit(img, pilc_ins(VmOp::OpLoadConst, 18, 0, 0, pilc_const_int(img, 42)), -1);
+    let _ = pilc_emit(img, pilc_ins(VmOp::OpRet, 0, 18, 0, 0), -1);
+    print(answer == pilc_const_int(img, 42));
+    return img;
+}
+
+fn main() {
+    var img = build();
+    let plain = pilc_bytes(img);
+    print(plain.len());
+    print(pilc_hex(plain));
+    img.files.push("a.pilot");
+    img.bases.push(0);
+    let traced = pilc_bytes(img);
+    print(traced.len() - plain.len());
+    print(pilc_hex(traced).slice(plain.len() * 2, traced.len() * 2));
+    let read = pilc_read(traced);
+    if read.ok {
+        let back = read.image;
+        for line in pilc_disasm(back) { print(line); }
+        print(back.files.len() == 1 && back.files[0] == "a.pilot" && back.spans[0] == 10 && back.spans[2] == -1);
+    } else {
+        print(read.message);
+    }
+    var junk = packed_buffer<u8>(sizeof(u8), false);
+    junk.push(80);
+    let bad = pilc_read(junk);
+    print(if bad.ok { "read junk" } else { bad.message });
+}

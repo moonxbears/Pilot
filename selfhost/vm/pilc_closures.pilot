@@ -1,0 +1,162 @@
+// ==============================================================================
+// FILE: selfhost/vm/pilc_closures.pilot
+// PROP-005 5D: function values (`call_indirect`) -> VM calls.
+// ==============================================================================
+// A PilIR function value is a record (a list on the VM): the function's
+// index, then its captured values (stand-in `ir.closure_record`,
+// selfhost/ir/lower_closure.pilot). `call_indirect f, args..` calls the
+// function the record names with `args`, then the captured values.
+//
+// The VM's one indirect call is `CallClosure`: it calls a VM function value
+// (a list `[entry, arity]`) whose arity matches the call's argument count,
+// and puts that value in the register after the arguments. So:
+//   - every record any function builds names a pair (function, number of
+//     captured values); for each pair a thunk is placed after the functions:
+//     it copies the captured values out of the record (passed in r0) into
+//     the registers after the call's own arguments, then jumps to the
+//     function's entry;
+//   - start-up code builds, in the global `FN_VALUES_GLOBAL`, the table from
+//     function index and captured count to a VM function value whose entry is
+//     that pair's thunk, every one of arity `CLOSURE_ARITY`;
+//   - `call_indirect` looks its record's pair up in the table, puts its
+//     arguments in r1.. and the record in r0, and calls the table's value
+//     with `CLOSURE_ARITY` arguments (the VM then puts the value itself in
+//     r16, past every argument a function takes here).
+// A record naming a pair the program never builds finds `null` in the table
+// and the VM stops: `null is not callable`.
+pub lvl(0) pkg selfhost.vm;
+
+use selfhost.ir.*;
+use pilot.vm.pilc;
+
+/// The global holding the function-value table; no Pilot name.
+const FN_VALUES_GLOBAL: str = "<function values>";
+/// The argument count every `call_indirect` hands `CallClosure`.
+const CLOSURE_ARITY: i64 = 15;
+/// Pairs are kept as `function * CAPTURE_LIMIT + captured`.
+const CAPTURE_LIMIT: i64 = 32;
+
+/// Records in `e.fn_values` every (function, captured count) pair a function
+/// record of the module names: a `construct_aggregate` whose first value is
+/// a constant. (A tuple starting with a constant adds a pair no call uses.)
+pub fn pilc_find_fn_values(var ref e: PilcEmit) {
+    for f in e.m.functions {
+        var const_of = Map<str, i64>();
+        for b in f.blocks {
+            for inst in b.insts {
+                let a = ir_args(f, inst);
+                if inst.opcode == op_const_bits() && inst.result != ir_no_value() {
+                    const_of.set(f"{inst.result}", e.m.ints[a[0] as i64]);
+                } else if inst.opcode == op_construct_aggregate() && a.len() > 0 {
+                    if some fi = const_of.get(f"{a[0]}") {
+                        if fi >= 0 && fi < e.m.functions.len() {
+                            add_pair(e, fi, a.len() - 1);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn add_pair(var ref e: PilcEmit, fi: i64, captured: i64) {
+    if captured >= CAPTURE_LIMIT { return; }
+    let key = fi * CAPTURE_LIMIT + captured;
+    for k in e.fn_values { if k == key { return; } }
+    e.fn_values.push(key);
+}
+
+pub fn pilc_lower_call_indirect(var ref e: PilcEmit, inst: IrInst, ref a: List<u32>) {
+    let k = a.len() - 1;
+    if k > CLOSURE_ARITY { seam("vm.call_args", f"a call through a function value with {k} arguments; the VM passes at most {CLOSURE_ARITY} that way"); }
+    let rec = reg_of(e, a[0]);
+    // r17 = table[record[0]][len(record) - 1]
+    put_global_get(e, FN_VALUES_GLOBAL, PILC_SCRATCH);
+    put_engine_key(e, "list_get", rec, pilc_const_int(e.img, 0), PILC_SCRATCH2);
+    put_engine2(e, "list_get", PILC_SCRATCH, PILC_SCRATCH2, PILC_SCRATCH);
+    put_engine1(e, "list_len", rec, PILC_SCRATCH2);
+    let _ = put_op(e, VmOp::OpSub, PILC_SCRATCH2, PILC_SCRATCH2, VM_CONST_REG, pilc_const_int(e.img, 1));
+    put_engine2(e, "list_get", PILC_SCRATCH, PILC_SCRATCH2, PILC_SCRATCH);
+    var regs: List<i64> = [];
+    var i = 1;
+    while i < a.len() {
+        regs.push(reg_of(e, a[i]));
+        i = i + 1;
+    }
+    stage_args(e, regs);
+    put_move(e, PILC_SCRATCH2, rec);
+    let _ = put_op(e, VmOp::OpCallClosure, result_reg(e, inst), PILC_SCRATCH, CLOSURE_ARITY, 0);
+}
+
+/// Places a thunk per pair of `e.fn_values`; their addresses, in order.
+pub fn pilc_emit_thunks(var ref e: PilcEmit) -> List<i64> {
+    e.span = ir_no_span();
+    var pcs: List<i64> = [];
+    for key in e.fn_values {
+        let fi = key / CAPTURE_LIMIT;
+        let c = key % CAPTURE_LIMIT;
+        let n = e.arity[fi];
+        // A pair no call can use (more captured values than parameters, or
+        // more parameters than a call through a value passes) gets no thunk;
+        // its table cell stays `null`.
+        if n - c < 0 || n > CLOSURE_ARITY {
+            pcs.push(-1);
+            continue;
+        }
+        pcs.push(pilc_here(e.img));
+        // The captured values follow the call's own n - c arguments.
+        var j = 1;
+        while j <= c {
+            put_engine_key(e, "list_get", PILC_SCRATCH2, pilc_const_int(e.img, j), n - c + j);
+            j = j + 1;
+        }
+        let _ = put_op(e, VmOp::OpJump, 0, 0, 0, e.entry[fi]);
+    }
+    return pcs;
+}
+
+/// Start-up code building the function-value table from the thunks at
+/// `pcs` (none when the module makes no function value).
+pub fn pilc_emit_fn_table(var ref e: PilcEmit, ref pcs: List<i64>) {
+    if e.fn_values.len() == 0 { return; }
+    e.span = ir_no_span();
+    let none_args: List<i64> = [];
+    let table = PILC_FIRST_REG;
+    let row = PILC_FIRST_REG + 1;
+    let cell = PILC_FIRST_REG + 2;
+    let arity = PILC_FIRST_REG + 3;
+    put_const(e, arity, pilc_const_int(e.img, CLOSURE_ARITY));
+    put_engine(e, "list_new", none_args, table);
+    var fi = 0;
+    while fi < e.m.functions.len() {
+        var widest = -1;
+        for key in e.fn_values {
+            if key / CAPTURE_LIMIT == fi && key % CAPTURE_LIMIT > widest { widest = key % CAPTURE_LIMIT; }
+        }
+        if widest < 0 {
+            put_const(e, row, pilc_const_null(e.img));
+        } else {
+            put_engine(e, "list_new", none_args, row);
+            var c = 0;
+            while c <= widest {
+                var at = -1;
+                var k = 0;
+                while k < e.fn_values.len() {
+                    if e.fn_values[k] == fi * CAPTURE_LIMIT + c { at = k; }
+                    k = k + 1;
+                }
+                if at < 0 || pcs[at] < 0 {
+                    put_const(e, cell, pilc_const_null(e.img));
+                } else {
+                    put_const(e, cell, pilc_const_int(e.img, pcs[at]));
+                    put_engine2(e, "closure_new", cell, arity, cell);
+                }
+                put_engine2(e, "list_push", row, cell, PILC_SCRATCH);
+                c = c + 1;
+            }
+        }
+        put_engine2(e, "list_push", table, row, PILC_SCRATCH);
+        fi = fi + 1;
+    }
+    put_global_set(e, FN_VALUES_GLOBAL, table);
+}

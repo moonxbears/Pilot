@@ -235,10 +235,14 @@ pub fn lower_member(var ref lw: Lowerer, n: i64) -> u32 {
         }
     }
     var t = if is_implied(lw, n) { lw.self_type } else { variant_value_type(lw, recv) };
-    // A member of the value an optional holds (`m.title` after `?..`): the
-    // seed reads it from the value itself.
-    if prog_member(lw.inf.p, t, member_word(lw, n)) == none && is_unwrappable(lw.inf.p, t) { t = unwrap_type(lw.inf.p, t); }
-    let r = member_receiver(lw, n);
+    var r = member_receiver(lw, n);
+    // A member of the value an optional holds (`m.title` after `?..`): read
+    // from the value its `op ?` gives (the seed holds that value itself).
+    if prog_member(lw.inf.p, t, member_word(lw, n)) == none && is_unwrappable(lw.inf.p, t) {
+        let inner = unwrap_type(lw.inf.p, t);
+        r = unwrap(lw, r, t, layout_of(lw.ls, inner), n);
+        t = inner;
+    }
     if some v = lower_variant_field(lw, r, t, member_word(lw, n), n) { return v; }
     return property_read(lw, r, t, member_word(lw, n), n);
 }
@@ -1012,27 +1016,30 @@ pub fn lower_cascade(var ref lw: Lowerer, n: i64) -> u32 {
     let skips = flags(s, n) != 0;
     var join: u32 = 0;
     var owner = t;
+    var target = recv;
     if skips {
-        let hook = bound(lw, absent_test_hook(), []);
-        if hook == "" { return unsupported(lw, n); }
-        let absent = emit(lw, op_call_intrinsic(), intrinsic_index(lw, hook), bool_physics(lw), [recv], n);
+        // Present: the try protocol's test (`opt<T>` is a record, never the
+        // engine's null), or not null for a value of no protocol type.
+        let present = success_test(lw, recv, t, n);
         let step_block = ir_add_block(lw.f);
         join = ir_add_block(lw.f);
-        emit_void(lw, op_cond_br(), 0, [absent, join, 0, step_block, 0], n);
+        emit_void(lw, op_cond_br(), 0, [present, step_block, 0, join, 0], n);
         switch_to(lw, step_block);
         owner = unwrap_type(lw.inf.p, t);
+        // The step applies to the value the optional holds.
+        target = unwrap(lw, recv, t, layout_of(lw.ls, owner), n);
     }
     let step = rhs(s, n);
     let sk = kind(s, step);
     if sk == nk_call() && kind(s, children(s, step)[0]) == nk_ident() {
         let ch = children(s, step);
-        let _ = member_call(lw, recv, owner, node_name(s, ch[0]), ch.slice(1, ch.len()), layout_unknown(lw.ls), step);
+        let _ = member_call(lw, target, owner, node_name(s, ch[0]), ch.slice(1, ch.len()), layout_unknown(lw.ls), step);
     } else if sk == nk_assign() && kind(s, lhs(s, step)) == nk_ident() && flags(s, step) == 0 {
         let name = node_name(s, lhs(s, step));
         let slot = field_slot(lw, owner, name);
         if slot < 0 { return unsupported(lw, n); }
         let phy = field_physics(lw, owner, name);
-        emit_void(lw, op_insert_field(), slot, [recv, coerce(lw, lower_expr(lw, rhs(s, step)), phy, step)], step);
+        emit_void(lw, op_insert_field(), slot, [target, coerce(lw, lower_expr(lw, rhs(s, step)), phy, step)], step);
     } else {
         return unsupported(lw, n);
     }
