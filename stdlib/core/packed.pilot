@@ -40,6 +40,12 @@ pub struct PackedBuffer<T: IValue> : IObject {
     /// The bytes the elements take.
     pub fn byte_len(ref self) -> i64 => .count * .width;
 
+    /// Where the elements start in raw memory (0 while there are none),
+    /// for a host operation that reads them in one go (`File.write_raw`).
+    /// It moves when the buffer grows and is freed with the buffer, so it
+    /// is used at once, not kept.
+    pub fn raw_base(ref self) -> i64 => .base;
+
     /// Makes room for `more` elements past the last one.
     pub fn reserve(var ref self, more: i64) {
         let need = .count + more;

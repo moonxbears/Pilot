@@ -1,7 +1,7 @@
 // =========================================================================
 // FILE: selfhost/cli/build_cmd.pilot
 // Milestone 60.3: Self-Hosted Build, Check & Compile Command Driver
-// Coordinates selfhost/codegen/* and selfhost/vm/compiler.pilot.
+// Coordinates selfhost/codegen/*; bytecode is `pilot compile` (selfhost/vm/ir_to_pilc.pilot).
 // =========================================================================
 pub pkg selfhost.cli;
 

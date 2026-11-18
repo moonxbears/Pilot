@@ -1,0 +1,258 @@
+// ==============================================================================
+// FILE: selfhost/vm/pilc_regs.pilot
+// PROP-005 5D: register allocation for PilIR -> .pilc (linear scan).
+// ==============================================================================
+// Every PilIR value of a function gets one VM register for the stretch of
+// code where it is live; values whose stretches do not overlap share one.
+//   - Code positions: the blocks in index order, each a label position (its
+//     parameters are defined there) followed by one position per instruction.
+//   - Liveness: from each use, back through the predecessors to the
+//     definition; a value live into a block covers the block's label, a value
+//     live out of a block covers its terminator. A block parameter is written
+//     by the jump of each predecessor, so it also covers those jumps.
+//   - A value's interval is the hull of everything it covers. Values are
+//     taken in order of their start; a register is free again after the last
+//     position of its value (never at it: the instruction that reads a value
+//     for the last time may write another, and its lowering can take several
+//     VM instructions).
+// Registers r0..r17 are never handed out: r1..r16 carry call arguments, and
+// r0 and r17 are the lowering's scratch registers. A stack slot whose address
+// is only loaded and stored is a register of its own for the whole function
+// (a cell); a module global's address is only a name. A function needing
+// more than the frame's registers stops at the seam `vm.register_spill`.
+pub lvl(0) pkg selfhost.vm;
+
+use selfhost.ir.*;
+
+/// The first register the allocator hands out.
+pub const PILC_FIRST_REG: i64 = 18;
+/// The last one (r255 is the VM's constant-operand register).
+pub const PILC_LAST_REG: i64 = 254;
+/// The lowering's scratch registers, never handed out.
+pub const PILC_SCRATCH: i64 = 17;
+pub const PILC_SCRATCH2: i64 = 0;
+
+/// What a value is, for the lowering: an ordinary value in a register, the
+/// address of a cell or of a global, or an address used other than by
+/// `load` and `store`.
+pub enum PilcAddr : u8 { AddrPlain, AddrCell, AddrGlobal, AddrEscaped }
+
+/// Where each value of a function lives.
+pub struct PilcAlloc : IObject {
+    /// Value id -> its register, or -1 (an address, or a value never defined).
+    pub reg: List<i64>;
+    /// Value id -> what it is.
+    pub addr: List<PilcAddr>;
+    /// Value id -> the cell register (`Cell`) or global index (`Global`).
+    pub target: List<i64>;
+    /// The most registers live at once, for `pilot compile --stats`.
+    pub peak: i64;
+}
+
+/// The operand positions of `inst` that are values (the rest are block
+/// numbers, counts or pool indexes).
+pub fn pilc_value_operands(ref a: List<u32>, opcode: u16) -> List<i64> {
+    var out: List<i64> = [];
+    if opcode == op_const_bits() || opcode == op_const_float() || opcode == op_const_bytes() || opcode == op_undef() || opcode == op_global_addr() || opcode == op_stack_slot() {
+        return out;
+    }
+    if opcode == op_jump() {
+        var i = 1;
+        while i < a.len() { out.push(i); i = i + 1; }
+        return out;
+    }
+    if opcode == op_cond_br() {
+        out.push(0);
+        let n_then = a[2] as i64;
+        var i = 0;
+        while i < n_then { out.push(3 + i); i = i + 1; }
+        let other = 3 + n_then;
+        let n_else = a[other + 1] as i64;
+        i = 0;
+        while i < n_else { out.push(other + 2 + i); i = i + 1; }
+        return out;
+    }
+    if opcode == op_switch_table() {
+        out.push(0);
+        return out;
+    }
+    var i = 0;
+    while i < a.len() { out.push(i); i = i + 1; }
+    return out;
+}
+
+/// The predecessors of each block of `f`.
+pub fn pilc_preds(ref f: IrFunction) -> List<List<i64>> {
+    var preds: List<List<i64>> = [];
+    for b in f.blocks { preds.push([]); }
+    for b in f.blocks {
+        let n = b.insts.len();
+        if n > 0 {
+            for s in ir_successors(f, b.insts[n - 1]) { preds[s as i64].push(b.id as i64); }
+        }
+    }
+    return preds;
+}
+
+/// Widens interval `v` (`lo`, `hi`) to take in position `p`.
+fn cover(var ref lo: List<i64>, var ref hi: List<i64>, v: i64, p: i64) {
+    if lo[v] < 0 || p < lo[v] { lo[v] = p; }
+    if p > hi[v] { hi[v] = p; }
+}
+
+/// Allocates the registers of `f`.
+pub fn pilc_allocate(ref f: IrFunction) -> PilcAlloc {
+    let nvals = f.value_physics.len();
+    let nblocks = f.blocks.len();
+    var reg: List<i64> = [];
+    var addr: List<PilcAddr> = [];
+    var target: List<i64> = [];
+    var def_block: List<i64> = [];
+    var lo: List<i64> = [];
+    var hi: List<i64> = [];
+    var v = 0;
+    while v < nvals {
+        reg.push(-1);
+        addr.push(PilcAddr::AddrPlain);
+        target.push(-1);
+        def_block.push(-1);
+        lo.push(-1);
+        hi.push(-1);
+        v = v + 1;
+    }
+    // Positions, definitions and addresses.
+    var label: List<i64> = [];
+    var last: List<i64> = [];
+    var pos = 0;
+    for b in f.blocks {
+        label.push(pos);
+        for p in b.params {
+            def_block[p as i64] = b.id as i64;
+            cover(lo, hi, p as i64, pos);
+        }
+        for inst in b.insts {
+            pos = pos + 1;
+            if inst.result != ir_no_value() {
+                let r = inst.result as i64;
+                def_block[r] = b.id as i64;
+                cover(lo, hi, r, pos);
+                if inst.opcode == op_stack_slot() { addr[r] = PilcAddr::AddrCell; }
+                if inst.opcode == op_global_addr() {
+                    addr[r] = PilcAddr::AddrGlobal;
+                    target[r] = inst.subop as i64;
+                }
+            }
+        }
+        last.push(pos);
+        pos = pos + 1;
+    }
+    let preds = pilc_preds(f);
+    // Uses, and liveness back to the definition.
+    var live_in: List<i64> = [];
+    var live_out: List<i64> = [];
+    var b = 0;
+    while b < nblocks {
+        live_in.push(-1);
+        live_out.push(-1);
+        b = b + 1;
+    }
+    b = 0;
+    while b < nblocks {
+        let blk = f.blocks[b];
+        var p = label[b];
+        for inst in blk.insts {
+            p = p + 1;
+            let a = ir_args(f, inst);
+            let addr_use = inst.opcode == op_load() || inst.opcode == op_store();
+            for k in pilc_value_operands(a, inst.opcode) {
+                let u = a[k] as i64;
+                if addr[u] != PilcAddr::AddrPlain {
+                    if !(addr_use && k == 0) { addr[u] = PilcAddr::AddrEscaped; }
+                    continue;
+                }
+                cover(lo, hi, u, p);
+                if def_block[u] != b { mark_live_in(f, preds, label, last, live_in, live_out, def_block[u], u, b, lo, hi); }
+            }
+        }
+        // A parameter of a successor is written by this block's jump.
+        let n = blk.insts.len();
+        if n > 0 {
+            for s in ir_successors(f, blk.insts[n - 1]) {
+                for prm in f.blocks[s as i64].params { cover(lo, hi, prm as i64, last[b]); }
+            }
+        }
+        b = b + 1;
+    }
+    // Cells take registers of their own, from the top.
+    var top = PILC_LAST_REG;
+    v = 0;
+    while v < nvals {
+        if addr[v] == PilcAddr::AddrCell {
+            if top < PILC_FIRST_REG { seam("vm.register_spill", f"`{f.name}` keeps more values at once than a VM frame has registers; spilling to memory is not built"); }
+            target[v] = top;
+            top = top - 1;
+        }
+        v = v + 1;
+    }
+    // Linear scan, by start position.
+    var starts: List<List<i64>> = [];
+    var ends: List<List<i64>> = [];
+    var q = 0;
+    while q < pos {
+        starts.push([]);
+        ends.push([]);
+        q = q + 1;
+    }
+    v = 0;
+    while v < nvals {
+        if lo[v] >= 0 && addr[v] == PilcAddr::AddrPlain {
+            starts[lo[v]].push(v);
+            ends[hi[v]].push(v);
+        }
+        v = v + 1;
+    }
+    var free: List<i64> = [];
+    var r = top;
+    while r >= PILC_FIRST_REG {
+        free.push(r);
+        r = r - 1;
+    }
+    var live = 0;
+    var peak = 0;
+    q = 0;
+    while q < pos {
+        for s in starts[q] {
+            if free.len() == 0 { seam("vm.register_spill", f"`{f.name}` keeps more values at once than a VM frame has registers; spilling to memory is not built"); }
+            reg[s] = free.pop();
+            live = live + 1;
+            if live > peak { peak = live; }
+        }
+        for e in ends[q] {
+            free.push(reg[e]);
+            live = live - 1;
+        }
+        q = q + 1;
+    }
+    return PilcAlloc { reg: reg, addr: addr, target: target, peak: peak };
+}
+
+/// Marks value `v` (defined in block `d`) live into block `b`, and so live
+/// out of each predecessor, back to `d`.
+fn mark_live_in(ref f: IrFunction, ref preds: List<List<i64>>, ref label: List<i64>, ref last: List<i64>, var ref live_in: List<i64>, var ref live_out: List<i64>, d: i64, v: i64, b: i64, var ref lo: List<i64>, var ref hi: List<i64>) {
+    // `live_in[x] == v` marks x as done for v; the lists are reused across
+    // values, so the marks of other values do not count.
+    var work: List<i64> = [b];
+    while work.len() > 0 {
+        let x = work.pop();
+        if live_in[x] == v { continue; }
+        live_in[x] = v;
+        cover(lo, hi, v, label[x]);
+        for p in preds[x] {
+            if live_out[p] != v {
+                live_out[p] = v;
+                cover(lo, hi, v, last[p]);
+            }
+            if p != d { work.push(p); }
+        }
+    }
+}

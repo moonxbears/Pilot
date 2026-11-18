@@ -707,8 +707,6 @@ pub fn legacy_engine_ratchet() -> Map<str, i64> {
     m.set("selfhost/perf/profiler.pilot", 14);
     m.set("selfhost/perf/wcet.pilot", 17);
     m.set("selfhost/pkg/manifest.pilot", 6);
-    m.set("selfhost/vm/compiler.pilot", 341);
-    m.set("selfhost/vm/pilc_writer.pilot", 15);
     m.set("stdlib/core/effects.pilot", 43);
     m.set("stdlib/core/keywords.pilot", 8);
     m.set("stdlib/core/primitives/ast.pilot", 21);
