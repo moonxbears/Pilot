@@ -1,99 +1,156 @@
 // =========================================================================
 // FILE: selfhost/dap/cli_dbg.pilot
+<<<<<<< HEAD
 // Command-line debugger command parser: break, step, next, finish, continue,
 // print, bt. `pilot debug` has no handler (seam cli.command_handler).
 // No `pilot` command runs it yet; PROP-040 part B rebuilds the debugger.
+=======
+// PROP-040: `pilot debug <file>`, the terminal debugger. It reads one command
+// per line from standard input, runs the program on the PilIR interpreter
+// with the controller `pilot debug --dap` uses (vm_controller.pilot), and
+// writes the program's output and its own to standard output.
+//
+// Commands (before the run, only `break`, `run`/`continue` and `quit`):
+//   b, break N     a breakpoint on line N of the program's file
+//   r, run         start the program
+//   c, continue    run to the next breakpoint
+//   s, step        to the next line, into calls
+//   n, next        to the next line in this function or its caller
+//   finish, out    to the next line after this function returns
+//   bt, backtrace  the open calls, innermost first
+//   l, locals      the locals of the innermost call
+//   p, print X     a local, field or element (inspector.pilot `evaluate_in`)
+//   q, quit        stop the program and leave
+// When the input ends, the program runs to its end without stopping.
+// The program shares the debugger's standard input.
+>>>>>>> 0c863b8a54407529e5aedb563a81fb851f1ea2ba
 // =========================================================================
 pub pkg selfhost.dap;
 
-pub enum CliDbgAction {
-    Quit = 0,
-    StepIn = 1,
-    StepOver = 2,
-    StepOut = 3,
-    Continue = 4,
-    Backtrace = 5,
-    Breakpoint = 6,
-    Print = 7,
-}
+use selfhost.ir.*;
+use std.io;
+use std.text;
 
-fn cli_trim(s: str) -> str {
-    let n = s.len();
-    var a = 0;
-    while a < n {
-        let b = s.byte_at(a);
-        if b == 32 || b == 9 || b == 13 || b == 10 {
-            a = a + 1;
-        } else {
-            break;
-        }
-    }
-    var e = n;
-    while e > a {
-        let b = s.byte_at(e - 1);
-        if b == 32 || b == 9 || b == 13 || b == 10 {
-            e = e - 1;
-        } else {
-            break;
-        }
-    }
-    return s.slice(a, e);
+pub enum CliDbgAction : u8 {
+    Quit,
+    StepIn,
+    StepOver,
+    StepOut,
+    Continue,
+    Backtrace,
+    Breakpoint,
+    Print,
+    Locals,
+    Run,
+    /// A line that names no command.
+    Unknown,
 }
 
 fn cli_verb(cmd_line: str) -> str {
-    let t = cli_trim(cmd_line);
-    let n = t.len();
-    var i = 0;
-    while i < n {
-        let b = t.byte_at(i);
-        if b == 32 || b == 9 {
-            return t.slice(0, i);
-        }
-        i = i + 1;
-    }
-    return t;
+    let t = cmd_line.trim();
+    let sp = t.find(" ");
+    return if sp >= 0 { t.slice(0, sp) } else { t };
 }
 
-// Action codes:
-// 1 = step (s/step), 2 = next (n/next), 3 = step_out (finish/out),
-// 4 = continue (c/continue), 5 = backtrace (bt/backtrace),
-// 6 = break (b/break), 7 = print (p/print), 0 = quit (q/quit)
-pub fn parse_cli_dbg_action(cmd_line: str) -> i64 {
+/// The command a line names (the first word).
+pub fn parse_cli_dbg_action(cmd_line: str) -> CliDbgAction {
     let v = cli_verb(cmd_line);
-    if v == "s" || v == "step" {
-        return 1;
-    }
-    if v == "n" || v == "next" {
-        return 2;
-    }
-    if v == "finish" || v == "out" {
-        return 3;
-    }
-    if v == "c" || v == "continue" {
-        return 4;
-    }
-    if v == "bt" || v == "backtrace" {
-        return 5;
-    }
-    if v == "b" || v == "break" {
-        return 6;
-    }
-    if v == "p" || v == "print" {
-        return 7;
-    }
-    return 0;
+    if v == "s" || v == "step" { return CliDbgAction::StepIn; }
+    if v == "n" || v == "next" { return CliDbgAction::StepOver; }
+    if v == "finish" || v == "out" { return CliDbgAction::StepOut; }
+    if v == "c" || v == "continue" { return CliDbgAction::Continue; }
+    if v == "bt" || v == "backtrace" { return CliDbgAction::Backtrace; }
+    if v == "b" || v == "break" { return CliDbgAction::Breakpoint; }
+    if v == "p" || v == "print" { return CliDbgAction::Print; }
+    if v == "l" || v == "locals" { return CliDbgAction::Locals; }
+    if v == "r" || v == "run" { return CliDbgAction::Run; }
+    if v == "q" || v == "quit" { return CliDbgAction::Quit; }
+    return CliDbgAction::Unknown;
 }
 
+/// What follows a line's first word.
 pub fn parse_cli_dbg_arg(cmd_line: str) -> str {
-    let t = cli_trim(cmd_line);
-    let n = t.len();
-    var i = 0;
-    while i < n {
-        let b = t.byte_at(i);
-        if b == 32 || b == 9 {
-            return cli_trim(t.slice(i + 1, n));
+    let t = cmd_line.trim();
+    let sp = t.find(" ");
+    return if sp >= 0 { t.slice(sp + 1, t.len()).trim() } else { "" };
+}
+
+/// `pilot debug <path>`: debugs the program of the tool's snapshot, whose
+/// file is `path`, with script arguments `args`; the program's exit code.
+pub fn debug_cli_main(path: str, args: List<str>) -> i64 {
+    guard some t = debug_target_load() else { return 1; };
+    let file = target_file_of(t, path);
+    var lines: List<i64> = [];
+    while true {
+        guard some line = io.read_line() else { break; };
+        let action = parse_cli_dbg_action(line);
+        if action == CliDbgAction::Breakpoint {
+            if some n = text.parse_i64(parse_cli_dbg_arg(line)) {
+                lines.push(n);
+                let why = set_file_breakpoints(t, file, lines);
+                let last = why[why.len() - 1];
+                if last.len() > 0 {
+                    print(f"breakpoint not set: {last}");
+                    let _ = lines.pop();
+                } else {
+                    print(f"breakpoint at line {n}");
+                }
+            } else {
+                print("usage: break <line>");
+            }
+        } else if action == CliDbgAction::Run || action == CliDbgAction::Continue {
+            break;
+        } else if action == CliDbgAction::Quit {
+            return 0;
+        } else {
+            print("the program is not running: break <line>, run or quit");
         }
-        i = i + 1;
     }
-    return "";
+    let dbg = t.dbg;
+    dbg.on_line = (d, at, key) => cli_on_line(t, d, at, key);
+    let end = ir_debug_run(t.m, dbg, interp_engine_ops(), args);
+    if end.fault.active && end.fault.message != debug_stopped_message() {
+        eprint(debug_fault_text(dbg, end.fault));
+    }
+    if end.fault.active && end.fault.message == debug_stopped_message() { return 0; }
+    print(f"exited with code {end.exit_code}");
+    return end.exit_code;
+}
+
+fn frame_name(ref t: DebugTarget, i: i64) -> str => t.m.functions[t.dbg.fns[i]].name;
+
+fn cli_on_line(var ref t: DebugTarget, var ref dbg: IrDebug, at: i64, key: i64) {
+    let depth = dbg.frames.len() - 1;
+    guard some why = should_pause_at_pc(t.ctl, key, depth) else { return; };
+    print(f"stopped ({stop_reason_word(why)}) at line {debug_line_in_file(dbg, at)} in {frame_name(t, depth)}");
+    while true {
+        guard some line = io.read_line() else {
+            // The input ended: run to the end without stopping again.
+            control_clear_breakpoints(t.ctl);
+            control_resume(t.ctl, StepMode::Continue, depth);
+            return;
+        };
+        let action = parse_cli_dbg_action(line);
+        switch action {
+            case CliDbgAction::StepIn: { control_resume(t.ctl, StepMode::StepIn, depth); return; }
+            case CliDbgAction::StepOver: { control_resume(t.ctl, StepMode::StepOver, depth); return; }
+            case CliDbgAction::StepOut: { control_resume(t.ctl, StepMode::StepOut, depth); return; }
+            case CliDbgAction::Continue: { control_resume(t.ctl, StepMode::Continue, depth); return; }
+            case CliDbgAction::Run: { control_resume(t.ctl, StepMode::Continue, depth); return; }
+            case CliDbgAction::Quit: { dbg.stop = true; return; }
+            case CliDbgAction::Backtrace: {
+                for i in shown_frames(t) { print(f"  {frame_name(t, i)} at line {debug_line_in_file(dbg, dbg.at[i])}"); }
+            }
+            case CliDbgAction::Locals: {
+                for v in frame_variables(t.src, t.m, dbg.frames[depth], dbg.fns[depth], dbg.at[depth]) { print(f"  {v.name} = {value_text(v.value)}"); }
+            }
+            case CliDbgAction::Print: {
+                let vars = frame_variables(t.src, t.m, dbg.frames[depth], dbg.fns[depth], dbg.at[depth]);
+                let got = evaluate_in(vars, parse_cli_dbg_arg(line));
+                print(if got.ok { value_text(got.value) } else { f"error: {got.message}" });
+            }
+            case CliDbgAction::Breakpoint: print("breakpoints are set before the run");
+            case CliDbgAction::Unknown: print("commands: step, next, finish, continue, backtrace, locals, print <name>, quit");
+        }
+    }
 }

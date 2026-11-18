@@ -1,0 +1,22 @@
+// ==============================================================================
+// FILE: selfhost/ir/lower_locals.pilot
+// PROP-040: the local names of the source, kept beside the lowered function
+// for the debugger (`IrFunction.locals`, selfhost/dap/inspector.pilot).
+// ==============================================================================
+// The lowering records each `let`, `var` and parameter as it binds it: the
+// name the checker resolved, the value or stack slot that holds it, and the
+// binding's node, from which the debugger works out where in the source the
+// name can be seen. Nothing reads them while compiling or running.
+pub lvl(0) pkg selfhost.ir;
+
+/// Records binding `bi`, bound at node `site`, with the value or stack slot
+/// the lowering just gave it.
+pub fn note_local(var ref lw: Lowerer, bi: i64, site: i64) {
+    let k = key(bi);
+    let name = lw.inf.r.name[bi];
+    if some v = lw.values.get(k) {
+        lw.f.locals.push(IrLocal { name: name, value: v, slot: false, site: site });
+    } else if some slot = lw.slots.get(k) {
+        lw.f.locals.push(IrLocal { name: name, value: slot, slot: true, site: site });
+    }
+}

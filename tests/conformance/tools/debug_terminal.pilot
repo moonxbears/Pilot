@@ -1,0 +1,21 @@
+// `pilot debug <file>` without `--dap` (PROP-040 §2 B.4): the terminal
+// debugger over tests/tool_fixtures/dap/sample.pilot, its commands on
+// standard input (debug_terminal.stdin), one per line.
+//
+// Expected, worked by hand from the fixture (dap_session.pilot has the
+// arithmetic): `b 9` is set; `b 6` is refused (line 6 is blank); run stops
+// at line 9 of main; `l` shows x = 3; `s` steps into add at line 3; `bt`
+// lists add at line 3 over main at line 9; `l` shows a = 3, b = 4; `finish`
+// stops at line 10 of main, where `p y` gives 7 and `p y + 1` is refused
+// (only names, fields and elements are evaluated yet); `n` runs line 10
+// (the program prints 7) and stops at line 11; `c` runs to the end (14) and
+// the program's exit code 3 is reported and returned.
+use std.io;
+use std.proc;
+
+fn main() {
+    let input = io.read_all();
+    let r = proc.run(proc.pilot_cli_path(), ["debug", "tests/tool_fixtures/dap/sample.pilot"], input);
+    print(r.stdout);
+    print(f"exit code {r.exit_code}");
+}

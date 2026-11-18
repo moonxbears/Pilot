@@ -1,0 +1,93 @@
+// =========================================================================
+// FILE: selfhost/dap/target.pilot
+// PROP-040: the program a debugger runs, loaded the way `pilot ir run`
+// loads it: the program's snapshot (the tool host serves it), checked by
+// the type checker, lowered to PilIR and verified. Both debuggers
+// (server.pilot, cli_dbg.pilot) start from `debug_target_load`.
+// =========================================================================
+pub pkg selfhost.dap;
+
+use selfhost.ir.*;
+use selfhost.check.*;
+
+/// A checked, lowered program ready to run under the debugger.
+pub struct DebugTarget : IObject {
+    pub m: IrModule;
+    pub src: DebugSource;
+    pub dbg: IrDebug;
+    pub ctl: DebugControl;
+    /// The line keys of the user's files that hold code (`code_lines`).
+    pub code: Map<i64, bool>;
+}
+
+/// The program of the tool's snapshot, checked and lowered; none, with its
+/// errors reported on stderr, when it does not check or verify.
+pub fn debug_target_load() -> DebugTarget? {
+    let s = snap_load();
+    guard some inf = checked_program(s) else { return none; };
+    let m = lower_program_rooted(inf, false);
+    let issues = verify_ir_module(m);
+    if issues.len() > 0 {
+        for i in issues { eprint(f"error[{i.code}]: in `{i.function}`: {i.message}"); }
+        return none;
+    }
+    let map = ir_source_map_empty();
+    var user: List<bool> = [];
+    for f in s.files {
+        map.paths.push(f.0);
+        map.bases.push(f.2);
+        map.texts.push(f.3);
+        user.push(f.1);
+    }
+    let dbg = ir_debug_new(map, (d, at, key) => {});
+    let ctl = debug_control_new(user, dbg);
+    return DebugTarget { m: m, src: debug_source_new(s), dbg: dbg, ctl: ctl, code: code_lines(m, ctl, dbg) };
+}
+
+/// The index of the user's file at `path`, or -1. A path matches when it is
+/// the file's path, or one of the two ends with the other after a `/`
+/// (a client may give an absolute path for a relative one).
+pub fn target_file_of(ref t: DebugTarget, path: str) -> i64 {
+    let paths = t.dbg.sources.paths;
+    var i = 0;
+    while i < paths.len() {
+        let p = paths[i];
+        if t.ctl.user_files[i] && (p == path || p.ends_with("/" + path) || path.ends_with("/" + p)) { return i; }
+        i = i + 1;
+    }
+    return -1;
+}
+
+/// The frames a client is shown, innermost first, as indexes into
+/// `IrDebug.frames`: those of functions with a name (not `<start>`) on a
+/// known line.
+pub fn shown_frames(ref t: DebugTarget) -> List<i64> {
+    var out: List<i64> = [];
+    let dbg = t.dbg;
+    var i = dbg.frames.len() - 1;
+    while i >= 0 {
+        let name = t.m.functions[dbg.fns[i]].name;
+        if !name.starts_with("<") && debug_file_of(dbg, dbg.at[i]) >= 0 { out.push(i); }
+        i = i - 1;
+    }
+    return out;
+}
+
+/// Sets the breakpoints of file `f` to `lines`, replacing its earlier ones;
+/// for each line, the reason it can never be reached, or "" when it can.
+pub fn set_file_breakpoints(var ref t: DebugTarget, f: i64, lines: List<i64>) -> List<str> {
+    if f >= 0 { control_clear_file(t.ctl, f); }
+    var why: List<str> = [];
+    for line in lines {
+        if f < 0 {
+            why.push("not a file of the program being debugged");
+        } else if !t.code.has((f << 32) | line) {
+            why.push(f"no code on line {line}");
+        } else {
+            let flags = t.ctl.breakpoints[f];
+            flags[line] = true;
+            why.push("");
+        }
+    }
+    return why;
+}

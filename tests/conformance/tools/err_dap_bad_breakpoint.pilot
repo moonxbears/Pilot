@@ -1,0 +1,18 @@
+// `pilot debug --dap` (PROP-040 §3): breakpoints that can never be reached
+// are reported unverified, with the reason, and the others still work.
+// Requests on standard input (err_dap_bad_breakpoint.stdin); the program is
+// tests/tool_fixtures/dap/sample.pilot (14 lines).
+//
+// Expected, worked by hand from the fixture:
+//   line 6 is blank and line 40 is past the end: no instruction comes from
+//   either, so both are unverified ("no code on line N"); line 9 is
+//   verified. A breakpoint in a file the program does not consist of is
+//   unverified ("not a file of the program being debugged") and leaves the
+//   program's breakpoints as they were. The run stops at line 9 only;
+//   continue prints 7 and 14 and the program exits 3 (dap_session.pilot
+//   has the arithmetic).
+use lib.dap_client;
+
+fn main() {
+    run_and_digest("tests/tool_fixtures/dap/sample.pilot");
+}

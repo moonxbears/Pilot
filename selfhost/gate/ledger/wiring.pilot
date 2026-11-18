@@ -336,10 +336,20 @@ pub fn wiring_ledger() -> List<Capability> {
         cap("M3", "GNU flag binding (--k=v, -k v, bool shorts) and -- passthrough", ::Wired,
             "milestone03 test_m3_2_posix_gnu_argument_parser_and_passthrough; tests/conformance/runtime/script_args.pilot", ""),
         cap("M3", "direct script invocation (pilot file.pilot)", ::Wired, "pilot tests/conformance/numbers/arith_int.pilot", ""),
+<<<<<<< HEAD
         cap("M3", "command handlers for compile, fmt, repl, pkg, deps, tree, venv, debug, perf, from, map, ide-sync", ::Spec,
             "dispatch goes through cli_handlers() (selfhost/cli/commands.pilot); these stop at seam cli.command_handler", "cli.command_handler F6"),
         cap("M3", "pilot lsp: diagnostics (after typing pauses, on open and save), hover and go-to-definition, all from the type checker", ::Draft,
             "selfhost/lsp/server.pilot + index.pilot (PROP-040 A, 2026-11-18): tests/conformance/tools/{lsp_session,lsp_unsaved,err_lsp_bad_frame} pass on the seed engine; no completion, references or rename yet; a file under stdlib/ gets no checker diagnostics (the host never counts it as the user's)", ""),
+=======
+        cap("M3", "command handlers for compile, fmt, repl, pkg, deps, tree, venv, lsp, perf, from, map, ide-sync", ::Spec,
+            "dispatch goes through cli_handlers() (selfhost/cli/commands.pilot); these stop at seam cli.command_handler", "cli.command_handler F6"),
+        cap("PROP-040", "pilot debug --dap <file> and pilot debug <file>: breakpoints (unverified with a reason on a line with no code), continue, step in/over/out, pause, stack, locals and fields on the PilIR interpreter", ::Wired,
+            "selfhost/dap/{server,target,vm_controller,inspector,cli_dbg}.pilot over selfhost/ir/interp_debug.pilot (a debugged run swaps the two call handlers; ir_run and interp.pilot are unchanged) and the local names the lowering records (selfhost/ir/lower_locals.pilot, IrFunction.locals); tests/conformance/tools/dap_session, err_dap_bad_breakpoint and debug_terminal pass on pilot test, --ir and --emit c (2026-11-18); pause checked by hand on a 100,000-iteration loop (stops mid-loop, locals right); a debugged loop takes about 1.4 times a plain pilot ir run-unopt; vscode-pilot starts pilot debug --dap", ""),
+        cap("PROP-040", "debugger evaluate: any expression checked and run in the stopped frame", ::Draft,
+            "selfhost/dap/inspector.pilot evaluate_in reads a local, a field (a.b) or an element (a[0]); any other expression is refused with a message (tools/debug_terminal): the debugger tool has no parser or type checker for new source text", ""),
+        cap("PROP-040", "a debugged program's own standard input under pilot debug --dap", ::Spec, "the DAP requests use the server's stdin; a program that reads it stops at the seam", "dap.program_stdin"),
+>>>>>>> 0c863b8a54407529e5aedb563a81fb851f1ea2ba
 
         // M4 dual syntax
         cap("M4", "readable and symbolic forms parse to one AST", ::Core,

@@ -1,0 +1,14 @@
+// The program tests/conformance/tools/dap_session.pilot debugs.
+fn add(a: i64, b: i64) -> i64 {
+    let sum = a + b;
+    return sum;
+}
+
+fn main() -> i64 {
+    let x = 3;
+    let y = add(x, 4);
+    print(y);
+    let z = y * 2;
+    print(z);
+    return z - 11;
+}

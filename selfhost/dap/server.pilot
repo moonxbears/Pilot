@@ -1,39 +1,522 @@
 // =========================================================================
 // FILE: selfhost/dap/server.pilot
+<<<<<<< HEAD
 // Debug Adapter Protocol message framing and handling helpers.
 // `pilot debug` has no handler (seam cli.command_handler), so nothing serves
 // DAP today; the crates/pilot-dap crate this was meant to replace is gone.
 // No `pilot` command runs it yet; PROP-040 part B rebuilds the debugger.
+=======
+// PROP-040: `pilot debug --dap <file>`, a Debug Adapter Protocol server.
+>>>>>>> 0c863b8a54407529e5aedb563a81fb851f1ea2ba
 // =========================================================================
+// It reads requests from standard input and writes responses and events to
+// standard output, each as a JSON body after a `Content-Length` header. The
+// program is checked and lowered when the server starts (target.pilot) and
+// runs on the PilIR interpreter (selfhost/ir/interp_debug.pilot) once the
+// client has sent both `launch` and `configurationDone`.
+//
+// While the program runs, the interpreter tells the server about each new
+// line; the server stops there when `should_pause_at_pc` says so, sends a
+// `stopped` event and answers requests until one resumes the run. Every
+// 1024 lines it looks for a waiting request without blocking: a `pause`
+// stops the run, `threads` is answered, anything else waits for the next
+// stop. The program's output becomes `output` events; when it ends the
+// server sends `exited` (its exit code) and `terminated`, and goes on
+// answering until `disconnect` or the end of its input.
+//
+// The program's own standard input is the server's request stream, so a
+// program that reads it stops at the seam `dap.program_stdin`.
 pub pkg selfhost.dap;
 
-pub fn encode_dap_frame(json_payload: str) -> str {
-    let byte_len = json_payload.len();
-    return "Content-Length: " + byte_len + "\r\n\r\n" + json_payload;
+use selfhost.ir.*;
+use std.text;
+use std.polyglot.transport.json;
+use Pilot.Core.HostRaw;
+
+/// A debugging session over standard input and output.
+pub struct DapSession : IObject {
+    /// The program, or none when it did not check.
+    pub target: DebugTarget?;
+    pub args: List<str>;
+    /// The `seq` of the next message the server sends.
+    pub seq: i64;
+    /// Requests read while the program ran, answered at the next stop.
+    pub pending: List<JsonValue>;
+    pub launched: bool;
+    pub configured: bool;
+    pub started: bool;
+    /// The client asked to end the session, or its input ended.
+    pub quit: bool;
+    pub stop_on_entry: bool;
+    /// Lines the run has reached (for how often it looks for requests).
+    pub lines: i64;
+    /// The id the next breakpoint gets.
+    pub next_bp: i64;
+    /// While stopped: the values whose parts a client may ask for, by
+    /// `variablesReference` minus `parts_base()`.
+    pub parts: List<IrVal>;
 }
 
-pub fn build_dap_stack_trace_frame(seq: i64, fn_name: str, line: i64, col: i64) -> str {
-    return "{\"seq\":" + seq + ",\"type\":\"response\",\"request_seq\":" + seq + ",\"success\":true,\"command\":\"stackTrace\",\"body\":{\"stackFrames\":[{\"id\":1,\"name\":\"" + fn_name + "\",\"line\":" + line + ",\"column\":" + col + "}],\"totalFrames\":1}}";
+/// `variablesReference`s from here on name a value's parts; below, a frame's
+/// locals (the frame's index in `IrDebug.frames`, plus one).
+pub pure fn parts_base() -> i64 => 1000000;
+
+/// How many lines a run goes between looks for a waiting request.
+const POLL_EVERY: i64 = 1024;
+
+/// `pilot debug --dap`: serves the program of the tool's snapshot with
+/// script arguments `args`. The exit code is the server's: 0 after a
+/// session that ended normally, 1 when the input was not DAP.
+pub fn dap_main(args: List<str>) -> i64 {
+    let sess = DapSession { target: debug_target_load(), args: args, seq: 1, pending: [], launched: false, configured: false, started: false, quit: false, stop_on_entry: false, lines: 0, next_bp: 1, parts: [] };
+    while !sess.quit {
+        guard some req = next_request(sess) else { break; };
+        answer_idle(sess, req);
+        if sess.launched && sess.configured && !sess.started {
+            sess.started = true;
+            run_program(sess);
+        }
+    }
+    return 0;
 }
 
-pub fn route_dap_command(command: str, seq: i64) -> str {
-    if command == "initialize" {
-        return "{\"seq\":" + seq + ",\"type\":\"response\",\"request_seq\":" + seq + ",\"success\":true,\"command\":\"initialize\",\"body\":{\"supportsConfigurationDoneRequest\":true,\"supportsEvaluateForHovers\":true}}";
+// ------------------------------------------------------------------------------
+// Framing
+// ------------------------------------------------------------------------------
+
+/// Writes `text` to standard output, all of it.
+fn write_out(text: str) {
+    let n = text.len();
+    if n == 0 { return; }
+    let buf = RawMem.alloc(n, 1);
+    let _ = str_copy_to_ptr(text, buf, n);
+    var off = 0;
+    while off < n {
+        let w = Fd.write(1, buf + off, n - off);
+        if w <= 0 { break; }
+        off = off + w;
     }
-    if command == "launch" {
-        return "{\"seq\":" + seq + ",\"type\":\"response\",\"request_seq\":" + seq + ",\"success\":true,\"command\":\"launch\"}";
+    let _ = RawMem.free(buf, n, 1);
+}
+
+/// `body` framed for DAP.
+pub fn encode_dap_frame(body: str) -> str => f"Content-Length: {body.len()}\r\n\r\n{body}";
+
+/// The next frame's body from standard input; none at its end. A header
+/// without a `Content-Length` ends the session with an error on stderr.
+fn read_frame() -> str? {
+    let ch = RawMem.alloc(1, 1);
+    var header = "";
+    var length = -1;
+    var line = "";
+    var ended = false;
+    while true {
+        let r = Fd.read(0, ch, 1);
+        if r <= 0 { ended = true; break; }
+        let b = RawMem.load_int(ch, 8, 0);
+        if b == 10 {
+            let l = line.trim();
+            if l.len() == 0 {
+                if length >= 0 || header.len() > 0 { break; }
+            } else {
+                header = header + l;
+                let colon = l.find(":");
+                if colon >= 0 && l.slice(0, colon).trim() == "Content-Length" {
+                    length = text.parse_i64(l.slice(colon + 1, l.len()).trim()) ?? -1;
+                }
+            }
+            line = "";
+        } else {
+            line = line + str_from_ptr(ch, 1);
+        }
     }
-    if command == "setBreakpoints" {
-        return "{\"seq\":" + seq + ",\"type\":\"response\",\"request_seq\":" + seq + ",\"success\":true,\"command\":\"setBreakpoints\",\"body\":{\"breakpoints\":[{\"verified\":true}]}}";
+    let _ = RawMem.free(ch, 1, 1);
+    if ended && header.len() == 0 { return none; }
+    if length < 0 {
+        eprint("error: a DAP message without a Content-Length header; the session ends");
+        return none;
     }
-    if command == "threads" {
-        return "{\"seq\":" + seq + ",\"type\":\"response\",\"request_seq\":" + seq + ",\"success\":true,\"command\":\"threads\",\"body\":{\"threads\":[{\"id\":1,\"name\":\"PilVM Main Thread\"}]}}";
+    if length == 0 { return ""; }
+    let buf = RawMem.alloc(length, 1);
+    var got = 0;
+    while got < length {
+        let r = Fd.read(0, buf + got, length - got);
+        if r <= 0 { break; }
+        got = got + r;
     }
-    if command == "stackTrace" {
-        return build_dap_stack_trace_frame(seq, nameof(fn) + " main", 1, 1);
+    let body = if got > 0 { str_from_ptr(buf, got) } else { "" };
+    let _ = RawMem.free(buf, length, 1);
+    return body;
+}
+
+/// Whether a request is waiting on standard input (`poll`, no wait). The
+/// record is an `OsPollFd` (stdlib/core/os_abi.pilot): `fd` i64 at 0,
+/// `events` u32 at 8, `revents` u32 at 12; event 1 is readable.
+fn input_waiting() -> bool {
+    let pfd = RawMem.alloc(16, 8);
+    let _ = RawMem.store_int(pfd, 0, 64);
+    let _ = RawMem.store_int(pfd + 8, 1, 32);
+    let _ = RawMem.store_int(pfd + 12, 0, 32);
+    let n = Fd.poll(pfd, 1, 0);
+    let revents = RawMem.load_int(pfd + 12, 32, 0);
+    let _ = RawMem.free(pfd, 16, 8);
+    return n > 0 && (revents & 1) != 0;
+}
+
+/// The next request: a waiting one first, else one read from the input;
+/// none when the input has ended. A body that is not JSON is reported on
+/// stderr and skipped.
+fn next_request(var ref sess: DapSession) -> JsonValue? {
+    if sess.pending.len() > 0 { return sess.pending.remove_at(0); }
+    while true {
+        guard some body = read_frame() else { return none; };
+        let req = json_parse(body) catch e => json_null();
+        if req.kind == JsonKind::Object { return req; }
+        eprint("error: a DAP message whose body is not a JSON object; skipped");
     }
-    if command == "continue" || command == "next" || command == "stepIn" || command == "stepOut" {
-        return "{\"seq\":" + seq + ",\"type\":\"response\",\"request_seq\":" + seq + ",\"success\":true,\"command\":\"" + command + "\",\"body\":{\"allThreadsContinued\":true}}";
+    return none;
+}
+
+// ------------------------------------------------------------------------------
+// Messages
+// ------------------------------------------------------------------------------
+
+fn num(n: i64) -> JsonValue => json_num(n as f64);
+
+fn send(var ref sess: DapSession, msg: JsonValue) {
+    msg.set("seq", num(sess.seq));
+    sess.seq = sess.seq + 1;
+    write_out(encode_dap_frame(msg.stringify()));
+}
+
+fn command_of(ref req: JsonValue) -> str => req.get("command").str_val;
+
+fn int_of(v: JsonValue) -> i64 => v.num_val as i64;
+
+/// A successful response to `req`, with `body` unless it is null.
+fn respond(var ref sess: DapSession, ref req: JsonValue, body: JsonValue) {
+    let msg = json_object();
+    msg.set("seq", num(0));
+    msg.set("type", json_str("response"));
+    msg.set("request_seq", num(int_of(req.get("seq"))));
+    msg.set("success", json_bool(true));
+    msg.set("command", json_str(command_of(req)));
+    if body.kind != JsonKind::Null { msg.set("body", body); }
+    send(sess, msg);
+}
+
+/// A failed response to `req` with `message`.
+fn refuse(var ref sess: DapSession, ref req: JsonValue, message: str) {
+    let msg = json_object();
+    msg.set("seq", num(0));
+    msg.set("type", json_str("response"));
+    msg.set("request_seq", num(int_of(req.get("seq"))));
+    msg.set("success", json_bool(false));
+    msg.set("command", json_str(command_of(req)));
+    msg.set("message", json_str(message));
+    send(sess, msg);
+}
+
+fn event(var ref sess: DapSession, name: str, body: JsonValue) {
+    let msg = json_object();
+    msg.set("seq", num(0));
+    msg.set("type", json_str("event"));
+    msg.set("event", json_str(name));
+    if body.kind != JsonKind::Null { msg.set("body", body); }
+    send(sess, msg);
+}
+
+fn output(var ref sess: DapSession, category: str, text: str) {
+    let body = json_object();
+    body.set("category", json_str(category));
+    body.set("output", json_str(text));
+    event(sess, "output", body);
+}
+
+// ------------------------------------------------------------------------------
+// Requests
+// ------------------------------------------------------------------------------
+
+/// Answers a request that needs no stopped program; the others are refused.
+fn answer_idle(var ref sess: DapSession, ref req: JsonValue) {
+    let cmd = command_of(req);
+    if cmd == "initialize" {
+        let caps = json_object();
+        caps.set("supportsConfigurationDoneRequest", json_bool(true));
+        caps.set("supportsTerminateRequest", json_bool(true));
+        respond(sess, req, caps);
+        event(sess, "initialized", json_null());
+    } else if cmd == "launch" {
+        if sess.target == none {
+            refuse(sess, req, "the program has errors (written to the debugger's stderr); it was not started");
+            return;
+        }
+        sess.stop_on_entry = req.get("arguments").get("stopOnEntry").bool_val;
+        sess.launched = true;
+        respond(sess, req, json_null());
+    } else if cmd == "configurationDone" {
+        sess.configured = true;
+        respond(sess, req, json_null());
+    } else if cmd == "setBreakpoints" {
+        answer_breakpoints(sess, req);
+    } else if cmd == "threads" {
+        answer_threads(sess, req);
+    } else if cmd == "disconnect" || cmd == "terminate" {
+        respond(sess, req, json_null());
+        sess.quit = true;
+    } else {
+        refuse(sess, req, f"`{cmd}` needs a stopped program");
     }
-    return "{\"seq\":" + seq + ",\"type\":\"response\",\"request_seq\":" + seq + ",\"success\":true,\"command\":\"" + command + "\"}";
+}
+
+fn answer_threads(var ref sess: DapSession, ref req: JsonValue) {
+    let t = json_object();
+    t.set("id", num(1));
+    t.set("name", json_str("program"));
+    let list = json_array();
+    list.push(t);
+    let body = json_object();
+    body.set("threads", list);
+    respond(sess, req, body);
+}
+
+fn answer_breakpoints(var ref sess: DapSession, ref req: JsonValue) {
+    let a = req.get("arguments");
+    var lines: List<i64> = [];
+    let given = a.get("breakpoints");
+    var i: usize = 0;
+    while i < given.len() {
+        lines.push(int_of(given.get_at(i).get("line")));
+        i = i + 1;
+    }
+    var why: List<str> = [];
+    if some t = sess.target {
+        why = set_file_breakpoints(t, target_file_of(t, a.get("source").get("path").str_val), lines);
+    } else {
+        for l in lines { why.push("the program has errors"); }
+    }
+    let out = json_array();
+    var k = 0;
+    while k < lines.len() {
+        let bp = json_object();
+        bp.set("id", num(sess.next_bp));
+        sess.next_bp = sess.next_bp + 1;
+        bp.set("verified", json_bool(why[k].len() == 0));
+        bp.set("line", num(lines[k]));
+        if why[k].len() > 0 { bp.set("message", json_str(why[k])); }
+        out.push(bp);
+        k = k + 1;
+    }
+    let body = json_object();
+    body.set("breakpoints", out);
+    respond(sess, req, body);
+}
+
+// ------------------------------------------------------------------------------
+// Running
+// ------------------------------------------------------------------------------
+
+/// The engine operations of the run: the interpreter's, with the program's
+/// output sent as `output` events and its standard input refused.
+fn session_ops(var ref sess: DapSession) -> Map<str, IrEngineOp> {
+    let ops = interp_engine_ops();
+    ops.set("rt_print", (a, fault) => {
+        output(sess, "stdout", printed_text(a) + "\n");
+        return IrVal.Nil;
+    });
+    ops.set("rt_eprint", (a, fault) => {
+        output(sess, "stderr", printed_text(a) + "\n");
+        return IrVal.Nil;
+    });
+    let host = ops.get("host_op") ?? ((a, fault) => IrVal.Nil);
+    ops.set("host_op", (a, fault) => {
+        let op = if a.len() > 1 { ir_int(a[0]) ?? -1 } else { -1 };
+        let fd = if a.len() > 1 { ir_int(a[1]) ?? -1 } else { -1 };
+        if op == 18 && fd == 0 {
+            seam("dap.program_stdin", "a debugged program's standard input is the DAP request stream; it needs its own channel (a launch `stdin` file or the client's terminal)");
+        }
+        if op == 19 && (fd == 1 || fd == 2) && a.len() > 3 {
+            let written = host_checked("str_from_ptr", [a[2], a[3]], fault);
+            switch written {
+                case Text(t): output(sess, if fd == 1 { "stdout" } else { "stderr" }, t);
+                default: {}
+            }
+            return a[3];
+        }
+        return host(a, fault);
+    });
+    return ops;
+}
+
+/// The text `print` writes for `args`: each as the program prints it,
+/// joined by one space.
+pub fn printed_text(ref args: List<IrVal>) -> str {
+    var out = "";
+    var i = 0;
+    while i < args.len() {
+        if i > 0 { out = out + " "; }
+        out = out + ir_display(args[i]);
+        i = i + 1;
+    }
+    return out;
+}
+
+fn run_program(var ref sess: DapSession) {
+    guard some t = sess.target else { return; };
+    let dbg = t.dbg;
+    dbg.on_line = (d, at, key) => on_line(sess, t, d, at, key);
+    if sess.stop_on_entry { control_resume(t.ctl, StepMode::Entry, 0); }
+    let end = ir_debug_run(t.m, dbg, session_ops(sess), sess.args);
+    if sess.quit { return; }
+    if end.fault.active { output(sess, "stderr", debug_fault_text(dbg, end.fault) + "\n"); }
+    let body = json_object();
+    body.set("exitCode", num(end.exit_code));
+    event(sess, "exited", body);
+    event(sess, "terminated", json_null());
+}
+
+/// The interpreter reached a new line (`key`, `debug_line_key`) at source
+/// offset `at`.
+fn on_line(var ref sess: DapSession, var ref t: DebugTarget, var ref dbg: IrDebug, at: i64, key: i64) {
+    sess.lines = sess.lines + 1;
+    if sess.lines % POLL_EVERY == 0 && input_waiting() {
+        if some req = next_request(sess) {
+            let cmd = command_of(req);
+            if cmd == "pause" {
+                t.ctl.pause_asked = true;
+                respond(sess, req, json_null());
+            } else if cmd == "threads" {
+                answer_threads(sess, req);
+            } else {
+                sess.pending.push(req);
+            }
+        }
+    }
+    let depth = dbg.frames.len() - 1;
+    guard some why = should_pause_at_pc(t.ctl, key, depth) else { return; };
+    let body = json_object();
+    body.set("reason", json_str(stop_reason_word(why)));
+    body.set("threadId", num(1));
+    body.set("allThreadsStopped", json_bool(true));
+    event(sess, "stopped", body);
+    sess.parts = [];
+    while true {
+        guard some req = next_request(sess) else {
+            sess.quit = true;
+            dbg.stop = true;
+            return;
+        };
+        if answer_stopped(sess, t, req, depth) { return; }
+    }
+}
+
+/// Answers a request while the program is stopped in the frame at `depth`;
+/// whether it resumed the run.
+fn answer_stopped(var ref sess: DapSession, var ref t: DebugTarget, ref req: JsonValue, depth: i64) -> bool {
+    let cmd = command_of(req);
+    let dbg = t.dbg;
+    if cmd == "continue" || cmd == "next" || cmd == "stepIn" || cmd == "stepOut" {
+        let mode = if cmd == "next" { StepMode::StepOver } else if cmd == "stepIn" { StepMode::StepIn } else if cmd == "stepOut" { StepMode::StepOut } else { StepMode::Continue };
+        control_resume(t.ctl, mode, depth);
+        let body = json_object();
+        if cmd == "continue" { body.set("allThreadsContinued", json_bool(true)); }
+        respond(sess, req, if cmd == "continue" { body } else { json_null() });
+        return true;
+    }
+    if cmd == "disconnect" || cmd == "terminate" {
+        respond(sess, req, json_null());
+        sess.quit = true;
+        dbg.stop = true;
+        return true;
+    }
+    if cmd == "stackTrace" {
+        let frames = json_array();
+        let shown = shown_frames(t);
+        for i in shown {
+            let at = dbg.at[i];
+            let fr = json_object();
+            fr.set("id", num(i + 1));
+            fr.set("name", json_str(t.m.functions[dbg.fns[i]].name));
+            fr.set("line", num(debug_line_in_file(dbg, at)));
+            fr.set("column", num(1));
+            let source = json_object();
+            source.set("path", json_str(dbg.sources.paths[debug_file_of(dbg, at)]));
+            fr.set("source", source);
+            frames.push(fr);
+        }
+        let body = json_object();
+        body.set("stackFrames", frames);
+        body.set("totalFrames", num(shown.len() as i64));
+        respond(sess, req, body);
+        return false;
+    }
+    if cmd == "scopes" {
+        let id = int_of(req.get("arguments").get("frameId"));
+        let scope = json_object();
+        scope.set("name", json_str("Locals"));
+        scope.set("variablesReference", num(id));
+        scope.set("expensive", json_bool(false));
+        let list = json_array();
+        list.push(scope);
+        let body = json_object();
+        body.set("scopes", list);
+        respond(sess, req, body);
+        return false;
+    }
+    if cmd == "variables" {
+        let r = int_of(req.get("arguments").get("variablesReference"));
+        var vars: List<DebugVar> = [];
+        if r >= parts_base() && r - parts_base() < sess.parts.len() {
+            vars = value_parts(sess.parts[r - parts_base()]);
+        } else if r >= 1 && r <= dbg.frames.len() {
+            vars = frame_variables(t.src, t.m, dbg.frames[r - 1], dbg.fns[r - 1], dbg.at[r - 1]);
+        }
+        let list = json_array();
+        for v in vars { list.push(variable_json(sess, v)); }
+        let body = json_object();
+        body.set("variables", list);
+        respond(sess, req, body);
+        return false;
+    }
+    if cmd == "evaluate" {
+        let a = req.get("arguments");
+        let id = if a.has("frameId") { int_of(a.get("frameId")) } else { depth + 1 };
+        if id < 1 || id > dbg.frames.len() {
+            refuse(sess, req, "no such frame");
+            return false;
+        }
+        let vars = frame_variables(t.src, t.m, dbg.frames[id - 1], dbg.fns[id - 1], dbg.at[id - 1]);
+        let got = evaluate_in(vars, a.get("expression").str_val);
+        if !got.ok {
+            refuse(sess, req, got.message);
+            return false;
+        }
+        let body = json_object();
+        body.set("result", json_str(value_text(got.value)));
+        body.set("variablesReference", num(parts_ref(sess, got.value)));
+        respond(sess, req, body);
+        return false;
+    }
+    if cmd == "pause" {
+        respond(sess, req, json_null());
+        return false;
+    }
+    answer_idle(sess, req);
+    return false;
+}
+
+/// The `variablesReference` of `v`'s parts, or 0 when it has none.
+fn parts_ref(var ref sess: DapSession, v: IrVal) -> i64 {
+    if !has_parts(v) { return 0; }
+    sess.parts.push(v);
+    return parts_base() + sess.parts.len() as i64 - 1;
+}
+
+fn variable_json(var ref sess: DapSession, ref v: DebugVar) -> JsonValue {
+    let o = json_object();
+    o.set("name", json_str(v.name));
+    o.set("value", json_str(value_text(v.value)));
+    if v.type_name.len() > 0 { o.set("type", json_str(v.type_name)); }
+    o.set("variablesReference", num(parts_ref(sess, v.value)));
+    return o;
 }

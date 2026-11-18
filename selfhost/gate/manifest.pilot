@@ -680,9 +680,6 @@ pub fn legacy_engine_ratchet() -> Map<str, i64> {
     m.set("selfhost/check/snapshot.pilot", 1);
     m.set("selfhost/cli/test_runner.pilot", 7);
     m.set("selfhost/cst/cst.pilot", 17);
-    m.set("selfhost/dap/inspector.pilot", 4);
-    m.set("selfhost/dap/repl_eval.pilot", 19);
-    m.set("selfhost/dap/vm_controller.pilot", 9);
     m.set("selfhost/db/cache_io.pilot", 2);
     m.set("selfhost/db/engine.pilot", 81);
     m.set("selfhost/diagnostics.pilot", 12);

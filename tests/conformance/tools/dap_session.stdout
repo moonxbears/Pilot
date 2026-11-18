@@ -1,0 +1,42 @@
+initialize ok
+event initialized
+launch ok
+setBreakpoints ok
+  line 9 verified
+configurationDone ok
+event stopped: breakpoint
+threads ok
+  thread 1
+stackTrace ok
+  main line 9, frame 2
+scopes ok
+  Locals, reference 2
+variables ok
+  x = 3
+stepIn ok
+event stopped: step
+stackTrace ok
+  add line 3, frame 3
+  main line 9, frame 2
+variables ok
+  a = 3
+  b = 4
+stepOut ok
+event stopped: step
+variables ok
+  x = 3
+  y = 7
+evaluate ok
+  = 7
+next ok
+event output stdout: 7
+event stopped: step
+stackTrace ok
+  main line 11, frame 2
+continue ok
+event output stdout: 14
+event exited: 3
+event terminated
+disconnect ok
+debugger exit code 0
+messages in order: true

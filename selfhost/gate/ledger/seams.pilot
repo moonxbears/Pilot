@@ -73,7 +73,11 @@ pub fn seam_registry() -> List<SeamEntry> {
         seam_entry("build.target", ::Entry, "an LLVM, WASM, GPU or assembly backend behind `pilot build --target` (C11 is the only one)", "M56"),
         seam_entry("chor.cue_lattice", ::Entry, "cue payload lattice class from the resolved TypeDef (type checker)", "F4"),
         seam_entry("chor.emit_dispatchers", ::Exit, "PilIR function builder: one dispatcher per lowered .pchor route", "F5"),
+<<<<<<< HEAD
         seam_entry("cli.command_handler", ::Entry, "handlers in `cli_handlers()` for compile, repl, pkg, deps, tree, venv, debug, perf, from, map, ide-sync", "F6"),
+=======
+        seam_entry("cli.command_handler", ::Entry, "handlers in `cli_handlers()` for compile, repl, pkg, deps, tree, venv, lsp, perf, from, map, ide-sync", "F6"),
+>>>>>>> 0c863b8a54407529e5aedb563a81fb851f1ea2ba
         seam_entry("cli.weave_struct", ::Entry, "[Cli]/[Arg] weaving of a struct into a CliAppDef (struct reflection + attribute weaver)", "F4"),
         seam_entry("coach.loop_clones", ::Entry, "PilIR loop bodies and clone calls scanned for PERF001", "F5"),
         seam_entry("comptime.run_sandboxed", ::Entry, "seed VM running comptime blocks under a ComptimePolicy (fuel, heap, gated fs/net/proc/clock/env intrinsics)", "F3"),
@@ -91,6 +95,7 @@ pub fn seam_registry() -> List<SeamEntry> {
         seam_entry("convert.wide_scalar", ::Entry, "128-bit integer and f16/f128 values in the engine, for the `to_i128`, `to_u128`, `to_f16` and `to_f128` conversions (stdlib/core/convert/convert.pilot)", "M30"),
         seam_entry("cpp.catch_boundary", ::Entry, "compiled C++ catch shim (__cxa_begin_catch) around native calls", "F6"),
         seam_entry("cpp.string_view_from_str", ::Entry, "data address of a Pilot str (raw memory views in PilVM)", "F6"),
+        seam_entry("dap.program_stdin", ::Entry, "a debugged program's own standard input under `pilot debug --dap`, whose stdin carries the DAP requests (a launch `stdin` file or the client's terminal)", "PROP-040"),
         seam_entry("data.commit", ::Entry, "committing a transaction's held writes (stdlib/db/sql_syntax.pilot `commit` rule)", "K9"),
         seam_entry("data.rollback", ::Entry, "restoring what a transaction wrote, from its log (`rollback` rule)", "K9"),
         seam_entry("data.savepoint", ::Entry, "a named point in a transaction's log to roll back to (`savepoint` rule)", "K9"),
