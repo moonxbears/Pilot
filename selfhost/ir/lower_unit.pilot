@@ -30,8 +30,8 @@ pub fn runs_in_program(ref lw: Lowerer, n: i64) -> bool {
 /// The function the program binds to value dimensional literals, or -1.
 fn unit_converter(ref lw: Lowerer) -> i64 {
     for row in lw.bindings {
-        if row.len() < 2 || row[0] != unit_literal_hook() { continue; }
-        let fns = nl_get(lw.inf.p.fns, row[1]);
+        if row.hook != unit_literal_hook() || row.args.len() < 1 { continue; }
+        let fns = nl_get(lw.inf.p.fns, row.args[0]);
         return if fns.len() == 1 { fns[0] } else { -1 };
     }
     return -1;

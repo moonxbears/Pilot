@@ -26,7 +26,7 @@ pub lvl(0) pkg selfhost.check;
 /// worked out from its fields) and stores fields of its own (a scalar such
 /// as an integer stores none: it is one register, which every engine
 /// already copies). A type the engine holds itself (`engine_holds`) is not.
-pub fn declares_value(var ref p: Program, ref engine: List<List<str>>, t: i64) -> bool {
+pub fn declares_value(var ref p: Program, ref engine: List<EngineBinding>, t: i64) -> bool {
     if !ty_is_named(p.tt, t) || struct_decl(p, t) < 0 || engine_holds(engine, p.tt.name[t]) { return false; }
     let bt = build_type(p, node_name(p.s, ty_decl(p.tt, t)), 0);
     return (bt.lattice & 3) == 0 && stored_fields(p, t).len() > 0;

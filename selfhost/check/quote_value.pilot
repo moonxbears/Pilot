@@ -206,7 +206,7 @@ pub fn hole_calls(var ref inf: Infer, h: i64) -> HoleCalls? {
 /// (`bind_native_fn`, stdlib/core/builtins/native_calls.pilot).
 fn is_native_name(var ref p: Program, name: str) -> bool {
     for row in prog_engine_bindings(p) {
-        if row.len() >= 2 && row[1] == name && row[0] == "bind_native_fn" { return true; }
+        if row.hook == "bind_native_fn" && row.args.len() >= 1 && row.args[0] == name { return true; }
     }
     return false;
 }

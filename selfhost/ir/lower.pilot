@@ -33,7 +33,7 @@ pub struct Lowerer : IObject {
     pub queue_self: List<i64>;
     /// The engine bindings of the program's `comptime` blocks: the hook word
     /// then its arguments, each as text (`nameof(f)` is `f`).
-    pub bindings: List<List<str>>;
+    pub bindings: List<EngineBinding>;
     /// `bound`'s answers: `bound_key(hook, keys)` -> the value of the first
     /// binding with that hook and those leading arguments.
     pub bound_index: Map<str, str>;
@@ -210,26 +210,21 @@ fn bound_key(hook: str, ref keys: List<str>) -> str {
 
 /// `bound`'s index of `rows`: the first row of each hook and leading
 /// arguments wins, as a walk of the rows in order would find it.
-fn bound_rows_index(ref rows: List<List<str>>) -> Map<str, str> {
+fn bound_rows_index(ref rows: List<EngineBinding>) -> Map<str, str> {
     let index = Map<str, str>();
     for row in rows {
-        if row.len() < 2 { continue; }
-        var keys: List<str> = [];
-        var i = 1;
-        while i < row.len() - 1 {
-            keys.push(row[i]);
-            i = i + 1;
-        }
-        let k = bound_key(row[0], keys);
-        if !index.has(k) { index.set(k, row[row.len() - 1]); }
+        let n = row.args.len();
+        if n < 1 { continue; }
+        let k = bound_key(row.hook, row.args.slice(0, n - 1));
+        if !index.has(k) { index.set(k, row.args[n - 1]); }
     }
     return index;
 }
 
 /// The first argument of the first `bind_membership` row, or "".
-fn find_membership_fn(ref rows: List<List<str>>) -> str {
+fn find_membership_fn(ref rows: List<EngineBinding>) -> str {
     for row in rows {
-        if row.len() >= 2 && row[0] == "bind_membership" { return row[1]; }
+        if row.hook == "bind_membership" && row.args.len() >= 1 { return row.args[0]; }
     }
     return "";
 }

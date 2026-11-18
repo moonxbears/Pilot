@@ -74,7 +74,7 @@ pub const PREFIX_OP_TABLE: str = "prefix_op";
 pub fn prefix_member_name(var ref p: Program, flag: i64) -> str {
     let key = f"{flag}";
     for row in prog_engine_bindings(p) {
-        if row.len() == 4 && row[0] == "bind_native_member" && row[1] == PREFIX_OP_TABLE && row[2] == key { return row[3]; }
+        if row.hook == "bind_native_member" && row.args.len() == 3 && row.args[0] == PREFIX_OP_TABLE && row.args[1] == key { return row.args[2]; }
     }
     return "";
 }
@@ -518,8 +518,8 @@ pub fn view_fn(var ref inf: Infer, n: i64) -> i64 {
     let src = type_of(inf, lhs(s, n));
     var first = -1;
     for row in prog_engine_bindings(p) {
-        if row.len() >= 3 && row[0] == "bind_operator_fn" && row[1] == view_symbol() {
-            let fns = nl_get(p.fns, row[2]);
+        if row.hook == "bind_operator_fn" && row.args.len() >= 2 && row.args[0] == view_symbol() {
+            let fns = nl_get(p.fns, row.args[1]);
             if fns.len() == 1 {
                 if first < 0 { first = fns[0]; }
                 let params = fn_params(s, fns[0]);
@@ -559,8 +559,8 @@ pub pure fn quote_lift_symbol() -> str => nameof(quote) + " lift";
 pub fn bound_fns(var ref p: Program, key: str) -> List<i64> {
     var out: List<i64> = [];
     for row in prog_engine_bindings(p) {
-        if row.len() >= 3 && row[0] == "bind_operator_fn" && row[1] == key {
-            let fns = nl_get(p.fns, row[2]);
+        if row.hook == "bind_operator_fn" && row.args.len() >= 2 && row.args[0] == key {
+            let fns = nl_get(p.fns, row.args[1]);
             if fns.len() == 1 { out.push(fns[0]); }
         }
     }

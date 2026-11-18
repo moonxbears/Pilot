@@ -529,8 +529,8 @@ fn piped_type(var ref lw: Lowerer, n: i64) -> i64 {
 /// arguments; the unknown type when the program binds none.
 pub fn map_literal_type(ref lw: Lowerer) -> i64 {
     for row in lw.bindings {
-        if row.len() == 3 && row[0] == map_literal_hook() {
-            let d = prog_type_decl(lw.inf.p, row[1]);
+        if row.hook == map_literal_hook() && row.args.len() == 2 {
+            let d = prog_type_decl(lw.inf.p, row.args[0]);
             if d >= 0 { return owner_type(lw, d); }
         }
     }
@@ -745,9 +745,9 @@ pub fn lower_map_literal(var ref lw: Lowerer, n: i64) -> u32 {
     var map_type = "";
     var set_name = "";
     for row in lw.bindings {
-        if row.len() == 3 && row[0] == map_literal_hook() {
-            map_type = row[1];
-            set_name = row[2];
+        if row.hook == map_literal_hook() && row.args.len() == 2 {
+            map_type = row.args[0];
+            set_name = row.args[1];
         }
     }
     let make = if map_type != "" { bound(lw, native_fn_hook(), [map_type]) } else { "" };

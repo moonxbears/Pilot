@@ -16,7 +16,7 @@ The path to `PROP-022`, in order. Each item is built and verified on its own (th
 
 | # | Item | Approved 2026-11-17 | Still needs, before its Rust is touched |
 | :-- | :-- | :-- | :-- |
-| 1 | `PROP-005` 5B.3, finish (already approved, in progress) | — | nothing |
+| 1 | `PROP-005` 5B.3, finish — **DONE 2026-11-17** (engine bindings typed; see 5B.3 progress) | — | nothing |
 | 2 | `PROP-005` 5B.4 | yes | decision **D4**, per file: rewrite each legacy `__engine` file onto owner types or delete it; Rust link-list edits (`run.rs`) itemized |
 | 3 | `PROP-005` 5B.5, 5B.6 | yes | their Rust file lists, if any, itemized |
 | 4 | `PROP-005` 5C | yes | its Rust file list, if any, itemized |
@@ -66,7 +66,7 @@ The path to `PROP-022`, in order. Each item is built and verified on its own (th
 | **`PROP-034`** | A String Built From Many Parts Is Allocated Once: f-Strings and `+` Chains Lower to One `str_build`, and a Unique String Appends in Place (Perceus) | about `+15` for the seed VM's n-part build (opcode or appended `HostOp`), itemized when sequenced; the rest is Pilot and C | `DRAFT 2026-11-17 — DESIGN; SEQUENCED AFTER PROP-025 STEPS 1–3` |
 | **`PROP-003`** | Wave 3, itemized 2026-11-15: slices 3A–3F (struct `invariant` rule, dead f-string desugarer, `op_checked` to Pilot, contract rules, f-string scanner dedupe, small trims) | about `-270` now (most of the planned `-2,850` waits for `PROP-005`/`006`) | `3A + 3B BUILT 2026-11-15 (−29 RUST); 3C DEFERRED TO PROP-005; 3D–3F DRAFT` |
 | **`PROP-004`** | Retire Legacy `crates/pilot-analysis` Crate (`1,591` formatted `src` LOC; `647` packed) & Migrate Milestone Harnesses to `.pilot` | `-1,591` LOC (formatted) | `PLANNED (WAVE 4)` |
-| **`PROP-005`** | Replace Rust `BytecodeCompiler` (`24` `lower_*.rs` + `vm_gen.rs` + `codes.rs`) with `selfhost/vm/ir_to_pilc.pilot` | about `-7,950` LOC packed, about `-8,770` formatted (PROP-016) | `ITEMIZED 2026-11-15: 5A APPROVED AND BUILT (PILOT ONLY); 5B ITEMIZED (SLICES 5B.1–5B.6); D1/D2/D3/D5 DECIDED 2026-11-15, D4 OPEN; 5B.1 AND 5B.2 APPROVED AND BUILT (PILOT ONLY); 5B.3 APPROVED, IN PROGRESS (`ref<T>`, CLI AND DROP PLAN ROWS DONE; RUST AMENDMENT 5B.3a APPROVED AND BUILT 2026-11-16); 5B.4–5B.6, 5C AND 5D APPROVED 2026-11-17 AND QUEUED (WORK QUEUE ITEMS 2–5; D4 AND EACH RUST LIST STILL NEEDED); 5E–5F NOT APPROVED; BOOTSTRAP T1/T2 NEEDS AN OWNER DECISION BEFORE 5E` |
+| **`PROP-005`** | Replace Rust `BytecodeCompiler` (`24` `lower_*.rs` + `vm_gen.rs` + `codes.rs`) with `selfhost/vm/ir_to_pilc.pilot` | about `-7,950` LOC packed, about `-8,770` formatted (PROP-016) | `ITEMIZED 2026-11-15: 5A APPROVED AND BUILT (PILOT ONLY); 5B ITEMIZED (SLICES 5B.1–5B.6); D1/D2/D3/D5 DECIDED 2026-11-15, D4 OPEN; 5B.1 AND 5B.2 APPROVED AND BUILT (PILOT ONLY); 5B.3 APPROVED AND DONE 2026-11-17 (RUST AMENDMENTS 5B.3a AND 5B.3b BUILT); 5B.4–5B.6, 5C AND 5D APPROVED 2026-11-17 AND QUEUED (WORK QUEUE ITEMS 2–5; D4 AND EACH RUST LIST STILL NEEDED); 5E–5F NOT APPROVED; BOOTSTRAP T1/T2 NEEDS AN OWNER DECISION BEFORE 5E` |
 | **`PROP-006`** | Precompiled `toolchain.pilc` Stage-3 Cutover — Delete `pilot-{lexer,parser,ast,span,intern}` | `~ -5,950` LOC packed (the five crates are `11,386` formatted, PROP-016) | `PLANNED (WAVE 6 -> ~1,800 LOC FLOOR)` |
 
 ---
@@ -3666,8 +3666,8 @@ Can the Pilot pipeline read the toolchain at all? `pilot check selfhost/ir/main.
           - **selfhost:** `airlock_abi` tables are tuple aliases; `mg_link_plan` gives `LinkPlan`; comptime step rows are `StepRow` with `enum StepAction`; `File.walk_files`/`list_dirs` give `List<str>`.
           - **Left:**
             - The `glist_*` helpers (mixed lists behind raw `__engine`; 5B.4).
-            - Engine-binding rows `List<List<str>>` (about 20 readers); a candidate `EngineBinding` record.
             - Duplicate diagnostic and naming enums in `selfhost/diagnostics/model.pilot` and `selfhost/adapter/rules.pilot`. Rust file lists and milestone tests link those files, so merging them needs a Rust proposal.
+        - **Engine bindings typed (2026-11-17, owner: "start the next unimplemented stage or proposal"; Pilot only):** a binding is `EngineBinding { hook: str, args: List<str> }` (`selfhost/check/program.pilot`) instead of a `[hook, args..]` text row; `prog_engine_bindings`, `Program.engine_memo`, `Flow.engine` and `Lowerer.bindings` hold `List<EngineBinding>`, and the 20 readers in `check/{program,quote_value,effects,infer,own,copies}.pilot` and `ir/{lower,lower_destructure,lower_try,lower_unit,lower_members}.pilot` read `.hook` and `.args`. `pilot check selfhost/cli/main.pilot` unchanged at 409 errors, same codes. Three engines: VM 672 passed (16 known bugs reproduced), IR 664 passed and C 664 passed (1 seam each, `map_declared_property`), 0 failed. With this, 5B.3 has no `any` or `ref<T>` left in live files except the two kept by design: the `glist_*` helpers in `gate/manifest.pilot` and `loader/pragma_filter.pilot` (raw `__engine`, 5B.4) and `ir/fault.pilot` `host_checked` (the host boundary, until 5F). **5B.3 is done.**
     - **5B.4 Raw `__engine` in live files (about 3,550 diagnostics on the same sites).**
       - Per D4, file by file, smallest first.
       - `__engine` calls that must stay (owner ops) move to `[EngineOp]` owners.

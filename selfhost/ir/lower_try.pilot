@@ -34,7 +34,7 @@ pub pure fn absent_hook() -> str => "bind_absent";
 /// and the failure accessor; empty when the program binds none.
 fn protocol(ref lw: Lowerer) -> List<str> {
     for row in lw.bindings {
-        if row.len() == 4 && row[0] == try_protocol_hook() { return [row[1], row[2], row[3]]; }
+        if row.hook == try_protocol_hook() && row.args.len() == 3 { return row.args.slice(0, 3); }
     }
     return [];
 }
@@ -50,8 +50,8 @@ pub fn has_protocol(var ref lw: Lowerer, t: i64) -> bool {
 fn bound_ctor(var ref lw: Lowerer, t: i64, hook: str) -> Member? {
     if !ty_is_named(lw.inf.p.tt, t) { return none; }
     for row in lw.bindings {
-        if row.len() != 2 || row[0] != hook { continue; }
-        if some m = prog_member(lw.inf.p, t, row[1]) {
+        if row.hook != hook || row.args.len() != 1 { continue; }
+        if some m = prog_member(lw.inf.p, t, row.args[0]) {
             if is_static_decl(lw.inf.p.s, m.decl) && decl_body(lw.inf.p.s, m.decl) >= 0 { return m; }
         }
     }

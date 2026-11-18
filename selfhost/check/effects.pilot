@@ -40,9 +40,7 @@ pub fn effects_new(ref f: Flow) -> Effects {
         globals: Map<str, i64>(),
     };
     for row in f.engine {
-        if row.len() < 3 { continue; }
-        let hook = row[0];
-        if hook == "bind_native_effect" { e.native_effects.set(row[1] + "@" + row[2], 1); }
+        if row.hook == "bind_native_effect" && row.args.len() >= 2 { e.native_effects.set(row.args[0] + "@" + row.args[1], 1); }
     }
     if inf.p.globals_memo.len() == 0 { inf.p.globals_memo.push(linked_globals(inf.p)); }
     e.globals = inf.p.globals_memo[0];

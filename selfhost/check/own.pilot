@@ -41,7 +41,7 @@ pub struct Flow {
     /// been moved just before it is assigned (`walk_bodies` fills it).
     pub moved_at: Map<str, bool>;
     /// The program's engine bindings (`prog_engine_bindings`).
-    pub engine: List<List<str>>;
+    pub engine: List<EngineBinding>;
     /// Binding -> whether it borrows an owned element, once asked.
     pub element: Map<i64, bool>;
     /// Parameter -> the `param_flag_*` bits to read it with in place of the
@@ -81,7 +81,7 @@ pub fn owned_elements(ref f: Flow, t: i64) -> List<str> {
     if !ty_is_named(p.tt, t) || !prog_is_owned(p, owned_element_type(p, t)) { return []; }
     let name = p.tt.name[t];
     for row in f.engine {
-        if row.len() == 6 && row[0] == owned_elements_hook() && row[1] == name { return [row[2], row[3], row[4], row[5]]; }
+        if row.hook == owned_elements_hook() && row.args.len() == 5 && row.args[0] == name { return row.args.slice(1, 5); }
     }
     return [];
 }
@@ -98,8 +98,8 @@ pub fn owned_payload(ref f: Flow, t: i64) -> i64 {
     if !ty_is_named(p.tt, t) { return ty_unknown(); }
     let name = p.tt.name[t];
     for row in f.engine {
-        if row.len() == 4 && row[0] == owned_payload_hook() && row[1] == name {
-            if some m = prog_member(p, t, row[2]) {
+        if row.hook == owned_payload_hook() && row.args.len() == 3 && row.args[0] == name {
+            if some m = prog_member(p, t, row.args[1]) {
                 let pt = prog_member_type(p, m);
                 if prog_is_owned(p, pt) { return pt; }
             }
@@ -112,9 +112,9 @@ pub fn owned_payload(ref f: Flow, t: i64) -> i64 {
 /// holds itself (an optional kept as its payload or none, a collection): it
 /// is not a record of its declared fields, so it is never copied field by
 /// field.
-pub fn engine_holds(ref engine: List<List<str>>, name: str) -> bool {
+pub fn engine_holds(ref engine: List<EngineBinding>, name: str) -> bool {
     for row in engine {
-        if row.len() >= 2 && row[1] == name && (row[0] == owned_payload_hook() || row[0] == owned_elements_hook()) { return true; }
+        if row.args.len() >= 1 && row.args[0] == name && (row.hook == owned_payload_hook() || row.hook == owned_elements_hook()) { return true; }
     }
     return false;
 }
@@ -126,7 +126,7 @@ pub fn payload_absent_op(ref f: Flow, t: i64) -> str {
     if !ty_is_named(p.tt, t) { return ""; }
     let name = p.tt.name[t];
     for row in f.engine {
-        if row.len() == 4 && row[0] == owned_payload_hook() && row[1] == name { return row[3]; }
+        if row.hook == owned_payload_hook() && row.args.len() == 3 && row.args[0] == name { return row.args[2]; }
     }
     return "";
 }

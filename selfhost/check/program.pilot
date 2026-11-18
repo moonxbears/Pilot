@@ -130,7 +130,7 @@ pub struct Program {
     pub gen_memo: Map<str, List<i64>>;
     /// The engine bindings (`prog_engine_bindings`), once computed: empty
     /// before, one list after.
-    pub engine_memo: List<List<List<str>>>;
+    pub engine_memo: List<List<EngineBinding>>;
     /// The top-level bindings by name (selfhost/check/effects.pilot), once
     /// computed: empty before, one map after.
     pub globals_memo: List<Map<str, i64>>;
@@ -637,10 +637,17 @@ fn engine_arg_text(var ref p: Program, n: i64) -> str {
     return prog_const_text(p, n);
 }
 
-/// Every `__engine("<hook>", args..)` call of the linked program whose hook
-/// is a string: `[hook, args..]` as text. The program is walked once; the
-/// list is shared, so a caller must not change it.
-pub fn prog_engine_bindings(var ref p: Program) -> List<List<str>> {
+/// One engine binding of the linked program: a bind hook's call
+/// (`bind_native_fn(..)`) or an `__engine("<hook>", ..)` call whose hook is a
+/// string, with its arguments as text.
+pub struct EngineBinding {
+    pub hook: str;
+    pub args: List<str>;
+}
+
+/// Every engine binding of the linked program, in source order. The program
+/// is walked once; the list is shared, so a caller must not change it.
+pub fn prog_engine_bindings(var ref p: Program) -> List<EngineBinding> {
     if p.engine_memo.len() == 0 { p.engine_memo.push(scan_engine_bindings(p)); }
     return p.engine_memo[0];
 }
@@ -688,7 +695,7 @@ pub pure fn name_quote_receptor_kind() -> str => "33";
 /// `Pilot.Core.Keywords` brings into view.
 pub fn prog_is_name_quote(var ref p: Program, name: str) -> bool {
     for row in prog_engine_bindings(p) {
-        if row.len() >= 3 && row[0] == "bind_receptor" && row[1] == name && row[2] == name_quote_receptor_kind() { return true; }
+        if row.hook == "bind_receptor" && row.args.len() >= 2 && row.args[0] == name && row.args[1] == name_quote_receptor_kind() { return true; }
     }
     return false;
 }
@@ -697,14 +704,14 @@ pub fn prog_is_name_quote(var ref p: Program, name: str) -> bool {
 /// (`bind_type_query(sizeof, ..)`).
 pub fn prog_is_type_query(var ref p: Program, name: str) -> bool {
     for row in prog_engine_bindings(p) {
-        if row.len() >= 3 && row[0] == "bind_type_query" && row[1] == name { return true; }
+        if row.hook == "bind_type_query" && row.args.len() >= 2 && row.args[0] == name { return true; }
     }
     return false;
 }
 
-fn scan_engine_bindings(var ref p: Program) -> List<List<str>> {
+fn scan_engine_bindings(var ref p: Program) -> List<EngineBinding> {
     let s = p.s;
-    var out: List<List<str>> = [];
+    var out: List<EngineBinding> = [];
     let ident_kind = nk_ident();
     let token = engine_token();
     for n in nodes_of(s, nk_call()) {
@@ -722,24 +729,24 @@ fn scan_engine_bindings(var ref p: Program) -> List<List<str>> {
                 // that is not a binding, and read as one it would name the
                 // parameter as the op. Bindings call the hook by its name.
                 if ch.len() >= 3 && kind(s, ch[0]) == ident_kind && node_name(s, ch[0]) == token && engine_arg_text(p, ch[1]) != "" && !is_bridge_bind_hook(engine_arg_text(p, ch[1])) {
-                    var row: List<str> = [];
-                    var i = 1;
+                    var args: List<str> = [];
+                    var i = 2;
                     while i < ch.len() {
-                        row.push(engine_arg_text(p, ch[i]));
+                        args.push(engine_arg_text(p, ch[i]));
                         i = i + 1;
                     }
-                    out.push(row);
+                    out.push(EngineBinding { hook: engine_arg_text(p, ch[1]), args: args });
                 }
             } else if is_bridge_bind_hook(cname) {
                 let ch = children(s, n);
                 if ch.len() >= 2 && kind(s, ch[0]) == ident_kind && node_name(s, ch[0]) == cname && engine_arg_text(p, ch[1]) != "" {
-                    var row: List<str> = [cname];
+                    var args: List<str> = [];
                     var i = 1;
                     while i < ch.len() {
-                        row.push(engine_arg_text(p, ch[i]));
+                        args.push(engine_arg_text(p, ch[i]));
                         i = i + 1;
                     }
-                    out.push(row);
+                    out.push(EngineBinding { hook: cname, args: args });
                 }
             }
         }
