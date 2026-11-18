@@ -640,13 +640,16 @@ pub pure fn max_total_rust_loc() -> usize => 5900;
 //     on 2026-11-18 by PROP-038, which deleted the CLI host services the
 //     Pilot CLI rebuilt (`report_pending`, `cli_checked_tool`,
 //     `cli_text_tool`, `run_on_text`, `run_checked_on_program`; -78), the
-//     ceiling going to 27,054);
+//     ceiling going to 27,054; raised to `27,095` by the owner on
+//     2026-11-18 ("Raise it and push") for PROP-036's +41 (a literal
+//     `const` list read shares one value), which 5F deletes with the seed
+//     bytecode compiler);
 //   - each Rust source file must obey the `<= 1,500` LOC law (MOD001);
 //   - retired crates (`pilot-rt`, `pilot-codegen`, etc.) must stay absent.
 // To resume full per-crate contraction, set `seed_contraction_paused()` to
 // `false` at Stage-3 cutover and run `pilot gate --ratchet-update`.
 pub pure fn seed_contraction_paused() -> bool => true;
-pub pure fn paused_max_total_rust_loc() -> usize => 27054;
+pub pure fn paused_max_total_rust_loc() -> usize => 27095;
 pub pure fn paused_max_rust_file_loc() -> usize => 1500;
 pub pure fn max_pilot_file_loc() -> usize => 1500;
 

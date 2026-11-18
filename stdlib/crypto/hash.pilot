@@ -8,10 +8,8 @@
 // masked to 32 bits, but sums of up to five words are formed before masking,
 // so the arithmetic stays in i64 exactly as before. The round-constant tables
 // are FIPS 180-4 §4.2.2/§4.2.3 (SHA-256/512 K), §5.3.3 (IV, shared with BLAKE3)
-// and the BLAKE3 spec §2.2 message permutation. Each function copies a table
-// into a local once (`let k = SHA256_K;`) and indexes the local: on the VM
-// each read of a `const` list costs about as much as copying it (measured
-// 2026-11-17: `SHA256_K[t]` in the round loop made SHA-256 about twice as slow).
+// and the BLAKE3 spec §2.2 message permutation. They are indexed in place:
+// every engine builds a `const` list once (the seed since PROP-036).
 // ============================================================================
 
 pub pkg std.crypto.hash;
@@ -212,7 +210,6 @@ pub fn sha256_words(ref bytes: List<i64>, blen: i64) -> List<i64> {
 
     let padded_len = ((blen + 9 + 63) / 64) * 64;
     var w = hash_zero_words(64);
-    let k = SHA256_K;
     var blk = 0;
     while blk < padded_len {
         var t = 0;
@@ -246,7 +243,7 @@ pub fn sha256_words(ref bytes: List<i64>, blen: i64) -> List<i64> {
         t = 0;
         while t < 64 {
             let wt = w[t];
-            let kt = k[t];
+            let kt = SHA256_K[t];
             let t1 = (h + sha256_sigma1(e) + sha256_ch(e, f, g) + kt + wt) & MAX_32_BIT;
             let t2 = (sha256_sigma0(a) + sha256_maj(a, b, c_v)) & MAX_32_BIT;
             h = g;
@@ -441,8 +438,6 @@ pub fn sha512_words(ref bytes: List<i64>, blen: i64) -> List<i64> {
     let padded_len = ((blen + 17 + 127) / 128) * 128;
     var w_hi = hash_zero_words(80);
     var w_lo = hash_zero_words(80);
-    let k_hi = SHA512_K_HI;
-    let k_lo = SHA512_K_LO;
     var blk = 0;
     while blk < padded_len {
         var t = 0;
@@ -494,8 +489,8 @@ pub fn sha512_words(ref bytes: List<i64>, blen: i64) -> List<i64> {
         while t < 80 {
             let wt_h = w_hi[t];
             let wt_l = w_lo[t];
-            let kt_h = k_hi[t];
-            let kt_l = k_lo[t];
+            let kt_h = SHA512_K_HI[t];
+            let kt_l = SHA512_K_LO[t];
 
             let t1_l_sum = h_l + sha512_sigma1_lo(e_h, e_l) + sha256_ch(e_l, f_l, g_l) + kt_l + wt_l;
             let t1_l = t1_l_sum & MAX_32_BIT;
@@ -575,17 +570,15 @@ pub fn blake3_qround(var ref st: List<i64>, ai: i64, bi: i64, ci: i64, di: i64, 
 // `st` (56 words): 0..15 = state words, 16..31 = message words,
 // 32..47 = permutation scratch, 48..55 = chaining value.
 pub fn blake3_compress_in_place(var ref st: List<i64>, counter: i64, block_len: i64, flags: i64) {
-    let iv = BLAKE3_IV;
-    let perm = BLAKE3_MSG_PERM;
     var i = 0;
     while i < 8 {
         st[i] = st[48 + i];
         i = i + 1;
     }
-    st[8] = iv[0];
-    st[9] = iv[1];
-    st[10] = iv[2];
-    st[11] = iv[3];
+    st[8] = BLAKE3_IV[0];
+    st[9] = BLAKE3_IV[1];
+    st[10] = BLAKE3_IV[2];
+    st[11] = BLAKE3_IV[3];
     st[12] = counter & MAX_32_BIT;
     st[13] = (counter >> 32) & MAX_32_BIT;
     st[14] = block_len & MAX_32_BIT;
@@ -604,7 +597,7 @@ pub fn blake3_compress_in_place(var ref st: List<i64>, counter: i64, block_len: 
         if r < 6 {
             var pi = 0;
             while pi < 16 {
-                st[32 + pi] = st[16 + perm[pi]];
+                st[32 + pi] = st[16 + BLAKE3_MSG_PERM[pi]];
                 pi = pi + 1;
             }
             pi = 0;
@@ -650,12 +643,11 @@ pub fn blake3_load_msg_block(var ref st: List<i64>, msg: str, mlen: i64, blk_off
 // Loads `left` (8 words of `stack_cv` at `l_base`) and the current chaining
 // value as a parent block, and resets the chaining value to the IV.
 pub fn blake3_load_parent(var ref st: List<i64>, ref stack_cv: List<i64>, l_base: i64) {
-    let iv = BLAKE3_IV;
     var wi = 0;
     while wi < 8 {
         st[16 + wi] = stack_cv[l_base + wi];
         st[24 + wi] = st[48 + wi];
-        st[48 + wi] = iv[wi];
+        st[48 + wi] = BLAKE3_IV[wi];
         wi = wi + 1;
     }
 }
@@ -671,10 +663,9 @@ pub fn blake3_keep_cv(var ref st: List<i64>) {
 
 // Sets the chaining value to the IV.
 pub fn blake3_reset_cv(var ref st: List<i64>) {
-    let iv = BLAKE3_IV;
     var i = 0;
     while i < 8 {
-        st[48 + i] = iv[i];
+        st[48 + i] = BLAKE3_IV[i];
         i = i + 1;
     }
 }
