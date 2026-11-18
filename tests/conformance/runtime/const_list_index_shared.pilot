@@ -1,0 +1,38 @@
+// Indexing a literal `const` list reads the constant; nothing a program does
+// with a copy of it changes the constant (PROP-036). `T` and `M` are declared
+// below the code that reads them. Expected output, by hand:
+//   1,000 rounds of T[0] + T[1] + T[2] = 1,000 * (10 + 20 + 30) -> 60000
+//   after `var t = T; t[0] = 99; t.push(40);`:
+//     T[0] is still 10, T still has 3 items           -> 10, 3
+//     t[0] is 99 and t has 4 items                     -> 99, 4
+//   M["b"] of the constant map                         -> 2
+
+fn sum_rounds(n: i64) -> i64 {
+    var s = 0;
+    var r = 0;
+    while r < n {
+        var i = 0;
+        while i < 3 {
+            s = s + T[i];
+            i = i + 1;
+        }
+        r = r + 1;
+    }
+    return s;
+}
+
+fn main() {
+    print(sum_rounds(1000));
+    var t = T;
+    t[0] = 99;
+    t.push(40);
+    print(T[0]);
+    print(T.len());
+    print(t[0]);
+    print(t.len());
+    print(M["b"]);
+}
+
+pub const T: List<i64> = [10, 20, 30,];
+
+pub const M: Map<str, i64> = ["a": 1, "b": 2,];
