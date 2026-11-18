@@ -1,0 +1,2 @@
+error[GRAM001]: `[Infix]` declares `%%`, which is already a built-in operator symbol or readable word
+error[GRAM001]: `[InfixWord]` declares `or`, which is already a built-in operator symbol or readable word

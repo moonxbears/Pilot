@@ -121,13 +121,16 @@ pub fn host_text_tool(path: str, ref files: List<str>, entry: str) -> i64 =>
 /// The declarations every program is checked against, linked after the
 /// program: files, or directories whose `.pilot` files are taken in name
 /// order. `core.pilot` holds the `Cfg` tables (lattice masks, register
-/// classes), `operator.pilot` the root and operator interfaces, `live.pilot`
+/// classes), `operator.pilot` the root and operator interfaces,
+/// `operators/` the operator levels and the `syntax`-rule operators (the
+/// built-in operators GRAM001 refuses to redefine), `live.pilot`
 /// the flags of `[Live]`, `builtins/native_calls.pilot` the functions the
 /// engines answer themselves (a quote's names are checked against them).
 pub fn cli_checker_decls() -> List<str> => [
     "stdlib/core/bridge_lang.pilot",
     "stdlib/core/core.pilot",
     "stdlib/core/operator.pilot",
+    "stdlib/core/operators",
     "stdlib/core/primitives",
     "stdlib/core/live.pilot",
     "stdlib/core/builtins/native_calls.pilot",
@@ -143,9 +146,18 @@ pub fn cli_checker_files() -> List<str> => [
     "stdlib/core/convert/decimal_round.pilot",
     "stdlib/core/lex/numbers.pilot",
     "stdlib/core/lex/strings.pilot",
+    "stdlib/core/lex/seed_kinds.pilot",
+    "stdlib/core/lex/seed_forms.pilot",
     "stdlib/core/lex/literal_value.pilot",
     "stdlib/core/lex/utf8.pilot",
     "stdlib/pilot/lex/build.pilot",
+    "stdlib/core/generator.pilot",
+    "stdlib/core/os_abi.pilot",
+    "stdlib/core/host_raw.pilot",
+    "stdlib/core/file.pilot",
+    "stdlib/pilot/lex/modes.pilot",
+    "stdlib/pilot/lex/cache.pilot",
+    "stdlib/pilot/lex/seed.pilot",
     "selfhost/check/snapshot.pilot",
     "selfhost/check/types.pilot",
     "selfhost/check/diag.pilot",
@@ -185,6 +197,7 @@ pub fn cli_checker_files() -> List<str> => [
     "selfhost/check/noalloc.pilot",
     "selfhost/check/aliasing.pilot",
     "selfhost/check/layout_attrs.pilot",
+    "selfhost/check/grammar_lex.pilot",
     "selfhost/check/grammar_attrs.pilot",
     "selfhost/check/stack.pilot",
     "selfhost/check/clearance.pilot",

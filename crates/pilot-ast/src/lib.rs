@@ -87,7 +87,6 @@ pub enum NodeKind {
     MapExpr = 219,
     RangeExpr = 220,
     ComptimeExpr = 221,
-    PolyglotBlock = 222,
     /// `quote { .. }` / `quote expr`: `lhs` is the quoted code; `flags` is 1
     /// for a `syntax` rule's template, 0 for a quote value.
     QuoteExpr = 223,
@@ -169,7 +168,6 @@ impl NodeKind {
             219 => Self::MapExpr,
             220 => Self::RangeExpr,
             221 => Self::ComptimeExpr,
-            222 => Self::PolyglotBlock,
             223 => Self::QuoteExpr,
             300 => Self::IdentExpr,
             301 => Self::IntLit,
@@ -248,7 +246,6 @@ impl NodeKind {
             Self::MapExpr => "MapExpr",
             Self::RangeExpr => "RangeExpr",
             Self::ComptimeExpr => "ComptimeExpr",
-            Self::PolyglotBlock => "PolyglotBlock",
             Self::QuoteExpr => "QuoteExpr",
             Self::IdentExpr => "IdentExpr",
             Self::IntLit => "IntLit",
@@ -804,17 +801,6 @@ impl AstArena {
             .interner
             .intern(raw_kw.strip_prefix(':').unwrap_or(raw_kw));
         self.alloc_node(NodeKind::KeywordLit, 0, span, sym.0, 0)
-    }
-    #[inline]
-    pub fn alloc_polyglot_block(
-        &mut self,
-        lang: &str,
-        code: &str,
-        flags: u16,
-        span: ByteSpan,
-    ) -> NodeId {
-        let (l, c) = (self.interner.intern(lang), self.interner.intern(code));
-        self.alloc_node(NodeKind::PolyglotBlock, flags, span, l.0, c.0)
     }
 
     #[inline]

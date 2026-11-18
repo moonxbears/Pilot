@@ -819,6 +819,27 @@ pub let ERRORS = [
         reference: "proposals.md PROP-007 step 2 / PROP-002a Amendment A1",
     },
     ErrorDef {
+        code: "GRAM001",
+        title: "Built-In Operator Redefined",
+        description: "An operator attribute in the program declares a symbol or readable word that is already a built-in operator (declared by the standard library, or one of the seed's own forms)",
+        category: "Grammar",
+        reference: "proposals.md PROP-008 §5, step 2",
+    },
+    ErrorDef {
+        code: "GRAM003",
+        title: "Operator Declared Twice Differently",
+        description: "Two operator attributes in the program declare one symbol in one position (infix, prefix or postfix) with another level, associativity or shape",
+        category: "Grammar",
+        reference: "proposals.md PROP-008 §5, step 2",
+    },
+    ErrorDef {
+        code: "GRAM002",
+        title: "New Operator Symbol Changes How Text Lexes",
+        description: "A symbol the program declares would end inside a token the seed reads, or would join separate tokens in a file that does not declare it",
+        category: "Grammar",
+        reference: "proposals.md PROP-008 §5, step 2",
+    },
+    ErrorDef {
         code: "GRAM005",
         title: "Structural Operator Symbol",
         description: "An operator attribute declares a symbol or readable word that is one of the 13 structural tokens or a seed word",

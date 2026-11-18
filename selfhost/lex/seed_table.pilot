@@ -18,9 +18,6 @@ use pilot.lex.modes;
 use pilot.lex.cache;
 use pilot.lex.seed;
 
-/// Where the table the seed runs is kept.
-pub const SEED_TABLE_FILE: str = "stdlib/core/lex/toolchain.lex";
-
 /// `pilot lex --write-table` (`write`) or `--check-table`: builds the
 /// toolchain's lexer, then writes its seed table to `SEED_TABLE_FILE`, or
 /// compares it with the file there (GATE024 when they differ). Exit 0 when

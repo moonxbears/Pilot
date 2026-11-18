@@ -1,0 +1,2 @@
+error[SEAM001]: unconnected seam `grammar.user_ops_seed`: `op =:` declares the operator `=:`
+error[GRAM002]: the new operator symbol `=:` would change how the seed splits tests/conformance/operators/err_gram002.pilot:23:18: it ends inside the token `::`

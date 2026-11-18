@@ -12,6 +12,10 @@
 //
 // The numbers are the seed's (token.rs), copied by hand; they change only
 // with token.rs, which is frozen until PROP-022 replaces `TokenKind`.
+// An operator the seed parser does not name has no kind of its own: a
+// family named by its spelling (operators.pilot, seed_forms.pilot) that no
+// list names is `SEED_OPERATOR_KIND`, and the parser reads it by its text
+// (PROP-008 step 2), so a new operator needs no new number.
 //   - `SEED_FAMILY_KINDS`: a family whose token the seed reads with no flag;
 //   - `SEED_FLAGGED_KINDS`: a family read with flags (a raw, interpolated or
 //     triple-quoted string; a suffixed number);
@@ -34,6 +38,9 @@ pub const SEED_IS_DIMENSIONAL: u8 = 32;
 /// end of the source (`Eof`), which no family is.
 pub const SEED_ERROR_KIND: u16 = 5;
 pub const SEED_EOF_KIND: u16 = 0;
+
+/// The seed's kind for every operator it does not name (`Operator`).
+pub const SEED_OPERATOR_KIND: u16 = 269;
 
 /// What the seed does with a family's token.
 pub enum SeedEmit : u8 {
@@ -140,23 +147,15 @@ pub const SEED_FAMILY_KINDS: List<FamilyKind> = [
     FamilyKind { family: "+", kind: 270 },
     FamilyKind { family: "-", kind: 271 },
     FamilyKind { family: "*", kind: 272 },
-    FamilyKind { family: "/", kind: 273 },
-    FamilyKind { family: "%", kind: 274 },
     FamilyKind { family: "**", kind: 275 },
     FamilyKind { family: "*..", kind: 276 },
     FamilyKind { family: "&", kind: 278 },
     FamilyKind { family: "|", kind: 279 },
     FamilyKind { family: "^", kind: 280 },
-    FamilyKind { family: "<<", kind: 281 },
     FamilyKind { family: ">>", kind: 282 },
     FamilyKind { family: "=", kind: 283 },
-    FamilyKind { family: "==", kind: 284 },
-    FamilyKind { family: "!=", kind: 285 },
     FamilyKind { family: "<", kind: 286 },
     FamilyKind { family: ">", kind: 287 },
-    FamilyKind { family: "<=", kind: 288 },
-    FamilyKind { family: ">=", kind: 289 },
-    FamilyKind { family: ":=", kind: 290 },
     FamilyKind { family: "<-", kind: 291 },
     // Compound assignments.
     FamilyKind { family: "+=", kind: 300 },
@@ -164,7 +163,6 @@ pub const SEED_FAMILY_KINDS: List<FamilyKind> = [
     FamilyKind { family: "*=", kind: 302 },
     FamilyKind { family: "/=", kind: 303 },
     FamilyKind { family: "%=", kind: 304 },
-    FamilyKind { family: "**=", kind: 305 },
     FamilyKind { family: "&=", kind: 307 },
     FamilyKind { family: "|=", kind: 308 },
     FamilyKind { family: "^=", kind: 309 },
@@ -173,15 +171,10 @@ pub const SEED_FAMILY_KINDS: List<FamilyKind> = [
     FamilyKind { family: "??=", kind: 312 },
     // Pipes, navigation and ranges.
     FamilyKind { family: "|>", kind: 320 },
-    FamilyKind { family: "<|", kind: 321 },
     FamilyKind { family: "?..", kind: 322 },
     FamilyKind { family: "?.", kind: 323 },
-    FamilyKind { family: "??", kind: 324 },
     FamilyKind { family: "->", kind: 325 },
     FamilyKind { family: "=>", kind: 326 },
-    FamilyKind { family: "->>", kind: 327 },
-    FamilyKind { family: "@>", kind: 328 },
-    FamilyKind { family: "<@", kind: 329 },
     FamilyKind { family: "..", kind: 330 },
     FamilyKind { family: "..=", kind: 331 },
     FamilyKind { family: "..<", kind: 332 },
@@ -194,23 +187,7 @@ pub const SEED_FAMILY_KINDS: List<FamilyKind> = [
     FamilyKind { family: "grad_quote", kind: 344 },
     FamilyKind { family: "plan_quote", kind: 345 },
     // Logical, comparison and overflow operators.
-    FamilyKind { family: "&&", kind: 350 },
-    FamilyKind { family: "||", kind: 351 },
-    FamilyKind { family: "<=>", kind: 352 },
-    FamilyKind { family: "+|", kind: 353 },
-    FamilyKind { family: "-|", kind: 354 },
-    FamilyKind { family: "*|", kind: 355 },
-    FamilyKind { family: "+%", kind: 356 },
-    FamilyKind { family: "-%", kind: 357 },
-    FamilyKind { family: "*%", kind: 358 },
-    FamilyKind { family: "+?", kind: 359 },
-    FamilyKind { family: "-?", kind: 360 },
-    FamilyKind { family: "*?", kind: 361 },
-    FamilyKind { family: "%%", kind: 362 },
-    FamilyKind { family: "~>", kind: 363 },
-    FamilyKind { family: ">..<", kind: 364 },
     FamilyKind { family: ">..", kind: 365 },
-    FamilyKind { family: ":=:", kind: 366 },
 ];
 
 pub const SEED_SKIPPED: List<str> = ["space",];
@@ -222,6 +199,20 @@ pub struct SeedEntry : IValue {
     pub kind: u16;
     pub flags: u8;
     pub emit: SeedEmit;
+}
+
+/// Whether `family` is named by an operator spelling: not empty, and no
+/// letter, digit, `_`, space or quote in it.
+pub fn is_spelling(family: str) -> bool {
+    if family.len() == 0 { return false; }
+    var i = 0;
+    while i < family.len() {
+        let c = family.byte_at(i);
+        let word = (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c == 95;
+        if word || c <= 32 || c == 34 || c == 39 || c >= 128 { return false; }
+        i = i + 1;
+    }
+    return true;
 }
 
 /// The seed's entry for `family`, or none when this file does not name it
@@ -239,5 +230,6 @@ pub fn seed_kind_of(family: str) -> SeedEntry? {
     for f in SEED_INNER {
         if f == family { return SeedEntry { kind: 0, flags: 0, emit: SeedEmit::Inner }; }
     }
+    if is_spelling(family) { return SeedEntry { kind: SEED_OPERATOR_KIND, flags: 0, emit: SeedEmit::Token }; }
     return none;
 }

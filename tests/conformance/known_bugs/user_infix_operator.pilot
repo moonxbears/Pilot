@@ -1,0 +1,30 @@
+// KNOWN BUG seed.user_operator: an operator with a new symbol, declared in
+// a file and used in it (PROP-008 step 2). The seed lexes with the table
+// built from the standard library's declarations, so `<.>` is three tokens
+// there; the checker stops the declaration at seam `grammar.user_ops_seed`.
+//
+// `<.>` is declared at `Multiply`, `Left` (stdlib/core/operators/levels.pilot:
+// Multiply is tighter than Add). It glues two digits: a <.> b = a * 10 + b.
+//
+// Expected, worked by hand from the declared level:
+//   n(1) + n(2) <.> n(3): Multiply binds tighter than Add, so this is
+//     n(1) + (n(2) <.> n(3)) = 1 + 23 = 24        (at Add it would be 33)
+//   n(1) <.> n(2) <.> n(3): Left, so (1 <.> 2) <.> 3 = 12 <.> 3 = 123
+//                                                  (Right would give 33)
+//   n(4)<.>n(5): one token with or without spaces, 4 * 10 + 5 = 45
+pub struct N : IValue {
+    pub v: i64;
+
+    [Infix(::Multiply, ::Left)]
+    pub pure op <.> (rhs: N) -> N => N { v: .v * 10 + rhs.v };
+
+    pub pure op + (rhs: N) -> N => N { v: .v + rhs.v };
+}
+
+fn n(v: i64) -> N => N { v: v };
+
+fn main() {
+    print((n(1) + n(2) <.> n(3)).v);
+    print((n(1) <.> n(2) <.> n(3)).v);
+    print((n(4)<.>n(5)).v);
+}

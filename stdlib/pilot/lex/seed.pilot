@@ -14,12 +14,27 @@
 // seed_kinds.pilot does not name is LEX008, and no text is given.
 pub pkg pilot.lex.seed;
 
+use Pilot.Core.File;
 use Pilot.Core.Lex.SeedKinds;
 use core.derive;
 use std.text;
 use pilot.lex.build;
 use pilot.lex.modes;
 use pilot.lex.cache;
+
+/// Where the table the seed runs is kept (the seed reads the same path,
+/// `LEX_TABLE_FILE` in crates/pilot-parser/src/lib.rs).
+pub const SEED_TABLE_FILE: str = "stdlib/core/lex/toolchain.lex";
+
+/// The lexer the seed runs, read from `SEED_TABLE_FILE` as it is written:
+/// the checker's view of how the seed splits a file (GRAM002). `none` when
+/// the file is not there or not a lexer.
+pub fn read_seed_table() -> ModalLexer? {
+    if !File.exists(SEED_TABLE_FILE) { return none; }
+    let src = File.read_text(SEED_TABLE_FILE);
+    guard some key = written_key(src) else { return none; }
+    return read_lexer(src, key);
+}
 
 /// The seed emissions in a fixed order, written by position.
 pub const SEED_EMITS: List<SeedEmit> = [SeedEmit::Token, SeedEmit::Skip, SeedEmit::Inner,];

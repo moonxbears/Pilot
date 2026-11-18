@@ -1,0 +1,9 @@
+// The defining file of known_bugs/operator_hygiene: it declares no `+-`
+// operator, so in its quote and its rule `+-` is `+` then a prefix `-`.
+pkg lib.hygiene_ops;
+
+pub fn neg_sum() => quote { 5 +-3 };
+
+pub syntax {
+    plus_neg ( $a:Expr , $b:Expr ) => quote { $a +-$b };
+}

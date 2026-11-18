@@ -958,26 +958,6 @@ pub fn vmc_compile_node(st: i64, nid: i64) -> i64 {
         return vmc_compile_call(st, nid);
     }
 
-    // PolyglotBlock (`kind_tag == 13`)
-    if k == 13 {
-        let lsym = __engine("ast_node_sym", nid);
-        let lang = __engine("sym_str", lsym);
-        let s0 = __engine("ast_span_start", nid);
-        let s1 = __engine("ast_span_end", nid);
-        let raw_src = __engine("source_slice", s0, s1);
-        let seq = ((__engine("map_get", st, "call_seq") ?? 0)) + 1;
-        __engine("map_set", st, "call_seq", seq);
-        let r_bin = vmc_emit_load_const(st, vmc_add_str_const(st, lang));
-        let r_code = vmc_emit_load_const(st, vmc_add_str_const(st, raw_src));
-        let r_hook = vmc_emit_load_const(st, vmc_add_str_const(st, nameof(host_spawn_eval)));
-        __engine("map_set", st, "carg_" + seq + "_0", r_bin);
-        __engine("map_set", st, "carg_" + seq + "_1", r_code);
-        vmc_stage_call_args(st, seq, 2);
-        let dst = vmc_alloc_temp(st);
-        vmc_emit(st, op_engine_intrinsic(), dst, r_hook, 2);
-        return dst;
-    }
-
     return 0;
 }
 

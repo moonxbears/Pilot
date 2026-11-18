@@ -1,0 +1,36 @@
+// KNOWN BUG seed.operator_hygiene (PROP-008 §7, step 2): operators inside
+// `quote { .. }` and `syntax` rules use the grammar of the file that
+// defines them, not the file that expands them. lib/hygiene_ops.pilot
+// declares no `+-`, so its `5 +-3` and its rule `plus_neg(a, b)` (template
+// `$a +-$b`) read `+` then a prefix `-`. This file declares `+-` and uses
+// it; that must not change what the library's quote and rule mean.
+// Today the seed stops at seam `grammar.user_ops_seed` (it cannot lex `+-`
+// as one token), and a `syntax` rule of an imported package is not visible
+// in the importing file.
+//
+// Expected, worked by hand:
+//   neg_sum() is 5 + (-3): a binary node whose right operand is the unary
+//     node -3, whose operand is an integer      -> binary, unary, int
+//   plus_neg(5, 3) = 5 + (-3) = 2               -> 2
+//   a +-b here is Span's `+-`: lo = 1 - 3 = -2, hi = 2 + 3 = 5   -> -2 5
+use lib.hygiene_ops;
+
+struct Span : IValue {
+    pub lo: i64;
+    pub hi: i64;
+
+    [Infix(::Add, ::Left)]
+    pub pure op +- (rhs: Span) -> Span => Span { lo: .lo - rhs.hi, hi: .hi + rhs.hi };
+}
+
+fn main() {
+    let q = neg_sum();
+    print(q.kind());
+    print(q[1].kind());
+    print(q[1][0].kind());
+    print(plus_neg(5, 3));
+    let a = Span { lo: 1, hi: 2 };
+    let b = Span { lo: 0, hi: 3 };
+    let c = a +-b;
+    print(f"{c.lo} {c.hi}");
+}

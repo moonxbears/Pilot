@@ -339,22 +339,9 @@ impl<'a> Parser<'a> {
                 self.report_unbuilt(ByteSpan::new(sp.start, self.prev_span().end), &word);
                 NodeId::NONE
             }
-            TokenKind::RawDslBlock => {
-                let raw = self.text();
-                self.advance();
-                let inner = raw.trim_start_matches('`').trim_end_matches('`');
-                let (lang, code) = inner.split_once('\n').unwrap_or(("dsl", inner));
-                self.arena
-                    .alloc_polyglot_block(lang.trim(), code.trim(), 0, sp)
-            }
             _ if self.is_word() => {
                 if let Some(n) = self.expand_seq_rule() {
                     return n;
-                }
-                if let Some((rk, _)) = self.receptor() {
-                    match rk {
-                        _ => {}
-                    }
                 }
                 if self.receptor() == Some(EXCLUDE_RECEPTOR) && self.word_follows() {
                     return self.parse_exclude_decl();

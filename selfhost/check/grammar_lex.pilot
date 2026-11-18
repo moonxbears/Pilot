@@ -1,0 +1,85 @@
+// ==============================================================================
+// FILE: selfhost/check/grammar_lex.pilot
+// GRAM002: a program's new operator symbol must not change how the seed
+// splits the text it is declared for (PROP-008 step 2).
+// ==============================================================================
+// A symbol a program declares that the seed's table has no family for (`<.>`,
+// `+-`) is lexed by longest match beside the table's families. The checker
+// lexes the declaring file with the table the seed runs
+// (stdlib/core/lex/toolchain.lex, read by `read_seed_table`) and looks at
+// every place an operator token starts with the new symbol and the symbol
+// is longer than that token:
+//   - the symbol ends inside a token (`=:` before `::Red` ends inside `::`):
+//     GRAM002, since the text after it would lex differently;
+//   - the symbol covers whole tokens (`+` `-` becoming `+-`): the meaning
+//     the declaring file asks for, not reported.
+// Only the declaring file is lexed: a file's grammar is its own and its
+// imports' (operators in a quote or rule keep their defining file's grammar,
+// known_bugs/operator_hygiene), and on the seed an imported user package's
+// operators are not visible yet. Whether an importing file may have tokens
+// joined by a symbol it imports is still the owner's question (proposals.md
+// PROP-008 step 2).
+// The check is Pilot over the table the seed already runs; the seed itself
+// does not lex a program's symbols yet (proposals.md Amendment 008-C).
+pub lvl(0) pkg selfhost.check;
+
+use Pilot.Core.Lex.SeedKinds;
+use pilot.lex.build;
+use pilot.lex.modes;
+use pilot.lex.seed;
+
+/// A symbol a program's operator declares that the seed's table has no
+/// family for, and the declaration that first declares it in its file.
+pub struct NewSymbol : IValue {
+    pub symbol: str;
+    pub decl: i64;
+}
+
+/// Adds `sym`, declared by `d`, to `news` unless its file declared it before.
+pub fn add_new_symbol(ref s: Snap, var ref news: List<NewSymbol>, sym: str, d: i64) {
+    for n in news {
+        if n.symbol == sym && unit_of(s, n.decl) == unit_of(s, d) { return; }
+    }
+    news.push(NewSymbol { symbol: sym, decl: d });
+}
+
+/// GRAM002 for each of `news` over the file that declares it.
+pub fn check_new_symbols(ref s: Snap, var ref sink: DiagSink, ref news: List<NewSymbol>) {
+    guard some m = read_seed_table() else {
+        sink_error(sink, news[0].decl, "SEAM001",
+            f"unconnected seam `grammar.seed_table_read`: GRAM002 lexes the program with the seed's table, and {SEED_TABLE_FILE} is not found from the working directory or is not a lexer table");
+        return;
+    }
+    var u = 0;
+    while u < s.files.len() {
+        let row = s.files[u];
+        var mine: List<NewSymbol> = [];
+        for n in news { if unit_of(s, n.decl) == u { mine.push(n); } }
+        if row.1 && mine.len() > 0 { check_file(sink, m, mine, row.0, row.3); }
+        u = u + 1;
+    }
+}
+
+/// GRAM002 for each of `news`, all declared in the file `path` whose text
+/// is `text`.
+fn check_file(var ref sink: DiagSink, ref m: ModalLexer, ref news: List<NewSymbol>, path: str, text: str) {
+    var toks: List<Lexeme> = [];
+    for l in lex_modal(m, text) { toks.push(l); }
+    var i = 0;
+    while i < toks.len() {
+        let l = toks[i];
+        i = i + 1;
+        if l.decl < 0 || !is_spelling(modal_family(m, l)) { continue; }
+        for n in news {
+            let to = l.start + n.symbol.len();
+            if to <= l.end || to > text.len() || text.slice(l.start, to) != n.symbol { continue; }
+            // The old token the symbol ends in; `to` is a boundary when it ends there.
+            var j = i - 1;
+            while j < toks.len() && toks[j].end < to { j = j + 1; }
+            if j >= toks.len() || toks[j].end == to { continue; }
+            let inner = text.slice(toks[j].start, toks[j].end);
+            sink_error(sink, n.decl, "GRAM002",
+                f"the new operator symbol `{n.symbol}` would change how the seed splits {path}:{line_col(text, l.start)}: it ends inside the token `{inner}`, so the text after it would read differently; choose a symbol that does not end inside another token");
+        }
+    }
+}

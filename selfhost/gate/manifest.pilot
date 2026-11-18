@@ -634,13 +634,15 @@ pub pure fn max_total_rust_loc() -> usize => 5900;
 //     on 2026-11-17 by PROP-035, which deleted the analyzer loader,
 //     `run::analyze` and `cli_analyze`, the seed going to 27,290; and
 //     on 2026-11-18 by deleting the dead `pilot-analysis/src/diagnostics.rs`
-//     and its two `lib.rs` lines, the seed going to 27,233);
+//     and its two `lib.rs` lines (27,233) and by PROP-008 step 2, which
+//     deleted 30 unused operator token kinds and the dead `PolyglotBlock`
+//     chain (-80), the seed going to 27,153);
 //   - each Rust source file must obey the `<= 1,500` LOC law (MOD001);
 //   - retired crates (`pilot-rt`, `pilot-codegen`, etc.) must stay absent.
 // To resume full per-crate contraction, set `seed_contraction_paused()` to
 // `false` at Stage-3 cutover and run `pilot gate --ratchet-update`.
 pub pure fn seed_contraction_paused() -> bool => true;
-pub pure fn paused_max_total_rust_loc() -> usize => 27233;
+pub pure fn paused_max_total_rust_loc() -> usize => 27153;
 pub pure fn paused_max_rust_file_loc() -> usize => 1500;
 pub pure fn max_pilot_file_loc() -> usize => 1500;
 

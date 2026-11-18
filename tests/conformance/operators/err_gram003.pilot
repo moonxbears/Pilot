@@ -1,0 +1,29 @@
+// GRAM003 (PROP-008 §5): one symbol has one level, associativity and shape
+// in each position. `Meters` declares infix `<.>` at `Multiply`, `Feet` at
+// `Add`, so `a <.> b + c` would group differently by which declaration won.
+// Two declarations that agree are not an error. Both are also new spellings
+// the seed cannot run yet (seam `grammar.user_ops_seed`).
+struct Meters : IValue {
+    pub m: i64;
+
+    [Infix(::Multiply, ::Left)]
+    pub pure op <.> (rhs: Meters) -> i64 => .m * rhs.m;
+}
+
+struct Feet : IValue {
+    pub f: i64;
+
+    [Infix(::Add, ::Left)]
+    pub pure op <.> (rhs: Feet) -> i64 => .f * rhs.f;
+}
+
+struct Yards : IValue {
+    pub y: i64;
+
+    [Infix(::Multiply, ::Left)]
+    pub pure op <.> (rhs: Yards) -> i64 => .y * rhs.y;
+}
+
+fn main() {
+    print(Meters { m: 2 }.m);
+}

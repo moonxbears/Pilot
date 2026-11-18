@@ -1,0 +1,25 @@
+// GRAM002 (PROP-008 step 2): a new operator symbol must not end inside a
+// token of the file that declares it. This file declares `=:` and writes
+// `=::Low` below. The seed's table splits `=::Low` as `=` (byte 0), `::`
+// (bytes 1-2), `Low`; with `=:` lexed by longest match, `=:` would take
+// bytes 0-1 and end inside `::`, leaving `:Low`, so the line would read
+// differently. Worked by hand: the token starting at `=` is one byte, `=:`
+// is two, and byte 2 is not the end of any token (the `::` ends at 3).
+// The declaration also stops at seam `grammar.user_ops_seed`, as every
+// operator with a new symbol does.
+enum Level : u8 {
+    Low,
+    High,
+}
+
+struct Gauge : IValue {
+    pub v: i64;
+
+    [Infix(::Compare, ::Left)]
+    pub pure op =: (rhs: Gauge) -> bool => .v == rhs.v;
+}
+
+fn main() {
+    let l: Level =::Low;
+    print(l == ::Low);
+}

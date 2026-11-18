@@ -5,9 +5,7 @@
 //! file.
 
 use crate::Parser;
-use pilot_ast::NodeKind;
 use pilot_lexer::TokenKind;
-use pilot_span::ByteSpan;
 
 impl<'a> Parser<'a> {
     /// At the `{` of an inline block: its inner text, with the cursor moved
@@ -31,25 +29,14 @@ impl<'a> Parser<'a> {
         code
     }
 
-    /// Reports each character no lexer rule takes, outside inline foreign
-    /// blocks (whose text belongs to the foreign tool): before this, a stray
+    /// Reports each character no lexer rule takes: before this, a stray
     /// `└` between two expressions was skipped without a word.
     pub(crate) fn report_stray_characters(&mut self) {
-        let foreign: Vec<ByteSpan> = (0..self.arena.nodes.len())
-            .filter(|&i| self.arena.nodes[i].node_kind() == NodeKind::PolyglotBlock)
-            .map(|i| self.arena.spans[i])
-            .collect();
         for i in 0..self.tape.len() {
             if self.tape.kind(i) != TokenKind::ErrorToken {
                 continue;
             }
             let sp = self.tape.span(i);
-            if foreign
-                .iter()
-                .any(|f| f.start <= sp.start && sp.end <= f.end)
-            {
-                continue;
-            }
             let ch = self.tape.text(i, self.src);
             self.arena
                 .diagnostics

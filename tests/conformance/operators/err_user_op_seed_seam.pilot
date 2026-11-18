@@ -1,0 +1,18 @@
+// A user operator with a new symbol stops at the seam
+// `grammar.user_ops_seed` (PROP-008 step 2): the seed lexes with the table
+// built from the standard library's declarations, so `+-` is two tokens
+// there, and a use such as `a +-b` would silently read as `a + (-b)`. The
+// declaration stops the build until the seed's lexer takes the program's
+// own operator symbols (known_bugs/user_infix_operator has the program
+// that must then run).
+struct Span : IValue {
+    pub lo: i64;
+    pub hi: i64;
+
+    [Infix(::Add, ::Left)]
+    pub pure op +- (rhs: Span) -> Span => Span { lo: .lo - rhs.hi, hi: .hi + rhs.hi };
+}
+
+fn main() {
+    print(Span { lo: 1, hi: 2 }.hi);
+}

@@ -348,7 +348,6 @@ pub fn flatten_ast(arena: &AstArena, _root: NodeId) -> (RawAstArena, HashMap<u32
                 NodeKind::YieldStmt => (9, 0, 0, 0),
                 NodeKind::DeferStmt => (10, 0, 0, 0),
                 NodeKind::ComptimeExpr => (11, 0, 0, 0),
-                NodeKind::PolyglotBlock => (13, node.lhs, 0, 0),
                 NodeKind::IdentExpr | NodeKind::TypeNamed => (14, node.lhs, 0, 0),
                 NodeKind::IntLit => (
                     15,
